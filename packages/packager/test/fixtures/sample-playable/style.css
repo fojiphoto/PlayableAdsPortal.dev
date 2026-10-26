@@ -1,0 +1,21 @@
+body {
+  margin: 0;
+  background: #0b1220;
+  color: #fff;
+  font-family: -apple-system, system-ui, sans-serif;
+  text-align: center;
+}
+.hero {
+  width: 64px;
+  height: 64px;
+  margin: 16px auto;
+  background: url("logo.png") no-repeat center / contain;
+}
+#cta {
+  padding: 12px 24px;
+  font-size: 18px;
+  border: 0;
+  border-radius: 8px;
+  background: #7c3aed;
+  color: #fff;
+}

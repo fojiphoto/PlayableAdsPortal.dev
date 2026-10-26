@@ -1,0 +1,6 @@
+# Automatic HTTPS (Let's Encrypt) + gzip/zstd edge compression.
+# Requires: app.factorialstudio.dev  A/AAAA → this server, ports 80 & 443 open.
+app.factorialstudio.dev {
+    encode zstd gzip
+    reverse_proxy app:4000
+}

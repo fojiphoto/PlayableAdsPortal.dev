@@ -1,0 +1,20 @@
+# Render.com blueprint — Docker web service with a persistent disk for the sqlite DB.
+# In Render: New → Blueprint → connect this repo. It reads this file.
+services:
+  - type: web
+    name: playableforge
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter # starter has a persistent disk; free tier has none + spins down
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FORGE_DB
+        value: /data/forge.db
+      - key: JWT_SECRET
+        generateValue: true
+    disk:
+      name: forge-data
+      mountPath: /data
+      sizeGB: 1

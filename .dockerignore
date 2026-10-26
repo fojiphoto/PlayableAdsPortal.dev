@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+_recon
+PlayableAdsUnitySDK
+.git
+.github
+data
+**/data
+*.db
+*.db-wal
+*.db-shm
+*.log
+*.unitypackage

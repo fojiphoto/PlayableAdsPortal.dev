@@ -1,0 +1,217 @@
+import type { FastifyInstance, FastifyReply } from "fastify";
+import JSZip from "jszip";
+import { loadFromZip, packAll, getNetwork, PRIORITY_NETWORK_IDS, formatBytes } from "@forge/packager";
+import type { PackOptions, PackResult } from "@forge/packager";
+import { authed } from "../auth.js";
+import {
+  createCreative,
+  deleteCreative,
+  getConceptOwned,
+  getCreativeOwned,
+  getExport,
+  listExports,
+  upsertExport,
+  type ExportRow,
+} from "../repo.js";
+
+function networkName(id: string): string {
+  try {
+    return getNetwork(id).name;
+  } catch {
+    return id;
+  }
+}
+
+function packView(r: PackResult) {
+  return {
+    network: r.network,
+    networkName: r.networkName,
+    filename: r.filename,
+    format: r.format,
+    sizeBytes: r.sizeBytes,
+    maxSizeBytes: r.maxSizeBytes,
+    sizeLabel: `${formatBytes(r.sizeBytes)} / ${formatBytes(r.maxSizeBytes)}`,
+    ok: r.ok,
+    validation: r.validation,
+  };
+}
+
+function exportView(e: ExportRow) {
+  return {
+    network: e.network,
+    networkName: networkName(e.network),
+    filename: e.filename,
+    format: e.format,
+    sizeBytes: e.size_bytes,
+    maxSizeBytes: e.max_size_bytes,
+    sizeLabel: `${formatBytes(e.size_bytes)} / ${formatBytes(e.max_size_bytes)}`,
+    ok: e.ok === 1,
+    validation: JSON.parse(e.validation_json),
+  };
+}
+
+function sanitize(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "playable";
+}
+
+function sendBytes(reply: FastifyReply, bytes: Uint8Array, filename: string, contentType: string) {
+  return reply
+    .header("Content-Type", contentType)
+    .header("Content-Disposition", `attachment; filename="${filename}"`)
+    .send(Buffer.from(bytes));
+}
+
+export async function creativeRoutes(app: FastifyInstance): Promise<void> {
+  // upload a playable under a concept
+  app.post<{ Params: { conceptId: string } }>(
+    "/api/concepts/:conceptId/creatives",
+    authed,
+    async (req, reply) => {
+      const concept = getConceptOwned(req.params.conceptId, req.user!.id);
+      if (!concept) return reply.code(404).send({ error: "concept not found" });
+
+      let fileBuf: Buffer | undefined;
+      let filename = "upload";
+      const fields: Record<string, string> = {};
+      for await (const part of req.parts()) {
+        if (part.type === "file") {
+          filename = part.filename ?? "upload";
+          fileBuf = await part.toBuffer();
+        } else {
+          fields[part.fieldname] = String(part.value);
+        }
+      }
+      if (!fileBuf) return reply.code(400).send({ error: "no file uploaded (multipart field 'file')" });
+
+      let sourceZip: Uint8Array;
+      let entry: string;
+      let fileCount: number;
+      try {
+        if (/\.html?$/i.test(filename)) {
+          const zip = new JSZip();
+          zip.file("index.html", fileBuf);
+          sourceZip = await zip.generateAsync({ type: "uint8array" });
+          entry = "index.html";
+          fileCount = 1;
+        } else {
+          const source = await loadFromZip(new Uint8Array(fileBuf), fields.entry || undefined);
+          sourceZip = new Uint8Array(fileBuf);
+          entry = source.entry;
+          fileCount = Object.keys(source.files).length;
+        }
+      } catch (e) {
+        return reply.code(400).send({ error: `could not read playable: ${(e as Error).message}` });
+      }
+
+      const name = fields.name || filename.replace(/\.[^.]+$/, "") || "playable";
+      const options: PackOptions = {
+        name,
+        ctaUrl: fields.ctaUrl || undefined,
+        iosUrl: fields.iosUrl || undefined,
+        androidUrl: fields.androidUrl || undefined,
+      };
+      const row = createCreative({
+        conceptId: concept.id,
+        name,
+        entry,
+        sourceZip,
+        optionsJson: JSON.stringify(options),
+      });
+      return reply.code(201).send({
+        id: row.id,
+        name: row.name,
+        entry: row.entry,
+        fileCount,
+        conceptId: concept.id,
+        createdAt: row.created_at,
+      });
+    },
+  );
+
+  // creative detail + its exports
+  app.get<{ Params: { id: string } }>("/api/creatives/:id", authed, async (req, reply) => {
+    const cr = getCreativeOwned(req.params.id, req.user!.id);
+    if (!cr) return reply.code(404).send({ error: "not found" });
+    return {
+      id: cr.id,
+      name: cr.name,
+      entry: cr.entry,
+      conceptId: cr.concept_id,
+      options: JSON.parse(cr.options_json),
+      createdAt: cr.created_at,
+      exports: listExports(cr.id).map(exportView),
+    };
+  });
+
+  // export: build packages and persist them
+  app.post<{ Params: { id: string }; Body: { networks?: string[]; ctaUrl?: string; iosUrl?: string; androidUrl?: string } }>(
+    "/api/creatives/:id/export",
+    authed,
+    async (req, reply) => {
+      const cr = getCreativeOwned(req.params.id, req.user!.id);
+      if (!cr) return reply.code(404).send({ error: "not found" });
+
+      const body = req.body ?? {};
+      const ids = body.networks && body.networks.length ? body.networks : [...PRIORITY_NETWORK_IDS];
+      try {
+        ids.forEach(getNetwork);
+      } catch (e) {
+        return reply.code(400).send({ error: (e as Error).message });
+      }
+
+      const source = await loadFromZip(cr.source_zip, cr.entry);
+      const stored = JSON.parse(cr.options_json) as PackOptions;
+      const opts: PackOptions = {
+        name: stored.name,
+        ctaUrl: body.ctaUrl ?? stored.ctaUrl,
+        iosUrl: body.iosUrl ?? stored.iosUrl,
+        androidUrl: body.androidUrl ?? stored.androidUrl,
+      };
+      const results = await packAll(source, opts, ids);
+      for (const r of results) upsertExport(cr.id, r);
+      return { id: cr.id, exported: results.map(packView) };
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>("/api/creatives/:id", authed, async (req, reply) => {
+    return deleteCreative(req.params.id, req.user!.id)
+      ? { deleted: true }
+      : reply.code(404).send({ error: "not found" });
+  });
+
+  // ── public, UUID-guarded delivery (so <iframe>/<a download> work without headers) ──
+  app.get<{ Params: { id: string; network: string } }>(
+    "/api/creatives/:id/download/:network",
+    async (req, reply) => {
+      const e = getExport(req.params.id, req.params.network);
+      if (!e) return reply.code(404).send({ error: "not exported" });
+      return sendBytes(reply, e.bytes, e.filename, e.format === "zip" ? "application/zip" : "text/html");
+    },
+  );
+
+  app.get<{ Params: { id: string; network: string } }>(
+    "/api/creatives/:id/preview/:network",
+    async (req, reply) => {
+      const e = getExport(req.params.id, req.params.network);
+      if (!e) return reply.code(404).send({ error: "not exported" });
+      let html: string;
+      if (e.format === "zip") {
+        const zip = await JSZip.loadAsync(e.bytes);
+        const idx = zip.file("index.html");
+        html = idx ? await idx.async("string") : "<!-- no index.html -->";
+      } else {
+        html = new TextDecoder().decode(e.bytes);
+      }
+      return reply.header("Content-Type", "text/html; charset=utf-8").send(html);
+    },
+  );
+
+  app.get<{ Params: { id: string } }>("/api/creatives/:id/download-all", async (req, reply) => {
+    const exports = listExports(req.params.id);
+    if (exports.length === 0) return reply.code(404).send({ error: "nothing exported" });
+    const zip = new JSZip();
+    for (const e of exports) zip.file(e.filename, e.bytes);
+    const bytes = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+    return sendBytes(reply, bytes, `playables_all.zip`, "application/zip");
+  });
+}

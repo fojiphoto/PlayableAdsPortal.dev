@@ -1,0 +1,34 @@
+# Single-host deploy: the Node app (API + SPA) behind Caddy (automatic HTTPS).
+# Point app.factorialstudio.dev's DNS at this server, open ports 80/443, then:
+#   JWT_SECRET=$(openssl rand -base64 48) docker compose up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      FORGE_DB: /data/forge.db
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (e.g. openssl rand -base64 48)}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-52428800}
+    volumes:
+      - forge-data:/data
+    expose:
+      - "4000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  forge-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,32 @@
+# Fly.io — Docker app with a persistent volume. Deploy:
+#   fly launch --no-deploy        (creates the app; keep this file)
+#   fly volumes create forge_data --size 1
+#   fly secrets set JWT_SECRET=$(openssl rand -base64 48)
+#   fly deploy
+app = "playableforge"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "4000"
+  FORGE_DB = "/data/forge.db"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "forge_data"
+  destination = "/data"
+
+[[http_service.checks]]
+  method = "get"
+  path = "/api/health"
+  interval = "30s"
+  timeout = "5s"

@@ -1,0 +1,27 @@
+# deps
+node_modules/
+# build output
+dist/
+*.tsbuildinfo
+# local sqlite db
+data/
+*.db
+*.db-wal
+*.db-shm
+# env / secrets
+.env
+.env.*
+!.env.example
+# logs
+*.log
+npm-debug.log*
+# OS
+.DS_Store
+Thumbs.db
+# recon artifacts (large binaries / decompiled 3rd-party code — not part of our product)
+_recon/
+# Unity test project — local only, not part of the product
+PlayableAdsUnitySDK/
+# editor
+.vscode/
+.idea/
