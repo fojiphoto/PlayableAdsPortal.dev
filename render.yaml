@@ -2,7 +2,7 @@
 # In Render: New → Blueprint → connect this repo. It reads this file.
 services:
   - type: web
-    name: playableforge
+    name: playableadsportal
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: starter # starter has a persistent disk; free tier has none + spins down
