@@ -2,10 +2,12 @@ import type { FastifyInstance } from "fastify";
 import { createUser, getUserByEmail } from "../repo.js";
 import { authed, hashPassword, signToken, verifyPassword } from "../auth.js";
 import { planStatus } from "../plan-status.js";
+import { verifyTotp } from "../totp.js";
 
 interface Credentials {
   email?: string;
   password?: string;
+  code?: string;
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
@@ -26,6 +28,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const u = getUserByEmail(email);
     if (!u || !verifyPassword(password, u.password_hash)) {
       return reply.code(401).send({ error: "invalid credentials" });
+    }
+    if (u.totp_enabled && u.totp_secret) {
+      const code = req.body?.code;
+      if (!code) return reply.code(401).send({ error: "2FA code required", code: "2fa-required" });
+      if (!verifyTotp(u.totp_secret, code)) return reply.code(401).send({ error: "invalid 2FA code", code: "2fa-invalid" });
     }
     return { token: signToken(u), user: { id: u.id, email: u.email } };
   });

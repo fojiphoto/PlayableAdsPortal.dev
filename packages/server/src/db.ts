@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   plan          TEXT NOT NULL DEFAULT 'free',
+  totp_secret   TEXT,
+  totp_enabled  INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL
 );
 
@@ -82,10 +84,16 @@ export function initDb(path: string = config.dbPath): DB {
   db = new DatabaseSync(path);
   db.exec(SCHEMA);
   // migrations for pre-existing databases (ignore if the column already exists)
-  try {
-    db.exec("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'");
-  } catch {
-    /* column already present */
+  for (const stmt of [
+    "ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'",
+    "ALTER TABLE users ADD COLUMN totp_secret TEXT",
+    "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+  ]) {
+    try {
+      db.exec(stmt);
+    } catch {
+      /* column already present */
+    }
   }
   return db;
 }

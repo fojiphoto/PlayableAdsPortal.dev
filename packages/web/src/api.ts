@@ -40,13 +40,17 @@ function authHeaders(): Record<string, string> {
 
 async function toError(res: Response): Promise<never> {
   let msg = res.statusText;
+  let code: string | undefined;
   try {
-    const body = (await res.json()) as { error?: string };
+    const body = (await res.json()) as { error?: string; code?: string };
     if (body.error) msg = body.error;
+    code = body.code;
   } catch {
     /* ignore */
   }
-  throw new Error(msg);
+  const e = new Error(msg) as Error & { code?: string };
+  if (code) e.code = code;
+  throw e;
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -67,9 +71,17 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 // ── auth ──
 export const signup = (email: string, password: string) =>
   postJson<{ token: string; user: AuthUser }>("/signup", { email, password });
-export const login = (email: string, password: string) =>
-  postJson<{ token: string; user: AuthUser }>("/login", { email, password });
+export const login = (email: string, password: string, code?: string) =>
+  postJson<{ token: string; user: AuthUser }>("/login", { email, password, code });
 export const me = () => getJson<MeResponse>("/me");
+
+// ── account / security ──
+export const changePassword = (currentPassword: string, newPassword: string) =>
+  postJson<{ ok: true }>("/users/password", { currentPassword, newPassword });
+export const twofaStatus = () => getJson<{ enabled: boolean }>("/2fa/status");
+export const twofaBegin = () => postJson<{ secret: string; otpauth: string }>("/2fa/begin", {});
+export const twofaConfirm = (code: string) => postJson<{ enabled: boolean }>("/2fa/confirm", { code });
+export const twofaDisable = (code: string) => postJson<{ enabled: boolean }>("/2fa/disable", { code });
 
 // ── billing / plans ──
 export const listPlans = () => getJson<Plan[]>("/billing/plans");

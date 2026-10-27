@@ -5,6 +5,7 @@ import { AuthScreen } from "./components/AuthScreen";
 import { Workspace } from "./components/Workspace";
 import { Landing } from "./Landing";
 import { Plans } from "./components/Plans";
+import { Settings } from "./components/Settings";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -19,7 +20,7 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<"landing" | "auth">("landing");
   const [status, setStatus] = useState<PlanStatus | null>(null);
-  const [page, setPage] = useState<"app" | "plans">("app");
+  const [page, setPage] = useState<"app" | "plans" | "settings">("app");
 
   useEffect(() => {
     getNetworks().then(setNetworks).catch(() => {});
@@ -100,32 +101,28 @@ export default function App() {
     <div className="min-h-full">
       <header className="border-b border-[#1b5540]">
         <div className="flex items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-2">
+          <button onClick={() => setPage("app")} className="flex items-center gap-2">
             <img src="/logo.png" alt="Factorial" className="h-7 w-7 rounded-lg object-contain" />
             <span className="font-semibold text-slate-100">Factorial AdLab</span>
             <span className="rounded bg-[#123f2d] px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">Packager</span>
-          </div>
-          <div className="flex items-center gap-3 text-sm text-slate-400">
+          </button>
+          <div className="flex items-center gap-2 text-sm text-slate-400">
             {status && (
               <button
-                onClick={() => setPage(page === "plans" ? "app" : "plans")}
-                className="rounded-lg border border-[#1b5540] px-3 py-1.5 text-slate-200 hover:border-[#7cb342]"
+                onClick={() => setPage("plans")}
+                className={`rounded-lg border px-3 py-1.5 ${page === "plans" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-200 hover:border-[#7cb342]"}`}
               >
-                {page === "plans" ? (
-                  "← Dashboard"
-                ) : (
-                  <>
-                    {status.planName}
-                    {status.limit != null && (
-                      <span className="text-slate-500">
-                        {" "}· {status.used}/{status.limit}
-                      </span>
-                    )}
-                  </>
-                )}
+                {status.planName}
+                {status.limit != null && <span className="text-slate-500"> · {status.used}/{status.limit}</span>}
               </button>
             )}
-            <span>{user.email}</span>
+            <button
+              onClick={() => setPage("settings")}
+              className={`rounded-lg border px-3 py-1.5 ${page === "settings" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
+            >
+              Settings
+            </button>
+            <span className="hidden sm:inline">{user.email}</span>
             <button onClick={logout} className="rounded-lg border border-[#1f6b4a] px-3 py-1.5 text-slate-300 hover:border-[#7cb342]">
               Sign out
             </button>
@@ -136,6 +133,10 @@ export default function App() {
       {page === "plans" ? (
         <main className="min-w-0 flex-1 p-6">
           <Plans status={status} onChanged={setStatus} />
+        </main>
+      ) : page === "settings" ? (
+        <main className="min-w-0 flex-1 p-6">
+          <Settings user={user} status={status} />
         </main>
       ) : (
       <div className="flex">

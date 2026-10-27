@@ -6,6 +6,8 @@ export function AuthScreen({ onAuth, onBack }: { onAuth: (u: AuthUser) => void; 
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [needCode, setNeedCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -14,11 +16,20 @@ export function AuthScreen({ onAuth, onBack }: { onAuth: (u: AuthUser) => void; 
     setBusy(true);
     setErr(null);
     try {
-      const { token, user } = await (mode === "login" ? login(email, password) : signup(email, password));
+      const { token, user } =
+        mode === "login" ? await login(email, password, code || undefined) : await signup(email, password);
       setToken(token);
       onAuth(user);
     } catch (e) {
-      setErr((e as Error).message);
+      const c = (e as { code?: string }).code;
+      if (c === "2fa-required") {
+        setNeedCode(true);
+        setErr("Enter the 6-digit code from your authenticator app.");
+      } else if (c === "2fa-invalid") {
+        setErr("Invalid code — try again.");
+      } else {
+        setErr((e as Error).message);
+      }
     } finally {
       setBusy(false);
     }
@@ -61,6 +72,20 @@ export function AuthScreen({ onAuth, onBack }: { onAuth: (u: AuthUser) => void; 
             placeholder="••••••••"
             className="mb-4 w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500"
           />
+
+          {mode === "login" && needCode && (
+            <>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Authenticator code</label>
+              <input
+                inputMode="numeric"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="000000"
+                className="mb-4 w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500"
+              />
+            </>
+          )}
 
           {err && <div className="mb-3 text-sm text-red-400">{err}</div>}
 

@@ -10,6 +10,8 @@ export interface UserRow {
   email: string;
   password_hash: string;
   plan: string;
+  totp_secret: string | null;
+  totp_enabled: number;
   created_at: string;
 }
 export interface AppRow {
@@ -50,7 +52,10 @@ export interface ExportRow {
 
 // ── users ────────────────────────────────────────────────────────────────────
 export function createUser(email: string, passwordHash: string): UserRow {
-  const row: UserRow = { id: randomUUID(), email, password_hash: passwordHash, plan: "free", created_at: now() };
+  const row: UserRow = {
+    id: randomUUID(), email, password_hash: passwordHash, plan: "free",
+    totp_secret: null, totp_enabled: 0, created_at: now(),
+  };
   getDb()
     .prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
     .run(row.id, row.email, row.password_hash, row.created_at);
@@ -65,6 +70,14 @@ export function getUserById(id: string): UserRow | undefined {
 
 export function setUserPlan(id: string, plan: string): void {
   getDb().prepare("UPDATE users SET plan = ? WHERE id = ?").run(plan, id);
+}
+
+export function updatePassword(id: string, passwordHash: string): void {
+  getDb().prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, id);
+}
+
+export function setTotp(id: string, secret: string | null, enabled: number): void {
+  getDb().prepare("UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?").run(secret, enabled, id);
 }
 
 export function addExportUsage(userId: string, network: string): void {

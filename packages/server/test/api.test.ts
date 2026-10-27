@@ -149,6 +149,46 @@ describe("app → concept → creative → export flow", () => {
   });
 });
 
+describe("account: password + 2FA", () => {
+  it("changes password (wrong current rejected)", async () => {
+    const token = await signup("pw@factorialstudio.com", "secret123");
+    const bad = await app.inject({ method: "POST", url: "/api/users/password", headers: bearer(token), payload: { currentPassword: "wrong", newPassword: "newpass1" } });
+    expect(bad.statusCode).toBe(401);
+    const ok = await app.inject({ method: "POST", url: "/api/users/password", headers: bearer(token), payload: { currentPassword: "secret123", newPassword: "newpass1" } });
+    expect(ok.statusCode).toBe(200);
+    // old password no longer works, new one does
+    expect((await app.inject({ method: "POST", url: "/api/login", payload: { email: "pw@factorialstudio.com", password: "secret123" } })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: "/api/login", payload: { email: "pw@factorialstudio.com", password: "newpass1" } })).statusCode).toBe(200);
+  });
+
+  it("enables 2FA and then requires a code at login", async () => {
+    const { generateToken } = await import("../src/totp.js");
+    const token = await signup("tfa@factorialstudio.com", "secret123");
+
+    const begin = await app.inject({ method: "POST", url: "/api/2fa/begin", headers: bearer(token) });
+    const secret = begin.json().secret as string;
+    expect(secret.length).toBeGreaterThan(10);
+
+    // wrong code rejected, correct code enables
+    expect((await app.inject({ method: "POST", url: "/api/2fa/confirm", headers: bearer(token), payload: { code: "000000" } })).statusCode).toBe(400);
+    const confirm = await app.inject({ method: "POST", url: "/api/2fa/confirm", headers: bearer(token), payload: { code: generateToken(secret) } });
+    expect(confirm.statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/api/2fa/status", headers: bearer(token) })).json().enabled).toBe(true);
+
+    // login now needs the code
+    const noCode = await app.inject({ method: "POST", url: "/api/login", payload: { email: "tfa@factorialstudio.com", password: "secret123" } });
+    expect(noCode.statusCode).toBe(401);
+    expect(noCode.json().code).toBe("2fa-required");
+    const withCode = await app.inject({ method: "POST", url: "/api/login", payload: { email: "tfa@factorialstudio.com", password: "secret123", code: generateToken(secret) } });
+    expect(withCode.statusCode).toBe(200);
+
+    // disable
+    const dis = await app.inject({ method: "POST", url: "/api/2fa/disable", headers: bearer(token), payload: { code: generateToken(secret) } });
+    expect(dis.statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/api/2fa/status", headers: bearer(token) })).json().enabled).toBe(false);
+  });
+});
+
 describe("billing / plan enforcement", () => {
   async function setupCreative(token: string): Promise<string> {
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "A" } })).json().id;
