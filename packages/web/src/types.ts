@@ -71,3 +71,27 @@ export interface CreativeDetail {
   createdAt: string;
   exports: PackResultView[];
 }
+
+export interface Plan {
+  id: string;
+  name: string;
+  price: number | null;
+  priceLabel: string;
+  exportsPer30d: number | null;
+  networks: "all" | string[];
+  blurb: string;
+  features: string[];
+  popular?: boolean;
+}
+
+export interface PlanStatus {
+  plan: string;
+  planName: string;
+  limit: number | null; // null = unlimited
+  used: number;
+  networks: "all" | string[];
+}
+
+export interface MeResponse extends PlanStatus {
+  user: AuthUser;
+}

@@ -4,6 +4,7 @@ import { loadFromZip, packAll, getNetwork, PRIORITY_NETWORK_IDS, formatBytes } f
 import type { PackOptions, PackResult } from "@forge/packager";
 import { authed } from "../auth.js";
 import {
+  addExportUsage,
   createCreative,
   deleteCreative,
   getConceptOwned,
@@ -13,6 +14,7 @@ import {
   upsertExport,
   type ExportRow,
 } from "../repo.js";
+import { checkExport } from "../plan-status.js";
 
 function networkName(id: string): string {
   try {
@@ -159,6 +161,10 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: (e as Error).message });
       }
 
+      // plan gate: allowed networks + rolling-30-day quota
+      const gate = checkExport(req.user!.id, ids);
+      if (!gate.ok) return reply.code(402).send(gate);
+
       const source = await loadFromZip(cr.source_zip, cr.entry);
       const stored = JSON.parse(cr.options_json) as PackOptions;
       const opts: PackOptions = {
@@ -169,6 +175,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       };
       const results = await packAll(source, opts, ids);
       for (const r of results) upsertExport(cr.id, r);
+      for (const id of ids) addExportUsage(req.user!.id, id); // count usage toward quota
       return { id: cr.id, exported: results.map(packView) };
     },
   );

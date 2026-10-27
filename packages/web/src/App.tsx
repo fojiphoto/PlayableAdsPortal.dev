@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { getToken, setToken, me, getNetworks, listApps, createApp, getApp, createConcept } from "./api";
-import type { App as AppT, AuthUser, Concept, Network } from "./types";
+import { getToken, setToken, me, getNetworks, listApps, createApp, getApp, createConcept, getBillingStatus } from "./api";
+import type { App as AppT, AuthUser, Concept, Network, PlanStatus } from "./types";
 import { AuthScreen } from "./components/AuthScreen";
 import { Workspace } from "./components/Workspace";
 import { Landing } from "./Landing";
+import { Plans } from "./components/Plans";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -17,6 +18,8 @@ export default function App() {
   const [newConcept, setNewConcept] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<"landing" | "auth">("landing");
+  const [status, setStatus] = useState<PlanStatus | null>(null);
+  const [page, setPage] = useState<"app" | "plans">("app");
 
   useEffect(() => {
     getNetworks().then(setNetworks).catch(() => {});
@@ -31,7 +34,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (user) listApps().then(setApps).catch((e) => setErr((e as Error).message));
+    if (user) {
+      listApps().then(setApps).catch((e) => setErr((e as Error).message));
+      getBillingStatus().then(setStatus).catch(() => {});
+    }
   }, [user]);
 
   async function openApp(a: AppT) {
@@ -100,6 +106,25 @@ export default function App() {
             <span className="rounded bg-[#123f2d] px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">Packager</span>
           </div>
           <div className="flex items-center gap-3 text-sm text-slate-400">
+            {status && (
+              <button
+                onClick={() => setPage(page === "plans" ? "app" : "plans")}
+                className="rounded-lg border border-[#1b5540] px-3 py-1.5 text-slate-200 hover:border-[#7cb342]"
+              >
+                {page === "plans" ? (
+                  "← Dashboard"
+                ) : (
+                  <>
+                    {status.planName}
+                    {status.limit != null && (
+                      <span className="text-slate-500">
+                        {" "}· {status.used}/{status.limit}
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+            )}
             <span>{user.email}</span>
             <button onClick={logout} className="rounded-lg border border-[#1f6b4a] px-3 py-1.5 text-slate-300 hover:border-[#7cb342]">
               Sign out
@@ -108,6 +133,11 @@ export default function App() {
         </div>
       </header>
 
+      {page === "plans" ? (
+        <main className="min-w-0 flex-1 p-6">
+          <Plans status={status} onChanged={setStatus} />
+        </main>
+      ) : (
       <div className="flex">
         {/* sidebar: apps + concepts */}
         <aside className="w-64 shrink-0 border-r border-[#1b5540] p-4">
@@ -154,7 +184,12 @@ export default function App() {
         <main className="min-w-0 flex-1 p-6">
           {err && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">{err}</div>}
           {activeConcept ? (
-            <Workspace key={activeConcept.id} conceptId={activeConcept.id} networks={networks} />
+            <Workspace
+              key={activeConcept.id}
+              conceptId={activeConcept.id}
+              networks={networks}
+              onExported={() => getBillingStatus().then(setStatus).catch(() => {})}
+            />
           ) : (
             <div className="flex h-full min-h-[50vh] items-center justify-center text-center text-slate-500">
               {apps.length === 0
@@ -166,6 +201,7 @@ export default function App() {
           )}
         </main>
       </div>
+      )}
     </div>
   );
 }

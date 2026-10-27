@@ -10,6 +10,7 @@ import { networkRoutes } from "./routes/networks.js";
 import { authRoutes } from "./routes/auth.js";
 import { appRoutes } from "./routes/apps.js";
 import { creativeRoutes } from "./routes/creatives.js";
+import { billingRoutes } from "./routes/billing.js";
 
 /** Build the Fastify app (exported separately so tests can drive it via inject()). */
 export async function buildApp(): Promise<FastifyInstance> {
@@ -26,6 +27,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(authRoutes);
   await app.register(appRoutes);
   await app.register(creativeRoutes);
+  await app.register(billingRoutes);
 
   // Serve the built web SPA from the same origin (no CORS/proxy needed in prod).
   if (existsSync(config.webDist)) {

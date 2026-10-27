@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { createUser, getUserByEmail } from "../repo.js";
 import { authed, hashPassword, signToken, verifyPassword } from "../auth.js";
+import { planStatus } from "../plan-status.js";
 
 interface Credentials {
   email?: string;
@@ -29,5 +30,5 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return { token: signToken(u), user: { id: u.id, email: u.email } };
   });
 
-  app.get("/api/me", authed, async (req) => ({ user: req.user }));
+  app.get("/api/me", authed, async (req) => ({ user: req.user, ...planStatus(req.user!.id) }));
 }

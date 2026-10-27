@@ -5,8 +5,11 @@ import type {
   CreativeDetail,
   CreativeRef,
   CreativeSummary,
+  MeResponse,
   Network,
   PackResultView,
+  Plan,
+  PlanStatus,
 } from "./types";
 
 // Same-origin by default ("/api"). For a split deploy (SPA and API on different hosts),
@@ -66,7 +69,12 @@ export const signup = (email: string, password: string) =>
   postJson<{ token: string; user: AuthUser }>("/signup", { email, password });
 export const login = (email: string, password: string) =>
   postJson<{ token: string; user: AuthUser }>("/login", { email, password });
-export const me = () => getJson<{ user: AuthUser }>("/me");
+export const me = () => getJson<MeResponse>("/me");
+
+// ── billing / plans ──
+export const listPlans = () => getJson<Plan[]>("/billing/plans");
+export const getBillingStatus = () => getJson<PlanStatus>("/billing/status");
+export const setPlan = (plan: string) => postJson<PlanStatus>("/billing/plan", { plan });
 
 // ── networks ──
 export const getNetworks = () => getJson<Network[]>("/networks");

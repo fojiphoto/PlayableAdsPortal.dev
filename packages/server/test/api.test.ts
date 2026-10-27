@@ -76,6 +76,8 @@ describe("auth", () => {
 describe("app → concept → creative → export flow", () => {
   it("full happy path, persisted", async () => {
     const token = await signup();
+    // free plan is Unity-Ads-only; switch to a paid plan to export multiple networks
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
 
     const appRes = await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Construction ASMR", platform: "ios" } });
     expect(appRes.statusCode).toBe(201);
@@ -144,5 +146,49 @@ describe("app → concept → creative → export flow", () => {
     expect((await app.inject({ method: "DELETE", url: `/api/apps/${appId}`, headers: bearer(other) })).statusCode).toBe(404);
     // owner can
     expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(owner) })).statusCode).toBe(200);
+  });
+});
+
+describe("billing / plan enforcement", () => {
+  async function setupCreative(token: string): Promise<string> {
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "A" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c" } })).json().id;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "s.zip", contentType: "application/zip" });
+    const up = await app.inject({
+      method: "POST",
+      url: `/api/concepts/${conceptId}/creatives`,
+      headers: { ...bearer(token), ...form.getHeaders() },
+      payload: form.getBuffer(),
+    });
+    return up.json().id as string;
+  }
+
+  it("lists 4 plans; new users default to free", async () => {
+    const token = await signup();
+    expect((await app.inject({ method: "GET", url: "/api/billing/plans" })).json()).toHaveLength(4);
+    expect((await app.inject({ method: "GET", url: "/api/me", headers: bearer(token) })).json().plan).toBe("free");
+  });
+
+  it("free plan blocks non-Unity networks, allows Unity Ads", async () => {
+    const token = await signup();
+    const cid = await setupCreative(token);
+    const blocked = await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(token), payload: { networks: ["applovin"] } });
+    expect(blocked.statusCode).toBe(402);
+    expect(blocked.json().code).toBe("network-not-in-plan");
+    const ok = await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(token), payload: { networks: ["unityads"] } });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it("upgrading unlocks all networks and counts usage", async () => {
+    const token = await signup();
+    const cid = await setupCreative(token);
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
+    const ok = await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(token), payload: { networks: ["applovin", "meta"] } });
+    expect(ok.statusCode).toBe(200);
+    const me = (await app.inject({ method: "GET", url: "/api/me", headers: bearer(token) })).json();
+    expect(me.plan).toBe("starter");
+    expect(me.used).toBe(2);
+    expect(me.limit).toBe(30);
   });
 });

@@ -9,6 +9,7 @@ export interface UserRow {
   id: string;
   email: string;
   password_hash: string;
+  plan: string;
   created_at: string;
 }
 export interface AppRow {
@@ -49,7 +50,7 @@ export interface ExportRow {
 
 // ── users ────────────────────────────────────────────────────────────────────
 export function createUser(email: string, passwordHash: string): UserRow {
-  const row: UserRow = { id: randomUUID(), email, password_hash: passwordHash, created_at: now() };
+  const row: UserRow = { id: randomUUID(), email, password_hash: passwordHash, plan: "free", created_at: now() };
   getDb()
     .prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
     .run(row.id, row.email, row.password_hash, row.created_at);
@@ -60,6 +61,23 @@ export function getUserByEmail(email: string): UserRow | undefined {
 }
 export function getUserById(id: string): UserRow | undefined {
   return getDb().prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
+}
+
+export function setUserPlan(id: string, plan: string): void {
+  getDb().prepare("UPDATE users SET plan = ? WHERE id = ?").run(plan, id);
+}
+
+export function addExportUsage(userId: string, network: string): void {
+  getDb()
+    .prepare("INSERT INTO export_usage (id, user_id, network, created_at) VALUES (?, ?, ?, ?)")
+    .run(randomUUID(), userId, network, now());
+}
+
+export function countExportUsageSince(userId: string, sinceIso: string): number {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM export_usage WHERE user_id = ? AND created_at >= ?")
+    .get(userId, sinceIso) as { n: number } | undefined;
+  return row?.n ?? 0;
 }
 
 // ── apps ─────────────────────────────────────────────────────────────────────

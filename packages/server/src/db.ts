@@ -16,8 +16,17 @@ CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   email         TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
+  plan          TEXT NOT NULL DEFAULT 'free',
   created_at    TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS export_usage (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  network    TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_user_time ON export_usage(user_id, created_at);
 
 CREATE TABLE IF NOT EXISTS apps (
   id         TEXT PRIMARY KEY,
@@ -72,6 +81,12 @@ export function initDb(path: string = config.dbPath): DB {
   }
   db = new DatabaseSync(path);
   db.exec(SCHEMA);
+  // migrations for pre-existing databases (ignore if the column already exists)
+  try {
+    db.exec("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'");
+  } catch {
+    /* column already present */
+  }
   return db;
 }
 

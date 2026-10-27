@@ -5,7 +5,15 @@ import { UploadForm } from "./UploadForm";
 import { ResultCard } from "./ResultCard";
 import { DevicePreview } from "./DevicePreview";
 
-export function Workspace({ conceptId, networks }: { conceptId: string; networks: Network[] }) {
+export function Workspace({
+  conceptId,
+  networks,
+  onExported,
+}: {
+  conceptId: string;
+  networks: Network[];
+  onExported?: () => void;
+}) {
   const [creatives, setCreatives] = useState<CreativeRef[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeName, setActiveName] = useState("");
@@ -80,6 +88,7 @@ export function Workspace({ conceptId, networks }: { conceptId: string; networks
       const rs = await exportCreative(activeId, [...selected]);
       setResults(rs);
       setPreview((rs.find((r) => r.ok) ?? rs[0])?.network ?? null);
+      onExported?.();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
