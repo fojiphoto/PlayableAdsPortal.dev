@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck --workspaces --if-present
+      - name: Test
+        run: npm test --workspaces --if-present
+      - name: Build web
+        run: npm run build -w @forge/web

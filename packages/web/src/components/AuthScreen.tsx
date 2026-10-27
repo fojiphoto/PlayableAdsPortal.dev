@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { login, signup, setToken } from "../api";
 import type { AuthUser } from "../types";
 
-export function AuthScreen({ onAuth }: { onAuth: (u: AuthUser) => void }) {
+export function AuthScreen({ onAuth, onBack }: { onAuth: (u: AuthUser) => void; onBack?: () => void }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,9 +28,14 @@ export function AuthScreen({ onAuth }: { onAuth: (u: AuthUser) => void }) {
     <div className="flex min-h-full items-center justify-center px-6">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex items-center justify-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600 font-bold text-white">P</div>
-          <span className="text-lg font-semibold text-slate-100">PlayableForge</span>
+          <img src="/logo.png" alt="Factorial" className="h-8 w-8 rounded-lg object-contain" />
+          <span className="text-lg font-semibold text-slate-100">Factorial AdLab</span>
         </div>
+        {onBack && (
+          <button onClick={onBack} className="mb-4 block w-full text-center text-sm text-slate-500 hover:text-violet-400">
+            ← Back to home
+          </button>
+        )}
 
         <form onSubmit={submit} className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
           <h1 className="mb-1 text-xl font-semibold text-slate-100">

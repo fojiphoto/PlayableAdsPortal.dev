@@ -3,6 +3,7 @@ import { getToken, setToken, me, getNetworks, listApps, createApp, getApp, creat
 import type { App as AppT, AuthUser, Concept, Network } from "./types";
 import { AuthScreen } from "./components/AuthScreen";
 import { Workspace } from "./components/Workspace";
+import { Landing } from "./Landing";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -15,6 +16,7 @@ export default function App() {
   const [newApp, setNewApp] = useState("");
   const [newConcept, setNewConcept] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [view, setView] = useState<"landing" | "auth">("landing");
 
   useEffect(() => {
     getNetworks().then(setNetworks).catch(() => {});
@@ -80,15 +82,21 @@ export default function App() {
   }
 
   if (checking) return null;
-  if (!user) return <AuthScreen onAuth={setUser} />;
+  if (!user) {
+    return view === "auth" ? (
+      <AuthScreen onAuth={setUser} onBack={() => setView("landing")} />
+    ) : (
+      <Landing onGetStarted={() => setView("auth")} onSignIn={() => setView("auth")} />
+    );
+  }
 
   return (
     <div className="min-h-full">
       <header className="border-b border-slate-800">
         <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-600 text-sm font-bold text-white">P</div>
-            <span className="font-semibold text-slate-100">PlayableForge</span>
+            <img src="/logo.png" alt="Factorial" className="h-7 w-7 rounded-lg object-contain" />
+            <span className="font-semibold text-slate-100">Factorial AdLab</span>
             <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">Packager</span>
           </div>
           <div className="flex items-center gap-3 text-sm text-slate-400">
