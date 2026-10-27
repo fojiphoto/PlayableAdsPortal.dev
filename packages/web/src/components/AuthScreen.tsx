@@ -32,12 +32,12 @@ export function AuthScreen({ onAuth, onBack }: { onAuth: (u: AuthUser) => void; 
           <span className="text-lg font-semibold text-slate-100">Factorial AdLab</span>
         </div>
         {onBack && (
-          <button onClick={onBack} className="mb-4 block w-full text-center text-sm text-slate-500 hover:text-violet-400">
+          <button onClick={onBack} className="mb-4 block w-full text-center text-sm text-slate-500 hover:text-amber-400">
             ← Back to home
           </button>
         )}
 
-        <form onSubmit={submit} className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+        <form onSubmit={submit} className="rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-6">
           <h1 className="mb-1 text-xl font-semibold text-slate-100">
             {mode === "login" ? "Sign in" : "Create account"}
           </h1>
@@ -50,7 +50,7 @@ export function AuthScreen({ onAuth, onBack }: { onAuth: (u: AuthUser) => void; 
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@studio.com"
-            className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500"
+            className="mb-3 w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500"
           />
           <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Password</label>
           <input
@@ -59,7 +59,7 @@ export function AuthScreen({ onAuth, onBack }: { onAuth: (u: AuthUser) => void; 
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
-            className="mb-4 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500"
+            className="mb-4 w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500"
           />
 
           {err && <div className="mb-3 text-sm text-red-400">{err}</div>}
@@ -67,7 +67,7 @@ export function AuthScreen({ onAuth, onBack }: { onAuth: (u: AuthUser) => void; 
           <button
             type="submit"
             disabled={busy}
-            className="w-full rounded-lg bg-violet-600 px-4 py-2.5 font-medium text-white hover:bg-violet-500 disabled:opacity-40"
+            className="w-full rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40"
           >
             {busy ? "…" : mode === "login" ? "Sign in" : "Sign up"}
           </button>
@@ -80,7 +80,7 @@ export function AuthScreen({ onAuth, onBack }: { onAuth: (u: AuthUser) => void; 
                 setMode(mode === "login" ? "signup" : "login");
                 setErr(null);
               }}
-              className="text-violet-400 hover:underline"
+              className="text-amber-400 hover:underline"
             >
               {mode === "login" ? "Create an account" : "Sign in"}
             </button>

@@ -92,16 +92,16 @@ export default function App() {
 
   return (
     <div className="min-h-full">
-      <header className="border-b border-slate-800">
+      <header className="border-b border-[#1b5540]">
         <div className="flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-2">
             <img src="/logo.png" alt="Factorial" className="h-7 w-7 rounded-lg object-contain" />
             <span className="font-semibold text-slate-100">Factorial AdLab</span>
-            <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">Packager</span>
+            <span className="rounded bg-[#123f2d] px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">Packager</span>
           </div>
           <div className="flex items-center gap-3 text-sm text-slate-400">
             <span>{user.email}</span>
-            <button onClick={logout} className="rounded-lg border border-slate-700 px-3 py-1.5 text-slate-300 hover:border-slate-500">
+            <button onClick={logout} className="rounded-lg border border-[#1f6b4a] px-3 py-1.5 text-slate-300 hover:border-[#7cb342]">
               Sign out
             </button>
           </div>
@@ -110,7 +110,7 @@ export default function App() {
 
       <div className="flex">
         {/* sidebar: apps + concepts */}
-        <aside className="w-64 shrink-0 border-r border-slate-800 p-4">
+        <aside className="w-64 shrink-0 border-r border-[#1b5540] p-4">
           <SectionLabel>Apps</SectionLabel>
           <div className="mb-2 grid gap-1">
             {apps.map((a) => (
@@ -118,7 +118,7 @@ export default function App() {
                 key={a.id}
                 onClick={() => void openApp(a)}
                 className={`flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm ${
-                  activeApp?.id === a.id ? "bg-violet-500/10 text-violet-200" : "text-slate-300 hover:bg-slate-800/60"
+                  activeApp?.id === a.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
                 }`}
               >
                 <span className="truncate">{a.name}</span>
@@ -137,7 +137,7 @@ export default function App() {
                     key={c.id}
                     onClick={() => setActiveConcept(c)}
                     className={`rounded-md px-2.5 py-1.5 text-left text-sm ${
-                      activeConcept?.id === c.id ? "bg-violet-500/10 text-violet-200" : "text-slate-300 hover:bg-slate-800/60"
+                      activeConcept?.id === c.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
                     }`}
                   >
                     {c.name}
@@ -194,9 +194,9 @@ function CreateRow({
           if (e.key === "Enter") onAdd();
         }}
         placeholder={placeholder}
-        className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100 outline-none focus:border-violet-500"
+        className="min-w-0 flex-1 rounded-md border border-[#1f6b4a] bg-[#0a3a28] px-2 py-1 text-sm text-slate-100 outline-none focus:border-amber-500"
       />
-      <button onClick={onAdd} className="rounded-md bg-slate-800 px-2.5 text-slate-200 hover:bg-slate-700">
+      <button onClick={onAdd} className="rounded-md bg-[#123f2d] px-2.5 text-slate-200 hover:bg-[#1a5a40]">
         +
       </button>
     </div>

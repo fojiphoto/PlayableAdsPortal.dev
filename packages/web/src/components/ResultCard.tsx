@@ -18,21 +18,21 @@ export function ResultCard({
   return (
     <div
       className={`rounded-lg border p-3 transition ${
-        active ? "border-violet-500 bg-violet-500/5" : "border-slate-800 bg-slate-900/50"
+        active ? "border-amber-500 bg-amber-500/5" : "border-[#1b5540] bg-[#0a3a28]/50"
       }`}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className={`inline-block h-2 w-2 rounded-full ${r.ok ? "bg-emerald-400" : "bg-red-400"}`} />
           <span className="font-medium text-slate-100">{r.networkName}</span>
-          <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">
+          <span className="rounded bg-[#123f2d] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">
             {r.format === "zip" ? "zip" : "html"}
           </span>
         </div>
         <span className="text-xs tabular-nums text-slate-400">{r.sizeLabel}</span>
       </div>
 
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#123f2d]">
         <div className={`h-full ${bar}`} style={{ width: `${pct}%` }} />
       </div>
 
@@ -49,14 +49,14 @@ export function ResultCard({
       <div className="mt-3 flex gap-2">
         <button
           onClick={() => onPreview(r.network)}
-          className="rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-200 hover:border-slate-500"
+          className="rounded-md border border-[#1f6b4a] px-2.5 py-1 text-xs text-slate-200 hover:border-[#7cb342]"
         >
           Preview
         </button>
         <a
           href={downloadUrl(creativeId, r.network)}
           download
-          className="rounded-md bg-slate-800 px-2.5 py-1 text-xs text-slate-100 hover:bg-slate-700"
+          className="rounded-md bg-[#123f2d] px-2.5 py-1 text-xs text-slate-100 hover:bg-[#1a5a40]"
         >
           Download
         </a>

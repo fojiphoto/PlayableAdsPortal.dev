@@ -62,7 +62,7 @@ export function UploadForm({
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
         className={`cursor-pointer rounded-xl border-2 border-dashed p-8 text-center transition ${
-          drag ? "border-violet-400 bg-violet-500/10" : "border-slate-700 hover:border-slate-500"
+          drag ? "border-amber-400 bg-amber-500/10" : "border-[#1f6b4a] hover:border-[#7cb342]"
         }`}
       >
         <input
@@ -74,7 +74,7 @@ export function UploadForm({
         />
         <div className="text-slate-300">
           {file ? (
-            <span className="font-medium text-violet-300">{file.name}</span>
+            <span className="font-medium text-amber-300">{file.name}</span>
           ) : (
             <>
               <div className="text-lg font-medium">Drop an HTML5 playable</div>
@@ -103,7 +103,7 @@ export function UploadForm({
       <button
         onClick={submit}
         disabled={busy || !file}
-        className="mt-5 w-full rounded-lg bg-violet-600 px-4 py-2.5 font-medium text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40"
+        className="mt-5 w-full rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {busy ? "Uploading…" : "Upload playable"}
       </button>
@@ -112,7 +112,7 @@ export function UploadForm({
 }
 
 const inputCls =
-  "w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500";
+  "w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (

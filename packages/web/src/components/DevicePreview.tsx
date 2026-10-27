@@ -11,14 +11,14 @@ export function DevicePreview({ src, label }: { src: string | null; label?: stri
         <span className="text-sm text-slate-400">{label ? `Preview · ${label}` : "Preview"}</span>
         <button
           onClick={() => setLandscape((v) => !v)}
-          className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-slate-500"
+          className="rounded-md border border-[#1f6b4a] px-2 py-1 text-xs text-slate-300 hover:border-[#7cb342]"
         >
           {landscape ? "Portrait" : "Landscape"}
         </button>
       </div>
 
       <div
-        className="rounded-[2rem] border-[10px] border-slate-800 bg-black shadow-2xl transition-all"
+        className="rounded-[2rem] border-[10px] border-[#1b5540] bg-black shadow-2xl transition-all"
         style={{ width: w + 20, height: h + 20 }}
       >
         {src ? (

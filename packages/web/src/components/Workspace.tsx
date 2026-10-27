@@ -98,7 +98,7 @@ export function Workspace({ conceptId, networks }: { conceptId: string; networks
             key={c.id}
             onClick={() => void selectCreative(c)}
             className={`rounded-lg border px-3 py-1.5 text-sm ${
-              activeId === c.id ? "border-violet-500 bg-violet-500/10 text-violet-200" : "border-slate-800 text-slate-300 hover:border-slate-600"
+              activeId === c.id ? "border-amber-500 bg-amber-500/10 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"
             }`}
           >
             {c.name}
@@ -109,7 +109,7 @@ export function Workspace({ conceptId, networks }: { conceptId: string; networks
             setUploading(true);
             setActiveId(null);
           }}
-          className="rounded-lg border border-dashed border-slate-700 px-3 py-1.5 text-sm text-slate-400 hover:border-slate-500"
+          className="rounded-lg border border-dashed border-[#1f6b4a] px-3 py-1.5 text-sm text-slate-400 hover:border-[#7cb342]"
         >
           + Upload
         </button>
@@ -129,7 +129,7 @@ export function Workspace({ conceptId, networks }: { conceptId: string; networks
                 Networks · <span className="text-slate-200">{activeName}</span>
               </h2>
               <div className="flex gap-2 text-xs">
-                <button className="text-violet-400 hover:underline" onClick={() => setSelected(new Set(networks.map((n) => n.id)))}>
+                <button className="text-amber-400 hover:underline" onClick={() => setSelected(new Set(networks.map((n) => n.id)))}>
                   all
                 </button>
                 <button className="text-slate-500 hover:underline" onClick={() => setSelected(new Set())}>
@@ -143,10 +143,10 @@ export function Workspace({ conceptId, networks }: { conceptId: string; networks
                 <label
                   key={n.id}
                   className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm ${
-                    selected.has(n.id) ? "border-violet-500 bg-violet-500/5" : "border-slate-800 bg-slate-900/40"
+                    selected.has(n.id) ? "border-amber-500 bg-amber-500/5" : "border-[#1b5540] bg-[#0a3a28]/40"
                   }`}
                 >
-                  <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} className="accent-violet-500" />
+                  <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggle(n.id)} className="accent-amber-500" />
                   <span className="flex-1 truncate text-slate-200">{n.name}</span>
                 </label>
               ))}
@@ -155,7 +155,7 @@ export function Workspace({ conceptId, networks }: { conceptId: string; networks
             <button
               onClick={() => void doExport()}
               disabled={busy || selected.size === 0}
-              className="mt-4 w-full rounded-lg bg-violet-600 px-4 py-2.5 font-medium text-white hover:bg-violet-500 disabled:opacity-40"
+              className="mt-4 w-full rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40"
             >
               {busy ? "Exporting…" : `Export ${selected.size} network${selected.size === 1 ? "" : "s"}`}
             </button>
@@ -164,7 +164,7 @@ export function Workspace({ conceptId, networks }: { conceptId: string; networks
               <div className="mt-6">
                 <div className="mb-3 flex items-center justify-between">
                   <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">Exports</h2>
-                  <a href={downloadAllUrl(activeId)} download className="text-xs text-violet-400 hover:underline">
+                  <a href={downloadAllUrl(activeId)} download className="text-xs text-amber-400 hover:underline">
                     Download all (.zip)
                   </a>
                 </div>
