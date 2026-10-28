@@ -276,6 +276,37 @@ describe("capture → creative (Phase 2.1)", () => {
     expect(prev.body).toContain("Install");
   });
 
+  it("authors a tap zone + rich end-card (Phase 2.2) into the built playable", async () => {
+    const token = await signup("cap22@factorialstudio.com");
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Beat Matrix" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "hop" } })).json().id;
+
+    const form = new FormData();
+    for (let i = 0; i < 6; i++) form.append("frames", FRAME, { filename: `frame_${String(i).padStart(3, "0")}.jpg`, contentType: "image/jpeg" });
+    form.append("name", "Hop Ball 3D");
+    form.append("tapZone", JSON.stringify({ x: 0.35, y: 0.5, w: 0.3, h: 0.2, label: "Tap the ball!" }));
+    form.append("requiredTaps", "2");
+    form.append("endCardSubtitle", "10M downloads");
+    form.append("endCardCtaBg", "#15803d");
+
+    const cap = await app.inject({
+      method: "POST",
+      url: `/api/concepts/${conceptId}/capture`,
+      headers: { ...bearer(token), ...form.getHeaders() },
+      payload: form.getBuffer(),
+    });
+    expect(cap.statusCode).toBe(201);
+    const creativeId = cap.json().id;
+    await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["applovin"] } });
+    const prev = await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/preview/applovin` });
+    expect(prev.body).toContain("Tap the ball!");
+    expect(prev.body).toContain('"taps":2');
+    expect(prev.body).toContain("10M downloads");
+    expect(prev.body).toContain("#15803d");
+    expect(prev.body).toContain("LOOP=true"); // a tap zone makes the clip loop until completed
+  });
+
   it("rejects a capture with no frames", async () => {
     const token = await signup("cap2@factorialstudio.com");
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "X" } })).json().id;

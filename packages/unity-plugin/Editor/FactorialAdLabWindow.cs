@@ -82,8 +82,20 @@ namespace FactorialAdLab.Editor
                 cfg.width = EditorGUILayout.IntPopup("Capture width", cfg.width,
                     new[] { "360", "540", "720" }, new[] { 360, 540, 720 });
                 cfg.ctaLabel = EditorGUILayout.TextField("CTA label", cfg.ctaLabel);
+                cfg.endCardSubtitle = EditorGUILayout.TextField("End-card subtitle", cfg.endCardSubtitle);
                 cfg.iosUrl = EditorGUILayout.TextField("iOS store URL", cfg.iosUrl);
                 cfg.androidUrl = EditorGUILayout.TextField("Android store URL", cfg.androidUrl);
+
+                GUILayout.Space(6);
+                cfg.tapZoneEnabled = EditorGUILayout.BeginToggleGroup("Tap-zone interaction", cfg.tapZoneEnabled);
+                cfg.tapLabel = EditorGUILayout.TextField("Prompt", cfg.tapLabel);
+                cfg.requiredTaps = EditorGUILayout.IntSlider("Required taps", cfg.requiredTaps, 1, 10);
+                EditorGUILayout.LabelField("Zone (fraction of screen)", EditorStyles.miniLabel);
+                cfg.tzX = EditorGUILayout.Slider("  X", cfg.tzX, 0f, 1f);
+                cfg.tzY = EditorGUILayout.Slider("  Y", cfg.tzY, 0f, 1f);
+                cfg.tzW = EditorGUILayout.Slider("  Width", cfg.tzW, 0.05f, 1f);
+                cfg.tzH = EditorGUILayout.Slider("  Height", cfg.tzH, 0.05f, 1f);
+                EditorGUILayout.EndToggleGroup();
                 if (EditorGUI.EndChangeCheck()) SaveCfg();
 
                 GUILayout.Space(4);

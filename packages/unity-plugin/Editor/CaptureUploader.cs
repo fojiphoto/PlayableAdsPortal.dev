@@ -18,6 +18,15 @@ namespace FactorialAdLab.Editor
         public string ctaLabel = "Play Now";
         public string iosUrl = "";
         public string androidUrl = "";
+
+        // Phase 2.2 — interaction authoring (a tap hotspot over the clip)
+        public bool tapZoneEnabled = false;
+        public float tzX = 0.35f, tzY = 0.45f, tzW = 0.30f, tzH = 0.20f; // normalized, top-left origin
+        public string tapLabel = "Tap!";
+        public int requiredTaps = 1;
+
+        // Phase 2.2 — end-card editor
+        public string endCardSubtitle = "";
     }
 
     /// <summary>
@@ -153,8 +162,20 @@ namespace FactorialAdLab.Editor
                 form.Add(new MultipartFormDataSection("name", cfg.productName));
                 form.Add(new MultipartFormDataSection("fps", cfg.fps.ToString()));
                 form.Add(new MultipartFormDataSection("endCardCta", cfg.ctaLabel));
+                if (!string.IsNullOrEmpty(cfg.endCardSubtitle)) form.Add(new MultipartFormDataSection("endCardSubtitle", cfg.endCardSubtitle));
                 if (!string.IsNullOrEmpty(cfg.iosUrl)) form.Add(new MultipartFormDataSection("iosUrl", cfg.iosUrl));
                 if (!string.IsNullOrEmpty(cfg.androidUrl)) form.Add(new MultipartFormDataSection("androidUrl", cfg.androidUrl));
+                if (cfg.tapZoneEnabled)
+                {
+                    // invariant-culture floats so the server parses them regardless of the editor's locale
+                    var ci = System.Globalization.CultureInfo.InvariantCulture;
+                    string label = "\"" + (cfg.tapLabel ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+                    string zone = "{\"x\":" + cfg.tzX.ToString(ci) + ",\"y\":" + cfg.tzY.ToString(ci) +
+                                  ",\"w\":" + cfg.tzW.ToString(ci) + ",\"h\":" + cfg.tzH.ToString(ci) +
+                                  ",\"label\":" + label + "}";
+                    form.Add(new MultipartFormDataSection("tapZone", zone));
+                    form.Add(new MultipartFormDataSection("requiredTaps", Mathf.Max(1, cfg.requiredTaps).ToString()));
+                }
 
                 UnityWebRequest req = UnityWebRequest.Post($"{apiBase}/api/concepts/{conceptId}/capture", form);
                 req.SetRequestHeader("Authorization", "Bearer " + authToken);

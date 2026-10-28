@@ -70,7 +70,10 @@ already have.** No new server compiler needed for the MVP — the packager does 
 - **2.0 ✅:** plugin skeleton — editor window + sign-in + scene pick.
 - **2.1 ✅:** Play-mode frame capture (Game view → JPEG sequence) → `buildCapturePlayable` canvas
   flipbook (tap + end-card + CTA) → upload → export. Validated end-to-end.
-- **2.2:** interaction authoring (tap zones), end-card editor, size tuning.
+- **2.2 ✅:** interaction authoring (a tap-zone hotspot with a pulsing indicator + required taps,
+  looping the clip until completed), end-card editor (logo, title, subtitle, themed CTA), and size
+  tuning (`frameBudgetBytes` drops frames evenly to hit tighter caps). Plumbed through the capture
+  endpoint and the Unity plugin window.
 - **2.3+ (moat):** begin the real C#→web compiler track (approach C) for simple games.
 
 ## Integration note

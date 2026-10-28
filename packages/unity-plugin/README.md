@@ -19,6 +19,8 @@ Package Manager → **Add package from disk…** → select `packages/unity-plug
 - **Tools path:** `Factorial AdLab ▸ Playable Builder`.
 - Sign in with your `app.factorialstudio.dev` account.
 - Set the game name, clip length (frames × fps), capture width and CTA/store URLs.
+- Optionally author a **tap-zone interaction** (a hotspot the player must tap, with a pulsing
+  indicator and a required-tap count) and an **end-card subtitle**.
 - Press **Play**, start gameplay, then **Capture & upload playable**. The plugin grabs the clip
   from the Game view, uploads the frames, and the server builds the playable under a concept in
   your dashboard — open it there and **Export** to every network.

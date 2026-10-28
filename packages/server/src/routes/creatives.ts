@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import JSZip from "jszip";
 import { loadFromZip, packAll, getNetwork, PRIORITY_NETWORK_IDS, formatBytes, buildCapturePlayable } from "@forge/packager";
-import type { PackOptions, PackResult } from "@forge/packager";
+import type { PackOptions, PackResult, CaptureBuildOptions, TapZone } from "@forge/packager";
 import { authed } from "../auth.js";
 import {
   addExportUsage,
@@ -168,11 +168,44 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       const fps = Math.min(60, Math.max(1, Number(fields.fps) || 24));
       const name = fields.name || "Captured gameplay";
 
+      // Phase 2.2: interaction authoring, end-card editor, size tuning (all optional)
+      let tapZone: TapZone | undefined;
+      if (fields.tapZone) {
+        try {
+          const z = JSON.parse(fields.tapZone);
+          if (typeof z?.x === "number" && typeof z?.y === "number" && typeof z?.w === "number" && typeof z?.h === "number") {
+            tapZone = { x: z.x, y: z.y, w: z.w, h: z.h, label: z.label, hand: z.hand };
+          }
+        } catch {
+          /* ignore a malformed zone */
+        }
+      }
+      const endCard = {
+        title: fields.endCardTitle || undefined,
+        subtitle: fields.endCardSubtitle || undefined,
+        cta: fields.endCardCta || undefined,
+        bg: fields.endCardBg || undefined,
+        titleColor: fields.endCardTitleColor || undefined,
+        ctaBg: fields.endCardCtaBg || undefined,
+        ctaColor: fields.endCardCtaColor || undefined,
+        logoDataUri: fields.endCardLogo || undefined,
+      };
+      const hasEndCard = Object.values(endCard).some((v) => v !== undefined);
+      const buildOpts: CaptureBuildOptions = {
+        mime,
+        fps,
+        tapZone,
+        requiredTaps: fields.requiredTaps ? Math.max(1, Number(fields.requiredTaps)) : undefined,
+        loop: fields.loop ? fields.loop === "true" : undefined,
+        endCard: hasEndCard ? endCard : undefined,
+        frameBudgetBytes: fields.frameBudgetBytes ? Math.max(0, Number(fields.frameBudgetBytes)) : undefined,
+      };
+
       let sourceZip: Uint8Array;
       try {
         const built = buildCapturePlayable(
           captured.map((c) => new Uint8Array(c.buf)),
-          { mime, fps, endCardTitle: fields.endCardTitle || undefined, endCardCta: fields.endCardCta || undefined },
+          buildOpts,
         );
         const zip = new JSZip();
         zip.file("index.html", Buffer.from(built.files["index.html"]));
