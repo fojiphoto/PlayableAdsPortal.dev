@@ -233,6 +233,65 @@ describe("billing / plan enforcement", () => {
   });
 });
 
+describe("capture → creative (Phase 2.1)", () => {
+  // 1x1 JPEG — a real image the canvas player can decode
+  const FRAME = Buffer.from(
+    "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////" +
+      "////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAA" +
+      "AAAAAAAAAAP/aAAgBAQABPxA=",
+    "base64",
+  );
+
+  it("builds a flipbook playable from an uploaded frame sequence, then exports it", async () => {
+    const token = await signup("cap@factorialstudio.com");
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Beat Matrix" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "hop" } })).json().id;
+
+    const form = new FormData();
+    for (let i = 0; i < 10; i++) form.append("frames", FRAME, { filename: `frame_${String(i).padStart(3, "0")}.jpg`, contentType: "image/jpeg" });
+    form.append("name", "Hop Ball 3D");
+    form.append("fps", "24");
+    form.append("endCardCta", "Install");
+
+    const cap = await app.inject({
+      method: "POST",
+      url: `/api/concepts/${conceptId}/capture`,
+      headers: { ...bearer(token), ...form.getHeaders() },
+      payload: form.getBuffer(),
+    });
+    expect(cap.statusCode).toBe(201);
+    expect(cap.json().source).toBe("capture");
+    expect(cap.json().frameCount).toBe(10);
+    const creativeId = cap.json().id;
+
+    // the built capture playable flows through the normal export pipeline
+    const exp = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["applovin"] } });
+    expect(exp.statusCode).toBe(200);
+    expect(exp.json().exported[0].ok).toBe(true);
+
+    const prev = await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/preview/applovin` });
+    expect(prev.body).toContain("<canvas");
+    expect(prev.body).toContain("window.PF");
+    expect(prev.body).toContain("Install");
+  });
+
+  it("rejects a capture with no frames", async () => {
+    const token = await signup("cap2@factorialstudio.com");
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "X" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c" } })).json().id;
+    const form = new FormData();
+    form.append("name", "empty");
+    const cap = await app.inject({
+      method: "POST",
+      url: `/api/concepts/${conceptId}/capture`,
+      headers: { ...bearer(token), ...form.getHeaders() },
+      payload: form.getBuffer(),
+    });
+    expect(cap.statusCode).toBe(400);
+  });
+});
+
 describe("team / shared access", () => {
   it("invited member accesses the owner's apps; removal revokes it", async () => {
     const owner = await signup("teamowner@factorialstudio.com");

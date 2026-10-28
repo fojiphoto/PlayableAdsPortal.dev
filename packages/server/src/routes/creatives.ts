@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import JSZip from "jszip";
-import { loadFromZip, packAll, getNetwork, PRIORITY_NETWORK_IDS, formatBytes } from "@forge/packager";
+import { loadFromZip, packAll, getNetwork, PRIORITY_NETWORK_IDS, formatBytes, buildCapturePlayable } from "@forge/packager";
 import type { PackOptions, PackResult } from "@forge/packager";
 import { authed } from "../auth.js";
 import {
@@ -125,6 +125,82 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         name: row.name,
         entry: row.entry,
         fileCount,
+        conceptId: concept.id,
+        createdAt: row.created_at,
+      });
+    },
+  );
+
+  // capture → creative: the Unity plugin (Phase 2.1) POSTs an ordered gameplay frame
+  // sequence; we build a lightweight HTML5 flipbook playable and store it as a creative.
+  app.post<{ Params: { conceptId: string } }>(
+    "/api/concepts/:conceptId/capture",
+    authed,
+    async (req, reply) => {
+      const concept = getConceptOwned(req.params.conceptId, req.user!.id);
+      if (!concept) return reply.code(404).send({ error: "concept not found" });
+
+      const MAX_FRAMES = 240;
+      const captured: { name: string; buf: Buffer; mime: string }[] = [];
+      const fields: Record<string, string> = {};
+      for await (const part of req.parts()) {
+        if (part.type === "file") {
+          if (captured.length >= MAX_FRAMES) {
+            await part.toBuffer(); // drain
+            continue;
+          }
+          captured.push({
+            name: part.filename ?? `frame_${captured.length}`,
+            buf: await part.toBuffer(),
+            mime: part.mimetype || "image/jpeg",
+          });
+        } else {
+          fields[part.fieldname] = String(part.value);
+        }
+      }
+      if (captured.length === 0) {
+        return reply.code(400).send({ error: "no frames uploaded (multipart file fields)" });
+      }
+
+      // play back in filename order so frame_000, frame_001 … stay in sequence
+      captured.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      const mime = captured[0].mime.startsWith("image/") ? captured[0].mime : "image/jpeg";
+      const fps = Math.min(60, Math.max(1, Number(fields.fps) || 24));
+      const name = fields.name || "Captured gameplay";
+
+      let sourceZip: Uint8Array;
+      try {
+        const built = buildCapturePlayable(
+          captured.map((c) => new Uint8Array(c.buf)),
+          { mime, fps, endCardTitle: fields.endCardTitle || undefined, endCardCta: fields.endCardCta || undefined },
+        );
+        const zip = new JSZip();
+        zip.file("index.html", Buffer.from(built.files["index.html"]));
+        sourceZip = await zip.generateAsync({ type: "uint8array" });
+      } catch (e) {
+        return reply.code(400).send({ error: `could not build playable: ${(e as Error).message}` });
+      }
+
+      const options: PackOptions = {
+        name,
+        ctaUrl: fields.ctaUrl || undefined,
+        iosUrl: fields.iosUrl || undefined,
+        androidUrl: fields.androidUrl || undefined,
+      };
+      const row = createCreative({
+        conceptId: concept.id,
+        name,
+        entry: "index.html",
+        sourceZip,
+        optionsJson: JSON.stringify(options),
+      });
+      return reply.code(201).send({
+        id: row.id,
+        name: row.name,
+        entry: row.entry,
+        source: "capture",
+        frameCount: captured.length,
+        fps,
         conceptId: concept.id,
         createdAt: row.created_at,
       });

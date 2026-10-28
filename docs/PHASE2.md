@@ -67,13 +67,18 @@ already have.** No new server compiler needed for the MVP — the packager does 
 
 ## Roadmap
 
-- **2.0 (now):** plugin skeleton — editor window + sign-in + scene pick + multipart upload stub.
-- **2.1:** Recorder capture → image sequence; builder → canvas playable; end-to-end upload → export.
+- **2.0 ✅:** plugin skeleton — editor window + sign-in + scene pick.
+- **2.1 ✅:** Play-mode frame capture (Game view → JPEG sequence) → `buildCapturePlayable` canvas
+  flipbook (tap + end-card + CTA) → upload → export. Validated end-to-end.
 - **2.2:** interaction authoring (tap zones), end-card editor, size tuning.
 - **2.3+ (moat):** begin the real C#→web compiler track (approach C) for simple games.
 
 ## Integration note
 
-The plugin uploads to the **same** `/api/concepts/:id/creatives` endpoint the web dashboard uses, so
-a Unity-made playable lands in the same App ▸ Concept ▸ Creative hierarchy and exports to every
-network through the packager — no server changes required for the MVP.
+The plugin uploads frames to **`/api/concepts/:id/capture`**, a sibling of the web dashboard's
+`/api/concepts/:id/creatives`. The server builds the flipbook playable via `buildCapturePlayable`
+(in `@forge/packager`) and stores it as an ordinary creative, so a Unity-made playable lands in the
+same App ▸ Concept ▸ Creative hierarchy and exports to every network through the packager.
+
+The capture builder lives in the packager (not C#): the plugin just grabs frames + uploads, so the
+"compiler" is one tested TypeScript function shared by any future capture source.

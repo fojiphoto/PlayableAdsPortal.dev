@@ -7,3 +7,5 @@ export { buildRuntimeShim } from "./runtime-shim.js";
 export { validate, formatBytes } from "./validate.js";
 export { pack, packAll } from "./pack.js";
 export { loadFromDir, loadFromZip } from "./source.js";
+export { buildCapturePlayable } from "./capture.js";
+export type { CaptureBuildOptions } from "./capture.js";

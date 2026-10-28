@@ -16,11 +16,14 @@ namespace FactorialAdLab.Editor
         const string TokenKey = "FactorialAdLab.token";
         const string EmailKey = "FactorialAdLab.email";
 
+        const string CfgKey = "FactorialAdLab.capture";
+
         string api = "https://app.factorialstudio.dev";
         string email = "";
         string password = "";
         string token = "";
         string status = "";
+        CaptureSettings cfg = new CaptureSettings();
 
         [MenuItem("Factorial AdLab/Playable Builder")]
         public static void Open() => GetWindow<FactorialAdLabWindow>("Factorial AdLab");
@@ -30,7 +33,16 @@ namespace FactorialAdLab.Editor
             api = EditorPrefs.GetString(ApiKey, api);
             token = EditorPrefs.GetString(TokenKey, "");
             email = EditorPrefs.GetString(EmailKey, "");
+            string json = EditorPrefs.GetString(CfgKey, "");
+            if (!string.IsNullOrEmpty(json)) { try { cfg = JsonUtility.FromJson<CaptureSettings>(json) ?? cfg; } catch { } }
+            if (string.IsNullOrEmpty(cfg.productName) || cfg.productName == "My Game")
+                cfg.productName = Application.productName;
         }
+
+        void SaveCfg() => EditorPrefs.SetString(CfgKey, JsonUtility.ToJson(cfg));
+
+        // keep the Capture button's enabled-state in sync with play mode + capture progress
+        void OnInspectorUpdate() => Repaint();
 
         void OnGUI()
         {
@@ -61,14 +73,35 @@ namespace FactorialAdLab.Editor
                 GUILayout.Space(10);
                 GUILayout.Label("Active scene: " + SceneManager.GetActiveScene().name, EditorStyles.miniLabel);
 
-                GUILayout.Space(6);
-                using (new EditorGUI.DisabledScope(true))
+                GUILayout.Space(8);
+                GUILayout.Label("Capture gameplay", EditorStyles.boldLabel);
+                EditorGUI.BeginChangeCheck();
+                cfg.productName = EditorGUILayout.TextField("Game name", cfg.productName);
+                cfg.frames = EditorGUILayout.IntSlider("Frames", cfg.frames, 4, 240);
+                cfg.fps = EditorGUILayout.IntSlider("FPS", cfg.fps, 4, 30);
+                cfg.width = EditorGUILayout.IntPopup("Capture width", cfg.width,
+                    new[] { "360", "540", "720" }, new[] { 360, 540, 720 });
+                cfg.ctaLabel = EditorGUILayout.TextField("CTA label", cfg.ctaLabel);
+                cfg.iosUrl = EditorGUILayout.TextField("iOS store URL", cfg.iosUrl);
+                cfg.androidUrl = EditorGUILayout.TextField("Android store URL", cfg.androidUrl);
+                if (EditorGUI.EndChangeCheck()) SaveCfg();
+
+                GUILayout.Space(4);
+                float secs = cfg.frames / (float)Mathf.Max(1, cfg.fps);
+                GUILayout.Label($"≈ {secs:0.0}s clip ({cfg.frames} frames @ {cfg.fps} fps)", EditorStyles.miniLabel);
+
+                GUILayout.Space(4);
+                bool playing = Application.isPlaying;
+                using (new EditorGUI.DisabledScope(!playing || CaptureUploader.Running))
                 {
-                    GUILayout.Button("Capture & upload playable");
+                    if (GUILayout.Button(CaptureUploader.Running ? "Capturing…" : "Capture & upload playable", GUILayout.Height(30)))
+                    {
+                        SaveCfg();
+                        CaptureUploader.Run(api, token, cfg, s => { status = s; Repaint(); }, Repaint);
+                    }
                 }
-                EditorGUILayout.HelpBox(
-                    "Capture pipeline (Recorder → canvas playable → upload) lands in 2.1. See docs/PHASE2.md.",
-                    MessageType.None);
+                if (!playing)
+                    EditorGUILayout.HelpBox("Press Play and start gameplay, then click Capture.", MessageType.Info);
             }
 
             if (!string.IsNullOrEmpty(status))
