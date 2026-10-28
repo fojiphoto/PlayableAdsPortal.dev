@@ -115,3 +115,10 @@ export interface PreloaderSettings {
   bg: string | null;
   logoDataUri: string | null;
 }
+
+export interface DomainStatus {
+  domain: string | null;
+  token: string | null;
+  verified: boolean;
+  verifyFile: string;
+}

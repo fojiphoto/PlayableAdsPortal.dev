@@ -13,6 +13,7 @@ import type {
   TeamMember,
   Analytics,
   PreloaderSettings,
+  DomainStatus,
 } from "./types";
 
 // Same-origin by default ("/api"). For a split deploy (SPA and API on different hosts),
@@ -116,6 +117,11 @@ export async function savePreloader(fields: {
   if (!res.ok) return toError(res);
   return res.json();
 }
+
+// ── domain verification ──
+export const getDomain = () => getJson<DomainStatus>("/domain");
+export const setDomain = (domain: string) => postJson<DomainStatus>("/domain", { domain });
+export const checkDomain = () => postJson<{ verified: boolean; checked: string[] }>("/domain/check", {});
 
 // ── billing / plans ──
 export const listPlans = () => getJson<Plan[]>("/billing/plans");

@@ -15,6 +15,7 @@ import { accountRoutes } from "./routes/account.js";
 import { teamRoutes } from "./routes/team.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { preloaderRoutes } from "./routes/preloader.js";
+import { domainRoutes } from "./routes/domain.js";
 
 /** Build the Fastify app (exported separately so tests can drive it via inject()). */
 export async function buildApp(): Promise<FastifyInstance> {
@@ -36,6 +37,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(teamRoutes);
   await app.register(analyticsRoutes);
   await app.register(preloaderRoutes);
+  await app.register(domainRoutes);
 
   // Serve the built web SPA from the same origin (no CORS/proxy needed in prod).
   if (existsSync(config.webDist)) {

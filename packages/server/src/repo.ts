@@ -20,6 +20,9 @@ export interface UserRow {
   plan: string;
   totp_secret: string | null;
   totp_enabled: number;
+  domain: string | null;
+  domain_token: string | null;
+  domain_verified: number;
   created_at: string;
 }
 export interface AppRow {
@@ -62,7 +65,7 @@ export interface ExportRow {
 export function createUser(email: string, passwordHash: string): UserRow {
   const row: UserRow = {
     id: randomUUID(), email, password_hash: passwordHash, plan: "free",
-    totp_secret: null, totp_enabled: 0, created_at: now(),
+    totp_secret: null, totp_enabled: 0, domain: null, domain_token: null, domain_verified: 0, created_at: now(),
   };
   getDb()
     .prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
@@ -86,6 +89,14 @@ export function updatePassword(id: string, passwordHash: string): void {
 
 export function setTotp(id: string, secret: string | null, enabled: number): void {
   getDb().prepare("UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?").run(secret, enabled, id);
+}
+
+export function setUserDomain(id: string, domain: string, token: string): void {
+  getDb().prepare("UPDATE users SET domain = ?, domain_token = ?, domain_verified = 0 WHERE id = ?").run(domain, token, id);
+}
+
+export function setDomainVerified(id: string, verified: number): void {
+  getDb().prepare("UPDATE users SET domain_verified = ? WHERE id = ?").run(verified, id);
 }
 
 export function addExportUsage(userId: string, network: string): void {

@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS users (
   plan          TEXT NOT NULL DEFAULT 'free',
   totp_secret   TEXT,
   totp_enabled  INTEGER NOT NULL DEFAULT 0,
+  domain        TEXT,
+  domain_token  TEXT,
+  domain_verified INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL
 );
 
@@ -106,6 +109,9 @@ export function initDb(path: string = config.dbPath): DB {
     "ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'",
     "ALTER TABLE users ADD COLUMN totp_secret TEXT",
     "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN domain TEXT",
+    "ALTER TABLE users ADD COLUMN domain_token TEXT",
+    "ALTER TABLE users ADD COLUMN domain_verified INTEGER NOT NULL DEFAULT 0",
   ]) {
     try {
       db.exec(stmt);
