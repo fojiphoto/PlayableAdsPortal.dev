@@ -95,3 +95,10 @@ export interface PlanStatus {
 export interface MeResponse extends PlanStatus {
   user: AuthUser;
 }
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  role: string;
+  createdAt: string;
+}

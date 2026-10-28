@@ -30,6 +30,15 @@ CREATE TABLE IF NOT EXISTS export_usage (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user_time ON export_usage(user_id, created_at);
 
+CREATE TABLE IF NOT EXISTS memberships (
+  id             TEXT PRIMARY KEY,
+  owner_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  member_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role           TEXT NOT NULL DEFAULT 'member',
+  created_at     TEXT NOT NULL,
+  UNIQUE(owner_user_id, member_user_id)
+);
+
 CREATE TABLE IF NOT EXISTS apps (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

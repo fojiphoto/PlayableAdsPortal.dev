@@ -4,6 +4,14 @@ import { getDb } from "./db.js";
 
 const now = () => new Date().toISOString();
 
+/** Owner ids whose apps `userId` can access: themselves + anyone who added them as a member. */
+function accessibleOwnerIds(userId: string): string[] {
+  const rows = getDb()
+    .prepare("SELECT owner_user_id AS o FROM memberships WHERE member_user_id = ?")
+    .all(userId) as unknown as { o: string }[];
+  return [userId, ...rows.map((r) => r.o)];
+}
+
 // ── row types ────────────────────────────────────────────────────────────────
 export interface UserRow {
   id: string;
@@ -102,10 +110,16 @@ export function createApp(userId: string, name: string, platform?: string): AppR
   return row;
 }
 export function listApps(userId: string): AppRow[] {
-  return getDb().prepare("SELECT * FROM apps WHERE user_id = ? ORDER BY created_at DESC").all(userId) as unknown as AppRow[];
+  const ids = accessibleOwnerIds(userId);
+  const ph = ids.map(() => "?").join(",");
+  return getDb()
+    .prepare(`SELECT * FROM apps WHERE user_id IN (${ph}) ORDER BY created_at DESC`)
+    .all(...ids) as unknown as AppRow[];
 }
 export function getAppOwned(id: string, userId: string): AppRow | undefined {
-  return getDb().prepare("SELECT * FROM apps WHERE id = ? AND user_id = ?").get(id, userId) as AppRow | undefined;
+  const ids = accessibleOwnerIds(userId);
+  const ph = ids.map(() => "?").join(",");
+  return getDb().prepare(`SELECT * FROM apps WHERE id = ? AND user_id IN (${ph})`).get(id, ...ids) as AppRow | undefined;
 }
 export function deleteApp(id: string, userId: string): boolean {
   return getDb().prepare("DELETE FROM apps WHERE id = ? AND user_id = ?").run(id, userId).changes > 0;
@@ -123,11 +137,11 @@ export function listConcepts(appId: string): ConceptRow[] {
   return getDb().prepare("SELECT * FROM concepts WHERE app_id = ? ORDER BY created_at DESC").all(appId) as unknown as ConceptRow[];
 }
 export function getConceptOwned(id: string, userId: string): ConceptRow | undefined {
+  const ids = accessibleOwnerIds(userId);
+  const ph = ids.map(() => "?").join(",");
   return getDb()
-    .prepare(
-      `SELECT c.* FROM concepts c JOIN apps a ON a.id = c.app_id WHERE c.id = ? AND a.user_id = ?`,
-    )
-    .get(id, userId) as ConceptRow | undefined;
+    .prepare(`SELECT c.* FROM concepts c JOIN apps a ON a.id = c.app_id WHERE c.id = ? AND a.user_id IN (${ph})`)
+    .get(id, ...ids) as ConceptRow | undefined;
 }
 export function deleteConcept(id: string, userId: string): boolean {
   return (
@@ -174,9 +188,9 @@ export function getCreativeOwned(id: string, userId: string): CreativeRow | unde
       `SELECT cr.* FROM creatives cr
        JOIN concepts c ON c.id = cr.concept_id
        JOIN apps a ON a.id = c.app_id
-       WHERE cr.id = ? AND a.user_id = ?`,
+       WHERE cr.id = ? AND a.user_id IN (${accessibleOwnerIds(userId).map(() => "?").join(",")})`,
     )
-    .get(id, userId) as CreativeRow | undefined;
+    .get(id, ...accessibleOwnerIds(userId)) as CreativeRow | undefined;
 }
 /** Fetch a creative without an ownership check (for UUID-guarded download/preview). */
 export function getCreativeById(id: string): CreativeRow | undefined {
@@ -223,4 +237,35 @@ export function getExport(creativeId: string, network: string): ExportRow | unde
   return getDb()
     .prepare("SELECT * FROM exports WHERE creative_id = ? AND network = ?")
     .get(creativeId, network) as ExportRow | undefined;
+}
+
+// ── memberships / team ──
+export interface MemberView {
+  id: string;
+  email: string;
+  role: string;
+  createdAt: string;
+}
+
+export function addMember(ownerId: string, memberId: string, role = "member"): void {
+  getDb()
+    .prepare(
+      `INSERT INTO memberships (id, owner_user_id, member_user_id, role, created_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(owner_user_id, member_user_id) DO UPDATE SET role = excluded.role`,
+    )
+    .run(randomUUID(), ownerId, memberId, role, now());
+}
+
+export function listMembers(ownerId: string): MemberView[] {
+  return getDb()
+    .prepare(
+      `SELECT m.member_user_id AS id, u.email AS email, m.role AS role, m.created_at AS createdAt
+       FROM memberships m JOIN users u ON u.id = m.member_user_id
+       WHERE m.owner_user_id = ? ORDER BY m.created_at`,
+    )
+    .all(ownerId) as unknown as MemberView[];
+}
+
+export function removeMember(ownerId: string, memberId: string): boolean {
+  return getDb().prepare("DELETE FROM memberships WHERE owner_user_id = ? AND member_user_id = ?").run(ownerId, memberId).changes > 0;
 }

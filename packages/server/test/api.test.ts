@@ -232,3 +232,31 @@ describe("billing / plan enforcement", () => {
     expect(me.limit).toBe(30);
   });
 });
+
+describe("team / shared access", () => {
+  it("invited member accesses the owner's apps; removal revokes it", async () => {
+    const owner = await signup("teamowner@factorialstudio.com");
+    const member = await signup("teammember@factorialstudio.com");
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(owner), payload: { name: "Shared" } })).json().id;
+
+    // before invite: member can't see it
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(member) })).statusCode).toBe(404);
+
+    const inv = await app.inject({ method: "POST", url: "/api/team/invite", headers: bearer(owner), payload: { email: "teammember@factorialstudio.com" } });
+    expect(inv.statusCode).toBe(201);
+    expect(inv.json()).toHaveLength(1);
+
+    // now member can access it and it shows in their app list
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(member) })).statusCode).toBe(200);
+    const memberApps = (await app.inject({ method: "GET", url: "/api/apps", headers: bearer(member) })).json();
+    expect(memberApps.map((a: { id: string }) => a.id)).toContain(appId);
+
+    // inviting a non-existent user → 404
+    expect((await app.inject({ method: "POST", url: "/api/team/invite", headers: bearer(owner), payload: { email: "nobody@x.com" } })).statusCode).toBe(404);
+
+    // remove revokes access
+    const memberId = inv.json()[0].id as string;
+    await app.inject({ method: "DELETE", url: `/api/team/${memberId}`, headers: bearer(owner) });
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(member) })).statusCode).toBe(404);
+  });
+});

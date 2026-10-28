@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
-import { changePassword, twofaBegin, twofaConfirm, twofaDisable, twofaStatus } from "../api";
-import type { AuthUser, PlanStatus } from "../types";
+import { changePassword, inviteTeam, listTeam, removeTeam, twofaBegin, twofaConfirm, twofaDisable, twofaStatus } from "../api";
+import type { AuthUser, PlanStatus, TeamMember } from "../types";
 
 const input =
   "w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500";
@@ -166,7 +166,70 @@ export function Settings({ user, status }: { user: AuthUser; status: PlanStatus 
         )}
       </section>
 
-      <p className="mt-6 text-xs text-slate-600">Team members &amp; workspace roles are coming next.</p>
+      <TeamSection />
     </div>
+  );
+}
+
+function TeamSection() {
+  const [members, setMembers] = useState<TeamMember[]>([]);
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    listTeam().then(setMembers).catch(() => {});
+  }, []);
+
+  async function invite(e: FormEvent) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      setMembers(await inviteTeam(email.trim()));
+      setEmail("");
+    } catch (er) {
+      setErr((er as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function remove(id: string) {
+    setErr(null);
+    try {
+      setMembers(await removeTeam(id));
+    } catch (er) {
+      setErr((er as Error).message);
+    }
+  }
+
+  return (
+    <section className={`${panel} mt-5`}>
+      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-amber-400">Team members</h2>
+      <p className="mb-3 text-sm text-slate-400">
+        People you add can see and work on your apps. They need a Factorial AdLab account first.
+      </p>
+      <div className="mb-3 grid gap-1">
+        {members.length === 0 && <div className="text-sm text-slate-600">No members yet.</div>}
+        {members.map((m) => (
+          <div key={m.id} className="flex items-center justify-between rounded-lg border border-[#1b5540] bg-[#06281c] px-3 py-2 text-sm">
+            <span className="text-slate-100">
+              {m.email} <span className="text-xs text-slate-500">· {m.role}</span>
+            </span>
+            <button onClick={() => remove(m.id)} className="text-xs text-red-400 hover:underline">
+              Remove
+            </button>
+          </div>
+        ))}
+      </div>
+      {err && <div className="mb-2 text-sm text-red-400">{err}</div>}
+      <form onSubmit={invite} className="flex gap-2">
+        <input className={input} type="email" placeholder="teammate@studio.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <button type="submit" disabled={busy} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
+          {busy ? "…" : "Invite"}
+        </button>
+      </form>
+    </section>
   );
 }

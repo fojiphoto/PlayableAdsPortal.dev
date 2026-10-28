@@ -10,6 +10,7 @@ import type {
   PackResultView,
   Plan,
   PlanStatus,
+  TeamMember,
 } from "./types";
 
 // Same-origin by default ("/api"). For a split deploy (SPA and API on different hosts),
@@ -82,6 +83,16 @@ export const twofaStatus = () => getJson<{ enabled: boolean }>("/2fa/status");
 export const twofaBegin = () => postJson<{ secret: string; otpauth: string }>("/2fa/begin", {});
 export const twofaConfirm = (code: string) => postJson<{ enabled: boolean }>("/2fa/confirm", { code });
 export const twofaDisable = (code: string) => postJson<{ enabled: boolean }>("/2fa/disable", { code });
+
+// ── team ──
+async function delJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${base}${path}`, { method: "DELETE", headers: authHeaders() });
+  if (!res.ok) return toError(res);
+  return res.json();
+}
+export const listTeam = () => getJson<TeamMember[]>("/team");
+export const inviteTeam = (email: string) => postJson<TeamMember[]>("/team/invite", { email });
+export const removeTeam = (memberId: string) => delJson<TeamMember[]>(`/team/${memberId}`);
 
 // ── billing / plans ──
 export const listPlans = () => getJson<Plan[]>("/billing/plans");
