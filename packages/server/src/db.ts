@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS memberships (
   UNIQUE(owner_user_id, member_user_id)
 );
 
+CREATE TABLE IF NOT EXISTS preloaders (
+  user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  logo       BLOB,
+  logo_mime  TEXT,
+  bg         TEXT,
+  enabled    INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS apps (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

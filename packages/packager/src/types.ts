@@ -49,6 +49,14 @@ export interface PlayableSource {
   files: Record<string, Uint8Array>;
 }
 
+/** A custom loading screen shown over the playable while it loads. */
+export interface PreloaderConfig {
+  /** logo/splash image as a data: URI (inlined) */
+  logoDataUri?: string;
+  /** background color, e.g. "#0b1220" */
+  bg?: string;
+}
+
 /** Click-through configuration for the CTA / store-open. */
 export interface PackOptions {
   /** output filename stem (before extension); defaults to "playable" */
@@ -59,6 +67,8 @@ export interface PackOptions {
   iosUrl?: string;
   /** Google Play URL (used when the device looks like Android) */
   androidUrl?: string;
+  /** optional custom preloader / splash screen */
+  preloader?: PreloaderConfig;
 }
 
 export type IssueLevel = "error" | "warning";

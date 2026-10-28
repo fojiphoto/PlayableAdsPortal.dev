@@ -94,3 +94,22 @@ describe("validation", () => {
     expect(r.validation.some((v) => v.code === "size-exceeded")).toBe(true);
   });
 });
+
+describe("preloader", () => {
+  it("injects a custom preloader overlay when configured", async () => {
+    const src = await loadFromDir(fixture);
+    const r = await pack(src, getNetwork("applovin"), {
+      preloader: { bg: "#123456", logoDataUri: "data:image/png;base64,AAAA" },
+    });
+    const html = new TextDecoder().decode(r.bytes);
+    expect(html).toContain("__pf_pl");
+    expect(html).toContain("#123456");
+    expect(html).toContain("data:image/png;base64,AAAA");
+  });
+
+  it("omits the preloader when not configured", async () => {
+    const src = await loadFromDir(fixture);
+    const r = await pack(src, getNetwork("applovin"), {});
+    expect(new TextDecoder().decode(r.bytes)).not.toContain("__pf_pl");
+  });
+});

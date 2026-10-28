@@ -12,6 +12,7 @@ import type {
   PlanStatus,
   TeamMember,
   Analytics,
+  PreloaderSettings,
 } from "./types";
 
 // Same-origin by default ("/api"). For a split deploy (SPA and API on different hosts),
@@ -97,6 +98,24 @@ export const removeTeam = (memberId: string) => delJson<TeamMember[]>(`/team/${m
 
 // ── analytics ──
 export const getAnalytics = () => getJson<Analytics>("/analytics");
+
+// ── preloader ──
+export const getPreloader = () => getJson<PreloaderSettings>("/preloader");
+export async function savePreloader(fields: {
+  enabled: boolean;
+  bg?: string;
+  logo?: File | null;
+  removeLogo?: boolean;
+}): Promise<PreloaderSettings> {
+  const fd = new FormData();
+  fd.append("enabled", fields.enabled ? "1" : "0");
+  if (fields.bg) fd.append("bg", fields.bg);
+  if (fields.logo) fd.append("logo", fields.logo);
+  if (fields.removeLogo) fd.append("removeLogo", "1");
+  const res = await fetch(`${base}/preloader`, { method: "POST", headers: authHeaders(), body: fd });
+  if (!res.ok) return toError(res);
+  return res.json();
+}
 
 // ── billing / plans ──
 export const listPlans = () => getJson<Plan[]>("/billing/plans");

@@ -15,6 +15,7 @@ import {
   type ExportRow,
 } from "../repo.js";
 import { checkExport } from "../plan-status.js";
+import { preloaderForExport } from "../preloader-config.js";
 
 function networkName(id: string): string {
   try {
@@ -172,6 +173,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         ctaUrl: body.ctaUrl ?? stored.ctaUrl,
         iosUrl: body.iosUrl ?? stored.iosUrl,
         androidUrl: body.androidUrl ?? stored.androidUrl,
+        preloader: preloaderForExport(req.user!.id),
       };
       const results = await packAll(source, opts, ids);
       for (const r of results) upsertExport(cr.id, r);

@@ -7,6 +7,7 @@ import { Landing } from "./Landing";
 import { Plans } from "./components/Plans";
 import { Settings } from "./components/Settings";
 import { Analytics } from "./components/Analytics";
+import { Preloader } from "./components/Preloader";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -21,7 +22,7 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<"landing" | "auth">("landing");
   const [status, setStatus] = useState<PlanStatus | null>(null);
-  const [page, setPage] = useState<"app" | "plans" | "settings" | "analytics">("app");
+  const [page, setPage] = useState<"app" | "plans" | "settings" | "analytics" | "preloader">("app");
 
   useEffect(() => {
     getNetworks().then(setNetworks).catch(() => {});
@@ -124,6 +125,12 @@ export default function App() {
               Analytics
             </button>
             <button
+              onClick={() => setPage("preloader")}
+              className={`rounded-lg border px-3 py-1.5 ${page === "preloader" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
+            >
+              Preloader
+            </button>
+            <button
               onClick={() => setPage("settings")}
               className={`rounded-lg border px-3 py-1.5 ${page === "settings" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
             >
@@ -148,6 +155,10 @@ export default function App() {
       ) : page === "analytics" ? (
         <main className="min-w-0 flex-1 p-6">
           <Analytics />
+        </main>
+      ) : page === "preloader" ? (
+        <main className="min-w-0 flex-1 p-6">
+          <Preloader />
         </main>
       ) : (
       <div className="flex">

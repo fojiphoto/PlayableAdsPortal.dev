@@ -109,3 +109,9 @@ export interface Analytics {
   daily: { date: string; count: number }[];
   byNetwork: { network: string; networkName: string; count: number }[];
 }
+
+export interface PreloaderSettings {
+  enabled: boolean;
+  bg: string | null;
+  logoDataUri: string | null;
+}

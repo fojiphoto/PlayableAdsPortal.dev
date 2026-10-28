@@ -288,3 +288,32 @@ export function listMembers(ownerId: string): MemberView[] {
 export function removeMember(ownerId: string, memberId: string): boolean {
   return getDb().prepare("DELETE FROM memberships WHERE owner_user_id = ? AND member_user_id = ?").run(ownerId, memberId).changes > 0;
 }
+
+// ── preloader ──
+export interface PreloaderRow {
+  user_id: string;
+  logo: Uint8Array | null;
+  logo_mime: string | null;
+  bg: string | null;
+  enabled: number;
+  updated_at: string;
+}
+
+export function getPreloader(userId: string): PreloaderRow | undefined {
+  return getDb().prepare("SELECT * FROM preloaders WHERE user_id = ?").get(userId) as PreloaderRow | undefined;
+}
+
+export function setPreloader(
+  userId: string,
+  args: { logo?: Uint8Array | null; logoMime?: string | null; bg: string | null; enabled: number },
+): void {
+  const existing = getPreloader(userId);
+  const logo = args.logo === undefined ? (existing?.logo ?? null) : args.logo;
+  const logoMime = args.logo === undefined ? (existing?.logo_mime ?? null) : (args.logoMime ?? null);
+  getDb()
+    .prepare(
+      `INSERT INTO preloaders (user_id, logo, logo_mime, bg, enabled, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET logo=excluded.logo, logo_mime=excluded.logo_mime, bg=excluded.bg, enabled=excluded.enabled, updated_at=excluded.updated_at`,
+    )
+    .run(userId, logo ? Buffer.from(logo) : null, logoMime, args.bg, args.enabled, now());
+}
