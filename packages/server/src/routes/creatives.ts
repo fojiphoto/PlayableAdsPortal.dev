@@ -164,7 +164,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
 
       // play back in filename order so frame_000, frame_001 … stay in sequence
       captured.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-      const mime = captured[0].mime.startsWith("image/") ? captured[0].mime : "image/jpeg";
+      const mime = captured[0]!.mime.startsWith("image/") ? captured[0]!.mime : "image/jpeg";
       const fps = Math.min(60, Math.max(1, Number(fields.fps) || 24));
       const name = fields.name || "Captured gameplay";
 
@@ -208,7 +208,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
           buildOpts,
         );
         const zip = new JSZip();
-        zip.file("index.html", Buffer.from(built.files["index.html"]));
+        zip.file("index.html", Buffer.from(built.files["index.html"]!));
         sourceZip = await zip.generateAsync({ type: "uint8array" });
       } catch (e) {
         return reply.code(400).send({ error: `could not build playable: ${(e as Error).message}` });

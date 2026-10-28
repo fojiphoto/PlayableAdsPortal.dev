@@ -126,7 +126,13 @@ export const checkDomain = () => postJson<{ verified: boolean; checked: string[]
 // ── billing / plans ──
 export const listPlans = () => getJson<Plan[]>("/billing/plans");
 export const getBillingStatus = () => getJson<PlanStatus>("/billing/status");
+/** @deprecated dev-only direct switch; prefer checkout() */
 export const setPlan = (plan: string) => postJson<PlanStatus>("/billing/plan", { plan });
+/** Start an upgrade: with Stripe → { url } to redirect to Checkout; without → { dev, status }. */
+export const checkout = (plan: string) =>
+  postJson<{ url?: string; dev?: boolean; contact?: boolean; status?: PlanStatus }>("/billing/checkout", { plan });
+/** Open the Stripe billing portal (returns a { url } to redirect to). */
+export const billingPortal = () => postJson<{ url: string }>("/billing/portal", {});
 
 // ── networks ──
 export const getNetworks = () => getJson<Network[]>("/networks");

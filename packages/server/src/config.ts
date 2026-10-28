@@ -17,6 +17,12 @@ export const config = {
   /** built web SPA to serve (same-origin). Default: packages/web/dist */
   webDist: process.env.WEB_DIST ?? resolve(here, "../../web/dist"),
   isProduction: process.env.NODE_ENV === "production",
+
+  // Stripe keys are read live from the environment in stripe.ts (STRIPE_SECRET_KEY,
+  // STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_STARTER, STRIPE_PRICE_STUDIO); when unset, billing
+  // stays in dev mode (plans switch instantly).
+  /** absolute base URL for Checkout return links when the request Origin is missing */
+  publicUrl: process.env.PUBLIC_URL ?? "",
 };
 
 export const isDevSecret = config.jwtSecret === "dev-insecure-secret-change-me";

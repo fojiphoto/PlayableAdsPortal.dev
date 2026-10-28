@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { listPlans, setPlan } from "../api";
+import { listPlans, checkout, billingPortal } from "../api";
 import type { Plan, PlanStatus } from "../types";
 
 export function Plans({ status, onChanged }: { status: PlanStatus | null; onChanged: (s: PlanStatus) => void }) {
@@ -14,15 +14,31 @@ export function Plans({ status, onChanged }: { status: PlanStatus | null; onChan
   }, []);
 
   async function pick(id: string) {
-    if (id === "enterprise") {
-      window.location.href = "mailto:contact@factorialstudio.com?subject=Factorial%20AdLab%20Enterprise";
-      return;
-    }
     if (id === status?.plan) return;
     setBusy(id);
     setErr(null);
     try {
-      onChanged(await setPlan(id));
+      const res = await checkout(id);
+      if (res.contact) {
+        window.location.href = "mailto:contact@factorialstudio.com?subject=Factorial%20AdLab%20Enterprise";
+      } else if (res.url) {
+        window.location.href = res.url; // → Stripe Checkout / billing portal
+      } else if (res.status) {
+        onChanged(res.status); // dev mode: switched instantly
+      }
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function manageBilling() {
+    setBusy("__portal");
+    setErr(null);
+    try {
+      const { url } = await billingPortal();
+      window.location.href = url;
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -97,8 +113,16 @@ export function Plans({ status, onChanged }: { status: PlanStatus | null; onChan
         })}
       </div>
 
+      {status && status.plan !== "free" && status.plan !== "enterprise" && (
+        <div style={{ marginTop: 18 }}>
+          <button className="btn btn-ghost" disabled={busy === "__portal"} onClick={manageBilling}>
+            {busy === "__portal" ? "…" : "Manage billing"}
+          </button>
+        </div>
+      )}
+
       <p style={{ marginTop: 18, fontSize: ".8rem", color: "var(--muted)" }}>
-        Billing is in test mode — switching a plan is instant. Card payments (Stripe) connect soon.
+        Upgrades go through secure Stripe Checkout. Manage or cancel anytime from the billing portal.
       </p>
     </div>
   );

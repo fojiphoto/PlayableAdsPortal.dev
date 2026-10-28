@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import JSZip from "jszip";
@@ -320,6 +321,77 @@ describe("capture → creative (Phase 2.1)", () => {
       payload: form.getBuffer(),
     });
     expect(cap.statusCode).toBe(400);
+  });
+});
+
+describe("billing: Stripe checkout + webhook", () => {
+  async function sendEvent(secret: string, event: unknown) {
+    const payload = JSON.stringify(event);
+    const t = Math.floor(Date.now() / 1000);
+    const sig = createHmac("sha256", secret).update(`${t}.${payload}`).digest("hex");
+    return app.inject({
+      method: "POST",
+      url: "/api/billing/webhook",
+      headers: { "content-type": "application/json", "stripe-signature": `t=${t},v1=${sig}` },
+      payload,
+    });
+  }
+
+  it("checkout falls back to an instant dev switch when Stripe is unconfigured", async () => {
+    const token = await signup("checkout@factorialstudio.com");
+    const res = await app.inject({ method: "POST", url: "/api/billing/checkout", headers: bearer(token), payload: { plan: "starter" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().dev).toBe(true);
+    expect(res.json().status.plan).toBe("starter");
+  });
+
+  it("checkout returns contact:true for enterprise", async () => {
+    const token = await signup("ent@factorialstudio.com");
+    const res = await app.inject({ method: "POST", url: "/api/billing/checkout", headers: bearer(token), payload: { plan: "enterprise" } });
+    expect(res.json().contact).toBe(true);
+  });
+
+  it("portal is unavailable without Stripe configured", async () => {
+    const token = await signup("portal@factorialstudio.com");
+    const res = await app.inject({ method: "POST", url: "/api/billing/portal", headers: bearer(token), payload: {} });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("rejects a webhook with a bad signature", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/billing/webhook",
+      headers: { "content-type": "application/json", "stripe-signature": "t=1,v1=deadbeef" },
+      payload: JSON.stringify({ type: "ping" }),
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("applies a verified subscription event to the user's plan", async () => {
+    const WH = "whsec_test_abc";
+    const PRICE = "price_studio_123";
+    process.env.STRIPE_WEBHOOK_SECRET = WH;
+    process.env.STRIPE_PRICE_STUDIO = PRICE;
+    try {
+      const token = await signup("wh@factorialstudio.com");
+      const uid = (await app.inject({ method: "GET", url: "/api/me", headers: bearer(token) })).json().user.id;
+
+      // 1. checkout.session.completed links the Stripe customer to the user
+      const link = await sendEvent(WH, { type: "checkout.session.completed", data: { object: { client_reference_id: uid, customer: "cus_1" } } });
+      expect(link.statusCode).toBe(200);
+      // 2. subscription.updated sets the plan from the price
+      await sendEvent(WH, { type: "customer.subscription.updated", data: { object: { id: "sub_1", customer: "cus_1", status: "active", items: { data: [{ price: { id: PRICE } }] } } } });
+
+      const me = (await app.inject({ method: "GET", url: "/api/me", headers: bearer(token) })).json();
+      expect(me.plan).toBe("studio");
+
+      // 3. subscription.deleted downgrades back to free
+      await sendEvent(WH, { type: "customer.subscription.deleted", data: { object: { customer: "cus_1" } } });
+      expect((await app.inject({ method: "GET", url: "/api/me", headers: bearer(token) })).json().plan).toBe("free");
+    } finally {
+      delete process.env.STRIPE_WEBHOOK_SECRET;
+      delete process.env.STRIPE_PRICE_STUDIO;
+    }
   });
 });
 

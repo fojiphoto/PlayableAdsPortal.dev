@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS users (
   domain        TEXT,
   domain_token  TEXT,
   domain_verified INTEGER NOT NULL DEFAULT 0,
+  stripe_customer_id     TEXT,
+  stripe_subscription_id TEXT,
+  plan_status            TEXT,
   created_at    TEXT NOT NULL
 );
 
@@ -112,6 +115,9 @@ export function initDb(path: string = config.dbPath): DB {
     "ALTER TABLE users ADD COLUMN domain TEXT",
     "ALTER TABLE users ADD COLUMN domain_token TEXT",
     "ALTER TABLE users ADD COLUMN domain_verified INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN stripe_customer_id TEXT",
+    "ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT",
+    "ALTER TABLE users ADD COLUMN plan_status TEXT",
   ]) {
     try {
       db.exec(stmt);

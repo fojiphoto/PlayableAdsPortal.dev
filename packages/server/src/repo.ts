@@ -23,6 +23,9 @@ export interface UserRow {
   domain: string | null;
   domain_token: string | null;
   domain_verified: number;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  plan_status: string | null;
   created_at: string;
 }
 export interface AppRow {
@@ -65,7 +68,8 @@ export interface ExportRow {
 export function createUser(email: string, passwordHash: string): UserRow {
   const row: UserRow = {
     id: randomUUID(), email, password_hash: passwordHash, plan: "free",
-    totp_secret: null, totp_enabled: 0, domain: null, domain_token: null, domain_verified: 0, created_at: now(),
+    totp_secret: null, totp_enabled: 0, domain: null, domain_token: null, domain_verified: 0,
+    stripe_customer_id: null, stripe_subscription_id: null, plan_status: null, created_at: now(),
   };
   getDb()
     .prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
@@ -81,6 +85,22 @@ export function getUserById(id: string): UserRow | undefined {
 
 export function setUserPlan(id: string, plan: string): void {
   getDb().prepare("UPDATE users SET plan = ? WHERE id = ?").run(plan, id);
+}
+
+// ── Stripe billing ──
+export function setStripeCustomer(id: string, customerId: string): void {
+  getDb().prepare("UPDATE users SET stripe_customer_id = ? WHERE id = ?").run(customerId, id);
+}
+
+/** Set plan + subscription id + status together (called from the Stripe webhook). */
+export function setUserBilling(id: string, plan: string, subscriptionId: string | null, status: string | null): void {
+  getDb()
+    .prepare("UPDATE users SET plan = ?, stripe_subscription_id = ?, plan_status = ? WHERE id = ?")
+    .run(plan, subscriptionId, status, id);
+}
+
+export function getUserByStripeCustomer(customerId: string): UserRow | undefined {
+  return getDb().prepare("SELECT * FROM users WHERE stripe_customer_id = ?").get(customerId) as UserRow | undefined;
 }
 
 export function updatePassword(id: string, passwordHash: string): void {
