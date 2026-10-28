@@ -102,3 +102,10 @@ export interface TeamMember {
   role: string;
   createdAt: string;
 }
+
+export interface Analytics {
+  total: number;
+  last30: number;
+  daily: { date: string; count: number }[];
+  byNetwork: { network: string; networkName: string; count: number }[];
+}

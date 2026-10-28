@@ -101,6 +101,25 @@ export function countExportUsageSince(userId: string, sinceIso: string): number 
   return row?.n ?? 0;
 }
 
+export function countExportUsage(userId: string): number {
+  const row = getDb().prepare("SELECT COUNT(*) AS n FROM export_usage WHERE user_id = ?").get(userId) as { n: number } | undefined;
+  return row?.n ?? 0;
+}
+
+export function exportDaily(userId: string, sinceIso: string): { d: string; n: number }[] {
+  return getDb()
+    .prepare(
+      "SELECT substr(created_at,1,10) AS d, COUNT(*) AS n FROM export_usage WHERE user_id = ? AND created_at >= ? GROUP BY d ORDER BY d",
+    )
+    .all(userId, sinceIso) as unknown as { d: string; n: number }[];
+}
+
+export function exportByNetwork(userId: string): { network: string; n: number }[] {
+  return getDb()
+    .prepare("SELECT network, COUNT(*) AS n FROM export_usage WHERE user_id = ? GROUP BY network ORDER BY n DESC")
+    .all(userId) as unknown as { network: string; n: number }[];
+}
+
 // ── apps ─────────────────────────────────────────────────────────────────────
 export function createApp(userId: string, name: string, platform?: string): AppRow {
   const row: AppRow = { id: randomUUID(), user_id: userId, name, platform: platform ?? null, created_at: now() };

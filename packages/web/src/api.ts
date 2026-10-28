@@ -11,6 +11,7 @@ import type {
   Plan,
   PlanStatus,
   TeamMember,
+  Analytics,
 } from "./types";
 
 // Same-origin by default ("/api"). For a split deploy (SPA and API on different hosts),
@@ -93,6 +94,9 @@ async function delJson<T>(path: string): Promise<T> {
 export const listTeam = () => getJson<TeamMember[]>("/team");
 export const inviteTeam = (email: string) => postJson<TeamMember[]>("/team/invite", { email });
 export const removeTeam = (memberId: string) => delJson<TeamMember[]>(`/team/${memberId}`);
+
+// ── analytics ──
+export const getAnalytics = () => getJson<Analytics>("/analytics");
 
 // ── billing / plans ──
 export const listPlans = () => getJson<Plan[]>("/billing/plans");
