@@ -1,0 +1,8 @@
+{
+  "name": "com.factorialstudio.adlab",
+  "version": "0.1.0",
+  "displayName": "Factorial AdLab",
+  "description": "Build playable ads from your Unity game and upload them to Factorial AdLab (app.factorialstudio.dev), which packages them for every ad network.",
+  "unity": "6000.0",
+  "author": { "name": "Factorial Studio", "url": "https://factorialstudio.com" }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "FactorialAdLab.Editor",
+  "rootNamespace": "FactorialAdLab.Editor",
+  "references": ["FactorialAdLab"],
+  "includePlatforms": ["Editor"],
+  "excludePlatforms": []
+}
