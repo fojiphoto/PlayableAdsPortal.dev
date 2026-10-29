@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getToken, setToken, me, getNetworks, listApps, createApp, getApp, createConcept, getBillingStatus } from "./api";
+import { renameApp, renameConcept } from "./api";
 import type { App as AppT, AuthUser, Concept, Network, PlanStatus } from "./types";
 import { AuthScreen } from "./components/AuthScreen";
 import { Workspace } from "./components/Workspace";
@@ -55,6 +56,28 @@ export default function App() {
     }
   }
 
+  async function renameAppUi(a: AppT) {
+    const name = window.prompt("Rename app", a.name)?.trim();
+    if (!name || name === a.name) return;
+    try {
+      const updated = await renameApp(a.id, name);
+      setApps((xs) => xs.map((x) => (x.id === a.id ? { ...x, name: updated.name } : x)));
+      setActiveApp((cur) => (cur && cur.id === a.id ? { ...cur, name: updated.name } : cur));
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
+  async function renameConceptUi(c: Concept) {
+    const name = window.prompt("Rename concept", c.name)?.trim();
+    if (!name || name === c.name) return;
+    try {
+      const updated = await renameConcept(c.id, name);
+      setConcepts((xs) => xs.map((x) => (x.id === c.id ? { ...x, name: updated.name } : x)));
+      setActiveConcept((cur) => (cur && cur.id === c.id ? { ...cur, name: updated.name } : cur));
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
   async function addApp() {
     const name = newApp.trim();
     if (!name) return;
@@ -178,16 +201,26 @@ export default function App() {
           <SectionLabel>Apps</SectionLabel>
           <div className="mb-2 grid gap-1">
             {apps.map((a) => (
-              <button
-                key={a.id}
-                onClick={() => void openApp(a)}
-                className={`flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm ${
-                  activeApp?.id === a.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
-                }`}
-              >
-                <span className="truncate">{a.name}</span>
-                {a.conceptCount ? <span className="text-xs text-slate-400">{a.conceptCount}</span> : null}
-              </button>
+              <div key={a.id} className="flex items-center gap-1">
+                <button
+                  onClick={() => void openApp(a)}
+                  className={`flex min-w-0 flex-1 items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm ${
+                    activeApp?.id === a.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
+                  }`}
+                >
+                  <span className="truncate">{a.name}</span>
+                  {a.conceptCount ? <span className="text-xs text-slate-400">{a.conceptCount}</span> : null}
+                </button>
+                {activeApp?.id === a.id && (
+                  <button
+                    title="Rename app"
+                    onClick={() => void renameAppUi(a)}
+                    className="rounded px-1.5 py-1 text-xs text-slate-400 hover:bg-[#123f2d]/60 hover:text-amber-200"
+                  >
+                    ✎
+                  </button>
+                )}
+              </div>
             ))}
           </div>
           <CreateRow value={newApp} onChange={setNewApp} onAdd={addApp} placeholder="New app…" />
@@ -197,15 +230,25 @@ export default function App() {
               <SectionLabel>Concepts · {activeApp.name}</SectionLabel>
               <div className="mb-2 grid gap-1">
                 {concepts.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => setActiveConcept(c)}
-                    className={`rounded-md px-2.5 py-1.5 text-left text-sm ${
-                      activeConcept?.id === c.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
-                    }`}
-                  >
-                    {c.name}
-                  </button>
+                  <div key={c.id} className="flex items-center gap-1">
+                    <button
+                      onClick={() => setActiveConcept(c)}
+                      className={`min-w-0 flex-1 truncate rounded-md px-2.5 py-1.5 text-left text-sm ${
+                        activeConcept?.id === c.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
+                      }`}
+                    >
+                      {c.name}
+                    </button>
+                    {activeConcept?.id === c.id && (
+                      <button
+                        title="Rename concept"
+                        onClick={() => void renameConceptUi(c)}
+                        className="rounded px-1.5 py-1 text-xs text-slate-400 hover:bg-[#123f2d]/60 hover:text-amber-200"
+                      >
+                        ✎
+                      </button>
+                    )}
+                  </div>
                 ))}
                 {concepts.length === 0 && <div className="px-2.5 py-1 text-xs text-slate-400">No concepts yet</div>}
               </div>

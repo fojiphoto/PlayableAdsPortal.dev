@@ -40,6 +40,7 @@ export interface ConceptRow {
   id: string;
   app_id: string;
   name: string;
+  network_order: string | null; // JSON array of network ids, or null = default order
   created_at: string;
 }
 export interface CreativeRow {
@@ -178,13 +179,22 @@ export function getAppOwned(id: string, userId: string): AppRow | undefined {
   const ph = ids.map(() => "?").join(",");
   return getDb().prepare(`SELECT * FROM apps WHERE id = ? AND user_id IN (${ph})`).get(id, ...ids) as AppRow | undefined;
 }
+/** Rename / re-platform an app the user can access. */
+export function updateApp(id: string, userId: string, patch: { name?: string; platform?: string | null }): boolean {
+  const a = getAppOwned(id, userId);
+  if (!a) return false;
+  getDb()
+    .prepare("UPDATE apps SET name = ?, platform = ? WHERE id = ?")
+    .run(patch.name ?? a.name, patch.platform === undefined ? a.platform : patch.platform, id);
+  return true;
+}
 export function deleteApp(id: string, userId: string): boolean {
   return getDb().prepare("DELETE FROM apps WHERE id = ? AND user_id = ?").run(id, userId).changes > 0;
 }
 
 // ── concepts ─────────────────────────────────────────────────────────────────
 export function createConcept(appId: string, name: string): ConceptRow {
-  const row: ConceptRow = { id: randomUUID(), app_id: appId, name, created_at: now() };
+  const row: ConceptRow = { id: randomUUID(), app_id: appId, name, network_order: null, created_at: now() };
   getDb()
     .prepare("INSERT INTO concepts (id, app_id, name, created_at) VALUES (?, ?, ?, ?)")
     .run(row.id, row.app_id, row.name, row.created_at);
@@ -199,6 +209,18 @@ export function getConceptOwned(id: string, userId: string): ConceptRow | undefi
   return getDb()
     .prepare(`SELECT c.* FROM concepts c JOIN apps a ON a.id = c.app_id WHERE c.id = ? AND a.user_id IN (${ph})`)
     .get(id, ...ids) as ConceptRow | undefined;
+}
+/** Rename a concept and/or set its custom export network order (null = default). */
+export function updateConcept(
+  id: string,
+  userId: string,
+  patch: { name?: string; networkOrder?: string[] | null },
+): boolean {
+  const c = getConceptOwned(id, userId);
+  if (!c) return false;
+  const order = patch.networkOrder === undefined ? c.network_order : patch.networkOrder ? JSON.stringify(patch.networkOrder) : null;
+  getDb().prepare("UPDATE concepts SET name = ?, network_order = ? WHERE id = ?").run(patch.name ?? c.name, order, id);
+  return true;
 }
 export function deleteConcept(id: string, userId: string): boolean {
   return (
@@ -248,6 +270,24 @@ export function getCreativeOwned(id: string, userId: string): CreativeRow | unde
        WHERE cr.id = ? AND a.user_id IN (${accessibleOwnerIds(userId).map(() => "?").join(",")})`,
     )
     .get(id, ...accessibleOwnerIds(userId)) as CreativeRow | undefined;
+}
+/** Rename a creative and/or replace its stored pack options (CTA / store URLs). */
+export function updateCreative(id: string, userId: string, patch: { name?: string; optionsJson?: string }): boolean {
+  const cr = getCreativeOwned(id, userId);
+  if (!cr) return false;
+  getDb()
+    .prepare("UPDATE creatives SET name = ?, options_json = ? WHERE id = ?")
+    .run(patch.name ?? cr.name, patch.optionsJson ?? cr.options_json, id);
+  return true;
+}
+/** The user who owns the app a creative lives under (the publisher whose domain must be verified). */
+export function creativeOwnerId(creativeId: string): string | undefined {
+  const row = getDb()
+    .prepare(
+      `SELECT a.user_id AS uid FROM creatives cr JOIN concepts c ON c.id = cr.concept_id JOIN apps a ON a.id = c.app_id WHERE cr.id = ?`,
+    )
+    .get(creativeId) as { uid: string } | undefined;
+  return row?.uid;
 }
 /** Fetch a creative without an ownership check (for UUID-guarded download/preview). */
 export function getCreativeById(id: string): CreativeRow | undefined {

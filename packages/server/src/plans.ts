@@ -16,6 +16,8 @@ export interface PlanDef {
   blurb: string;
   features: string[];
   popular?: boolean;
+  /** may set a custom per-concept export network order */
+  networkOrdering?: boolean;
 }
 
 export const PLANS: Record<PlanId, PlanDef> = {
@@ -34,6 +36,7 @@ export const PLANS: Record<PlanId, PlanDef> = {
   enterprise: {
     id: "enterprise", name: "Enterprise", price: null, priceLabel: "Custom", exportsPer30d: null, networks: "all",
     blurb: "Volume & SLA", features: ["Unlimited exports", "Custom network ordering", "Dedicated support"],
+    networkOrdering: true,
   },
 };
 

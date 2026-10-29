@@ -117,6 +117,52 @@ export const NETWORKS: Record<string, NetworkSpec> = {
     orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
     notes: "MRAID generic. Cap 5 MB.",
   },
+  // ── DSPs & remaining networks (all accept MRAID 2.0 single-HTML playables) ─
+  remerge: {
+    id: "remerge", name: "Remerge", format: "mraid-single-html", maxSizeBytes: 5 * MB,
+    orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
+    notes: "Retargeting DSP; MRAID single HTML. Cap 5 MB.",
+  },
+  tencent: {
+    id: "tencent", name: "Tencent Ads", format: "mraid-single-html", maxSizeBytes: 2 * MB,
+    orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
+    notes: "MRAID single HTML. Cap conservative (2 MB) — CN specs run tighter; verify per campaign.",
+  },
+  aarki: {
+    id: "aarki", name: "Aarki", format: "mraid-single-html", maxSizeBytes: 5 * MB,
+    orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
+    notes: "MRAID single HTML. Cap 5 MB.",
+  },
+  line: {
+    id: "line", name: "LINE Ads", format: "mraid-single-html", maxSizeBytes: 5 * MB,
+    orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
+    notes: "MRAID single HTML. Cap 5 MB.",
+  },
+  appreciate: {
+    id: "appreciate", name: "Appreciate", format: "mraid-single-html", maxSizeBytes: 5 * MB,
+    orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
+    notes: "MRAID single HTML. Cap 5 MB.",
+  },
+  revx: {
+    id: "revx", name: "RevX", format: "mraid-single-html", maxSizeBytes: 5 * MB,
+    orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
+    notes: "MRAID single HTML. Cap 5 MB.",
+  },
+  adikteev: {
+    id: "adikteev", name: "Adikteev", format: "mraid-single-html", maxSizeBytes: 5 * MB,
+    orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
+    notes: "MRAID single HTML. Cap 5 MB.",
+  },
+  youappi: {
+    id: "youappi", name: "YouAppi", format: "mraid-single-html", maxSizeBytes: 5 * MB,
+    orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
+    notes: "MRAID single HTML. Cap 5 MB.",
+  },
+  mraid: {
+    id: "mraid", name: "MRAID (generic)", format: "mraid-single-html", maxSizeBytes: 5 * MB,
+    orientation: "both", clickMode: "mraid", ctaHook: "mraid", usesMraid: true, ext: "html",
+    notes: "Plain MRAID 2.0 single HTML for any network not listed here. Cap 5 MB (check the network's own limit).",
+  },
 };
 
 /** The default/priority networks used when none are specified (packAll, UI defaults). */

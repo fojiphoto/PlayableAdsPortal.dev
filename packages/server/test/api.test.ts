@@ -7,6 +7,7 @@ import FormData from "form-data";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "../src/db.js";
+import { getUserByEmail, setDomainVerified, setUserDomain } from "../src/repo.js";
 import { loadFromDir } from "@forge/packager";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -39,14 +40,22 @@ async function signup(email = "dev@factorialstudio.com", password = "secret123")
   return res.json().token;
 }
 const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
+/** Exports are gated on a verified company domain — mark the user verified (as /api/domain/check would). */
+function verifyDomain(email = "dev@factorialstudio.com"): void {
+  const u = getUserByEmail(email)!;
+  setUserDomain(u.id, "factorialstudio.dev", "fav-test");
+  setDomainVerified(u.id, 1);
+}
 
 describe("health + networks", () => {
-  it("is healthy and lists 20+ networks", async () => {
+  it("is healthy and lists all 29 networks (competitor's 27 + extras)", async () => {
     expect((await app.inject({ method: "GET", url: "/api/health" })).statusCode).toBe(200);
     const nets = (await app.inject({ method: "GET", url: "/api/networks" })).json();
-    expect(nets.length).toBeGreaterThanOrEqual(20);
+    expect(nets.length).toBeGreaterThanOrEqual(29);
     const ids = nets.map((n: { id: string }) => n.id);
-    expect(ids).toEqual(expect.arrayContaining(["applovin", "tiktok", "vungle", "meta"]));
+    expect(ids).toEqual(
+      expect.arrayContaining(["applovin", "tiktok", "vungle", "meta", "remerge", "tencent", "aarki", "line", "appreciate", "revx", "adikteev", "youappi", "mraid"]),
+    );
   });
 });
 
@@ -77,6 +86,7 @@ describe("auth", () => {
 describe("app → concept → creative → export flow", () => {
   it("full happy path, persisted", async () => {
     const token = await signup();
+    verifyDomain();
     // free plan is Unity-Ads-only; switch to a paid plan to export multiple networks
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
 
@@ -213,6 +223,7 @@ describe("billing / plan enforcement", () => {
 
   it("free plan blocks non-Unity networks, allows Unity Ads", async () => {
     const token = await signup();
+    verifyDomain();
     const cid = await setupCreative(token);
     const blocked = await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(token), payload: { networks: ["applovin"] } });
     expect(blocked.statusCode).toBe(402);
@@ -223,6 +234,7 @@ describe("billing / plan enforcement", () => {
 
   it("upgrading unlocks all networks and counts usage", async () => {
     const token = await signup();
+    verifyDomain();
     const cid = await setupCreative(token);
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
     const ok = await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(token), payload: { networks: ["applovin", "meta"] } });
@@ -245,6 +257,7 @@ describe("capture → creative (Phase 2.1)", () => {
 
   it("builds a flipbook playable from an uploaded frame sequence, then exports it", async () => {
     const token = await signup("cap@factorialstudio.com");
+    verifyDomain("cap@factorialstudio.com");
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Beat Matrix" } })).json().id;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "hop" } })).json().id;
@@ -279,6 +292,7 @@ describe("capture → creative (Phase 2.1)", () => {
 
   it("authors a tap zone + rich end-card (Phase 2.2) into the built playable", async () => {
     const token = await signup("cap22@factorialstudio.com");
+    verifyDomain("cap22@factorialstudio.com");
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Beat Matrix" } })).json().id;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "hop" } })).json().id;
@@ -432,6 +446,76 @@ describe("security hardening (audit fixes)", () => {
     const replay = await app.inject({ method: "POST", url: "/api/login", payload: { email: "replay@factorialstudio.com", password: "secret123", code } });
     expect(replay.statusCode).toBe(401);
     expect(replay.json().code).toBe("2fa-replay");
+  });
+});
+
+describe("quick wins: domain gate, rename/update, network order", () => {
+  async function appConceptCreative(token: string) {
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Game", platform: "ios" } })).json().id as string;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c1" } })).json().id as string;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "s.zip", contentType: "application/zip" });
+    const up = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
+    return { appId, conceptId, creativeId: up.json().id as string };
+  }
+
+  it("blocks export until the company domain is verified (403 domain-unverified)", async () => {
+    const token = await signup("gate@factorialstudio.com");
+    const { creativeId } = await appConceptCreative(token);
+    const blocked = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["unityads"] } });
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json().code).toBe("domain-unverified");
+    verifyDomain("gate@factorialstudio.com");
+    const ok = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["unityads"] } });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it("renames apps, concepts and creatives; updates creative store URLs", async () => {
+    const token = await signup("ren@factorialstudio.com");
+    const { appId, conceptId, creativeId } = await appConceptCreative(token);
+
+    const a = await app.inject({ method: "PATCH", url: `/api/apps/${appId}`, headers: bearer(token), payload: { name: "Game Deluxe", platform: "android" } });
+    expect(a.statusCode).toBe(200);
+    expect(a.json()).toMatchObject({ name: "Game Deluxe", platform: "android" });
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(token) })).json().name).toBe("Game Deluxe");
+
+    const c = await app.inject({ method: "PATCH", url: `/api/concepts/${conceptId}`, headers: bearer(token), payload: { name: "castle_v3" } });
+    expect(c.json().name).toBe("castle_v3");
+
+    const cr = await app.inject({ method: "PATCH", url: `/api/creatives/${creativeId}`, headers: bearer(token), payload: { name: "lumber2", iosUrl: "https://apps.apple.com/app/id777" } });
+    expect(cr.statusCode).toBe(200);
+    expect(cr.json().name).toBe("lumber2");
+    const detail = (await app.inject({ method: "GET", url: `/api/creatives/${creativeId}`, headers: bearer(token) })).json();
+    expect(detail.name).toBe("lumber2");
+    expect(detail.options.iosUrl).toBe("https://apps.apple.com/app/id777");
+
+    // empty name rejected; other users can't rename
+    expect((await app.inject({ method: "PATCH", url: `/api/apps/${appId}`, headers: bearer(token), payload: { name: "  " } })).statusCode).toBe(400);
+    const other = await signup("other2@factorialstudio.com");
+    expect((await app.inject({ method: "PATCH", url: `/api/apps/${appId}`, headers: bearer(other), payload: { name: "hax" } })).statusCode).toBe(404);
+  });
+
+  it("custom network order: Enterprise-only, validated, and used as the default export set", async () => {
+    const token = await signup("order@factorialstudio.com");
+    verifyDomain("order@factorialstudio.com");
+    const { conceptId, creativeId } = await appConceptCreative(token);
+
+    // not on Enterprise -> 402
+    const denied = await app.inject({ method: "PATCH", url: `/api/concepts/${conceptId}`, headers: bearer(token), payload: { networkOrder: ["unityads", "applovin"] } });
+    expect(denied.statusCode).toBe(402);
+    expect(denied.json().code).toBe("network-ordering-not-in-plan");
+
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "enterprise" } });
+    // unknown network id rejected
+    expect((await app.inject({ method: "PATCH", url: `/api/concepts/${conceptId}`, headers: bearer(token), payload: { networkOrder: ["nope"] } })).statusCode).toBe(400);
+    const set = await app.inject({ method: "PATCH", url: `/api/concepts/${conceptId}`, headers: bearer(token), payload: { networkOrder: ["unityads", "applovin"] } });
+    expect(set.statusCode).toBe(200);
+    expect(set.json().networkOrder).toEqual(["unityads", "applovin"]);
+
+    // export with no explicit networks follows the concept's order
+    const exp = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: {} });
+    expect(exp.statusCode).toBe(200);
+    expect(exp.json().exported.map((e: { network: string }) => e.network)).toEqual(["unityads", "applovin"]);
   });
 });
 

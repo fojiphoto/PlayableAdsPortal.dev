@@ -64,10 +64,11 @@ CREATE TABLE IF NOT EXISTS apps (
 );
 
 CREATE TABLE IF NOT EXISTS concepts (
-  id         TEXT PRIMARY KEY,
-  app_id     TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-  name       TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  id            TEXT PRIMARY KEY,
+  app_id        TEXT NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  network_order TEXT,
+  created_at    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS creatives (
@@ -120,6 +121,7 @@ export function initDb(path: string = config.dbPath): DB {
     "ALTER TABLE users ADD COLUMN stripe_customer_id TEXT",
     "ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT",
     "ALTER TABLE users ADD COLUMN plan_status TEXT",
+    "ALTER TABLE concepts ADD COLUMN network_order TEXT",
   ]) {
     try {
       db.exec(stmt);

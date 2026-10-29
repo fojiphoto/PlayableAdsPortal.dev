@@ -6,14 +6,18 @@ import { authed } from "../auth.js";
 import {
   addExportUsage,
   createCreative,
+  creativeOwnerId,
   deleteCreative,
   getConceptOwned,
   getCreativeOwned,
   getExport,
+  getUserById,
   listExports,
+  updateCreative,
   upsertExport,
   type ExportRow,
 } from "../repo.js";
+import { parseNetworkOrder } from "./apps.js";
 import { checkExport } from "../plan-status.js";
 import { preloaderForExport } from "../preloader-config.js";
 
@@ -255,6 +259,30 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  // rename / update stored CTA + store URLs
+  app.patch<{ Params: { id: string }; Body: { name?: string; ctaUrl?: string | null; iosUrl?: string | null; androidUrl?: string | null } }>(
+    "/api/creatives/:id",
+    authed,
+    async (req, reply) => {
+      const cr = getCreativeOwned(req.params.id, req.user!.id);
+      if (!cr) return reply.code(404).send({ error: "not found" });
+      const name = req.body?.name?.trim();
+      if (req.body?.name !== undefined && !name) return reply.code(400).send({ error: "name cannot be empty" });
+      const stored = JSON.parse(cr.options_json) as PackOptions;
+      const pick = (v: string | null | undefined, cur: string | undefined) => (v === undefined ? cur : v || undefined);
+      const options: PackOptions = {
+        ...stored,
+        name: name ?? stored.name,
+        ctaUrl: pick(req.body?.ctaUrl, stored.ctaUrl),
+        iosUrl: pick(req.body?.iosUrl, stored.iosUrl),
+        androidUrl: pick(req.body?.androidUrl, stored.androidUrl),
+      };
+      updateCreative(cr.id, req.user!.id, { name, optionsJson: JSON.stringify(options) });
+      const fresh = getCreativeOwned(cr.id, req.user!.id)!;
+      return { id: fresh.id, name: fresh.name, entry: fresh.entry, conceptId: fresh.concept_id, options, createdAt: fresh.created_at };
+    },
+  );
+
   // export: build packages and persist them
   app.post<{ Params: { id: string }; Body: { networks?: string[]; ctaUrl?: string; iosUrl?: string; androidUrl?: string } }>(
     "/api/creatives/:id/export",
@@ -263,8 +291,20 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       const cr = getCreativeOwned(req.params.id, req.user!.id);
       if (!cr) return reply.code(404).send({ error: "not found" });
 
+      // publisher gate: the app owner's company domain must be verified (app-ads.txt / verify file)
+      // before anything ships to a network — the same gate the competitor applies.
+      const owner = getUserById(creativeOwnerId(cr.id) ?? req.user!.id);
+      if (!owner?.domain_verified) {
+        return reply.code(403).send({
+          error: "Verify your company domain before exporting: open the Domain page, add the token to app-ads.txt (or the verify file), then Check now.",
+          code: "domain-unverified",
+        });
+      }
+
       const body = req.body ?? {};
-      const ids = body.networks && body.networks.length ? body.networks : [...PRIORITY_NETWORK_IDS];
+      const concept = getConceptOwned(cr.concept_id, req.user!.id);
+      const customOrder = parseNetworkOrder(concept?.network_order);
+      const ids = body.networks && body.networks.length ? body.networks : (customOrder ?? [...PRIORITY_NETWORK_IDS]);
       try {
         ids.forEach(getNetwork);
       } catch (e) {

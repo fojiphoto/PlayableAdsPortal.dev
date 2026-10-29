@@ -72,6 +72,16 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return res.json();
 }
 
+async function patchJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${base}${path}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...authHeaders() },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return toError(res);
+  return res.json();
+}
+
 // ── auth ──
 export const signup = (email: string, password: string) =>
   postJson<{ token: string; user: AuthUser }>("/signup", { email, password });
@@ -133,6 +143,17 @@ export const checkout = (plan: string) =>
   postJson<{ url?: string; dev?: boolean; contact?: boolean; status?: PlanStatus }>("/billing/checkout", { plan });
 /** Open the Stripe billing portal (returns a { url } to redirect to). */
 export const billingPortal = () => postJson<{ url: string }>("/billing/portal", {});
+
+// ── rename / update ──
+export const renameApp = (id: string, name: string) => patchJson<App>(`/apps/${id}`, { name });
+export const renameConcept = (id: string, name: string) => patchJson<Concept>(`/concepts/${id}`, { name });
+/** Enterprise: custom export network order for a concept (null = default). */
+export const setNetworkOrder = (conceptId: string, order: string[] | null) =>
+  patchJson<Concept>(`/concepts/${conceptId}`, { networkOrder: order });
+export const updateCreative = (
+  id: string,
+  patch: { name?: string; ctaUrl?: string | null; iosUrl?: string | null; androidUrl?: string | null },
+) => patchJson<CreativeDetail>(`/creatives/${id}`, patch);
 
 // ── networks ──
 export const getNetworks = () => getJson<Network[]>("/networks");

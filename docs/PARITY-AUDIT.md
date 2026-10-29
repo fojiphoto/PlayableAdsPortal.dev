@@ -11,7 +11,7 @@ The Phase‑1 "Packager" slice is real and tested (upload → inline → per‑n
 with plans/quota, Stripe billing, 2FA, team, preloader, domain token). Against the competitor as the benchmark:
 
 - **~35–40% API parity** — 41 route handlers / 34 paths vs their ~92.
-- **20 of 27 networks** (18 overlap; 9 missing; 2 extra).
+- ~~**20 of 27 networks**~~ → **29 networks** as of 2026-10-29 (all 27 of the competitor's + Smadex, Kayzen).
 - **The core differentiator — a Unity C# → interactive web-playable compiler — is absent by design**, replaced by a
   pixel‑capture flipbook (PHASE2.md "approach B").
 - Several DONE‑looking features are **shells**: the domain gate gates nothing, team roles authorize nothing,
@@ -193,13 +193,13 @@ landing; two extra networks; a capture-based Unity path that ships *something* w
 |---|---|---|---|
 | 1 | ~~**Per-network CTA/lifecycle hooks + real validator**~~ **DONE 2026-10-29** — `ctaHook` per network (Google/DV360 `ExitApi.exit` + exitapi.js, Meta `FbPlayableAd.onCTAClick`, Mintegral `gameReady`/`install`, Pangle `openAppStore`/`gameEnd`, ironSource `dapi` ready+viewable, Vungle `postMessage`, ready-gated `mraid.open` + viewableChange→pause/resume); validator: bundled-SDK error, real click-through check, orientation, per-network external allowlist; caps reviewed. Remaining: AppLovin `CHALLENGE_*` analytics events (optional), live review-tool confirmation per network. | Core promise — was the #1 rejection risk | done |
 | 2 | **Unity compiler / interactive playable from the game itself** | Competitor's moat and the headline; flipbook is a different product | XL |
-| 3 | **Enforce the domain-verification gate** | Currently cosmetic; also anti-abuse | S |
+| 3 | ~~Enforce the domain-verification gate~~ **DONE 2026-10-29** — `/export` returns 403 `domain-unverified` until the app owner's domain is verified (team members inherit the owner's verification) | Was cosmetic; now anti-abuse + publisher legitimacy | done |
 | 4 | **Password reset + email verification + mail transport** | Table-stakes SaaS auth; no recovery today | M |
 | 5 | **Org/Workspace model with enforced roles** (plan/domain/billing/quota on org; email invites) | Team/Studio tier advertised; roles unenforced | L |
 | 6 | **Async job model + worker** for export/capture | Sync handlers block on big uploads; prerequisite for a compiler | M |
 | 7 | **In-playable analytics ingestion** | Theirs = ad performance; ours = billing usage | M |
-| 8 | **Missing 9 networks** (+ MRAID generic) | Marketing says 20+/27 | S ids / M correct specs |
-| 9 | **Rename/update endpoints**; concept config; network-order | CRUD hygiene; already sold as Enterprise | S |
+| 8 | ~~Missing 9 networks~~ **DONE 2026-10-29** — Remerge, Tencent, Aarki, LINE, Appreciate, RevX, Adikteev, YouAppi + MRAID generic added (all MRAID 2.0 specs, caps noted) → **29 networks** | Marketing now accurate | done |
+| 9 | ~~Rename/update endpoints; network-order~~ **DONE 2026-10-29** — `PATCH /api/apps/:id` (name/platform), `PATCH /api/concepts/:id` (name + Enterprise-gated `networkOrder`, validated, used as the default `/export` set), `PATCH /api/creatives/:id` (name + CTA/store URLs); sidebar rename UI | The advertised Enterprise feature now exists | done |
 | 10 | **Billing: surface subscription state, in-app cancel/resume, sync** | Users can't see renewal/cancel state | S–M |
 | 11 | **Runtime API completeness** + actually read `[AdLabField]` | Half-declared contract | S declare / L wire |
 | 12 | Preloader kit templates, per-concept kit, server preview | Template library | M |
