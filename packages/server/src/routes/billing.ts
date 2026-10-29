@@ -72,20 +72,37 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     const price = priceForPlan(plan);
     if (!price) return reply.code(400).send({ error: `no Stripe price configured for "${plan}"` });
 
-    let customerId = user.stripe_customer_id;
-    if (!customerId) {
-      customerId = await createCustomer(user.email, user.id);
-      setStripeCustomer(user.id, customerId);
-    }
     const b = baseUrl(req);
-    const url = await createCheckoutSession({
-      customerId,
-      priceId: price,
-      userId: user.id,
-      successUrl: `${b}/?billing=success`,
-      cancelUrl: `${b}/?billing=cancel`,
-    });
-    return { url };
+    const mkSession = (customerId: string) =>
+      createCheckoutSession({
+        customerId,
+        priceId: price,
+        userId: user.id,
+        successUrl: `${b}/?billing=success`,
+        cancelUrl: `${b}/?billing=cancel`,
+      });
+
+    try {
+      let customerId = user.stripe_customer_id;
+      if (!customerId) {
+        customerId = await createCustomer(user.email, user.id);
+        setStripeCustomer(user.id, customerId);
+      }
+      try {
+        return { url: await mkSession(customerId) };
+      } catch (e) {
+        // A stored customer from a different mode/account (e.g. after a test→live switch)
+        // no longer exists here — create a fresh one and retry once.
+        if (/no such customer/i.test((e as Error).message)) {
+          const fresh = await createCustomer(user.email, user.id);
+          setStripeCustomer(user.id, fresh);
+          return { url: await mkSession(fresh) };
+        }
+        throw e;
+      }
+    } catch (e) {
+      return reply.code(502).send({ error: `Stripe checkout failed: ${(e as Error).message}` });
+    }
   });
 
   // Open the Stripe billing portal to manage/cancel a subscription.
@@ -93,7 +110,11 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if (!stripeEnabled()) return reply.code(400).send({ error: "billing portal is not configured" });
     const user = getUserById(req.user!.id);
     if (!user?.stripe_customer_id) return reply.code(400).send({ error: "no billing account yet" });
-    return { url: await createPortalSession(user.stripe_customer_id, baseUrl(req)) };
+    try {
+      return { url: await createPortalSession(user.stripe_customer_id, baseUrl(req)) };
+    } catch (e) {
+      return reply.code(502).send({ error: `Stripe portal failed: ${(e as Error).message}` });
+    }
   });
 
   // Dev-only direct switch (used by tests and keyless local/staging). Blocked in production
