@@ -395,6 +395,46 @@ describe("billing: Stripe checkout + webhook", () => {
   });
 });
 
+describe("security hardening (audit fixes)", () => {
+  it("rate-limits repeated failed logins (429)", async () => {
+    await signup("brute@factorialstudio.com", "secret123");
+    let got429 = false;
+    for (let i = 0; i < 12; i++) {
+      const r = await app.inject({ method: "POST", url: "/api/login", payload: { email: "brute@factorialstudio.com", password: "wrong" } });
+      if (r.statusCode === 429) { got429 = true; break; }
+    }
+    expect(got429).toBe(true);
+  });
+
+  it("rejects an oversized preloader logo", async () => {
+    const token = await signup("logo@factorialstudio.com");
+    const form = new FormData();
+    form.append("logo", Buffer.alloc(600 * 1024, 7), { filename: "big.png", contentType: "image/png" });
+    form.append("enabled", "1");
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/preloader",
+      headers: { ...bearer(token), ...form.getHeaders() },
+      payload: form.getBuffer(),
+    });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it("rejects a replayed 2FA code at login", async () => {
+    const { generateToken } = await import("../src/totp.js");
+    const token = await signup("replay@factorialstudio.com", "secret123");
+    const secret = (await app.inject({ method: "POST", url: "/api/2fa/begin", headers: bearer(token) })).json().secret as string;
+    await app.inject({ method: "POST", url: "/api/2fa/confirm", headers: bearer(token), payload: { code: generateToken(secret) } });
+
+    const code = generateToken(secret);
+    const first = await app.inject({ method: "POST", url: "/api/login", payload: { email: "replay@factorialstudio.com", password: "secret123", code } });
+    expect(first.statusCode).toBe(200);
+    const replay = await app.inject({ method: "POST", url: "/api/login", payload: { email: "replay@factorialstudio.com", password: "secret123", code } });
+    expect(replay.statusCode).toBe(401);
+    expect(replay.json().code).toBe("2fa-replay");
+  });
+});
+
 describe("team / shared access", () => {
   it("invited member accesses the owner's apps; removal revokes it", async () => {
     const owner = await signup("teamowner@factorialstudio.com");

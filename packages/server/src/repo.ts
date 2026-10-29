@@ -20,6 +20,7 @@ export interface UserRow {
   plan: string;
   totp_secret: string | null;
   totp_enabled: number;
+  totp_last_step: number | null;
   domain: string | null;
   domain_token: string | null;
   domain_verified: number;
@@ -68,7 +69,7 @@ export interface ExportRow {
 export function createUser(email: string, passwordHash: string): UserRow {
   const row: UserRow = {
     id: randomUUID(), email, password_hash: passwordHash, plan: "free",
-    totp_secret: null, totp_enabled: 0, domain: null, domain_token: null, domain_verified: 0,
+    totp_secret: null, totp_enabled: 0, totp_last_step: null, domain: null, domain_token: null, domain_verified: 0,
     stripe_customer_id: null, stripe_subscription_id: null, plan_status: null, created_at: now(),
   };
   getDb()
@@ -108,7 +109,13 @@ export function updatePassword(id: string, passwordHash: string): void {
 }
 
 export function setTotp(id: string, secret: string | null, enabled: number): void {
-  getDb().prepare("UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?").run(secret, enabled, id);
+  // reset the replay counter whenever the secret/enabled state changes
+  getDb().prepare("UPDATE users SET totp_secret = ?, totp_enabled = ?, totp_last_step = NULL WHERE id = ?").run(secret, enabled, id);
+}
+
+/** Record the last accepted TOTP time-step (replay guard: a step can't be reused). */
+export function setTotpLastStep(id: string, step: number): void {
+  getDb().prepare("UPDATE users SET totp_last_step = ? WHERE id = ?").run(step, id);
 }
 
 export function setUserDomain(id: string, domain: string, token: string): void {

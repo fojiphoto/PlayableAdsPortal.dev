@@ -40,13 +40,18 @@ export function generateToken(secret: string): string {
   return hotp(secret, Math.floor(Date.now() / 30000));
 }
 
-export function verifyTotp(secret: string, token: string, window = 1): boolean {
-  if (!/^\d{6}$/.test(token)) return false;
+/** Return the matched time-step counter for a token, or -1 if it doesn't match the ±window. */
+export function matchTotpStep(secret: string, token: string, window = 1): number {
+  if (!/^\d{6}$/.test(token)) return -1;
   const counter = Math.floor(Date.now() / 30000);
   for (let w = -window; w <= window; w++) {
-    if (hotp(secret, counter + w) === token) return true;
+    if (hotp(secret, counter + w) === token) return counter + w;
   }
-  return false;
+  return -1;
+}
+
+export function verifyTotp(secret: string, token: string, window = 1): boolean {
+  return matchTotpStep(secret, token, window) >= 0;
 }
 
 export function otpauthURL(secret: string, label: string, issuer = "Factorial AdLab"): string {
