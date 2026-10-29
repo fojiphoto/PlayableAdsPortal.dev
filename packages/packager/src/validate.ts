@@ -1,11 +1,25 @@
 import type { NetworkSpec, ValidationIssue } from "./types.js";
 import { findExternalRefs } from "./inline.js";
 
+/** Things a playable can call to fire its CTA — if none appear, the ad has no click-through. */
+const CTA_CALL =
+  /PF\.(install|installFullGame|openStore)|PlayableForge\.|mraid\.open|window\.open\(|ExitApi\.exit|FbPlayableAd\.onCTAClick|openAppStore\(|dapi\.openStoreUrl|window\.install\(|postMessage\(\s*["']download/;
+
 /**
  * Validate a packaged playable against a network spec. Mirrors what a network's own review tool
- * checks: size cap, self-containment, MRAID presence, viewport. `error`s would get the ad rejected.
+ * checks — size cap, self-containment, no bundled SDK, a real click-through, orientation,
+ * viewport. `error`s would get the ad rejected; `warning`s are review risks.
+ *
+ * `html` is the final packaged markup (shim injected); `sourceHtml` is the playable as uploaded
+ * (inlined, pre-shim) so checks about what the *author* wrote are not fooled by our own runtime.
  */
-export function validate(bytes: Uint8Array, html: string, spec: NetworkSpec): ValidationIssue[] {
+export function validate(
+  bytes: Uint8Array,
+  html: string,
+  spec: NetworkSpec,
+  sourceHtml: string = html,
+  sourceFiles: readonly string[] = [],
+): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   // size cap
@@ -23,8 +37,12 @@ export function validate(bytes: Uint8Array, html: string, spec: NetworkSpec): Va
     });
   }
 
-  // self-containment (single-file formats must not reach out to the network)
-  const external = findExternalRefs(html);
+  // self-containment: nothing external except the hosts this network itself requires
+  const allowed = (spec.allowedExternalHosts ?? []).map((h) => h.toLowerCase());
+  const external = findExternalRefs(html).filter((ref) => {
+    const host = hostOf(ref);
+    return !allowed.some((a) => host === a || host.endsWith(`.${a}`));
+  });
   if (external.length > 0) {
     issues.push({
       level: spec.format === "zip" ? "warning" : "error",
@@ -33,12 +51,34 @@ export function validate(bytes: Uint8Array, html: string, spec: NetworkSpec): Va
     });
   }
 
-  // MRAID presence
-  if (spec.usesMraid && !/mraid/i.test(html)) {
+  // bundled SDK: networks inject mraid.js / dapi.js themselves — shipping your own copy is a rejection.
+  // Check the uploaded file list (the inliner absorbs a local copy, erasing the src) and any leftover tag.
+  const bundledSdk =
+    sourceFiles.some((f) => /(^|\/)(mraid|dapi)\.js$/i.test(f)) ||
+    /<script[^>]+src=["'][^"']*\b(mraid|dapi)\.js/i.test(sourceHtml);
+  if (bundledSdk) {
+    issues.push({
+      level: "error",
+      code: "bundled-sdk",
+      message: `The playable bundles its own mraid.js/dapi.js — ${spec.name} injects the SDK; remove the script tag`,
+    });
+  }
+
+  // a real click-through: the author must trigger the CTA somewhere
+  if (!CTA_CALL.test(sourceHtml)) {
     issues.push({
       level: "warning",
-      code: "no-mraid-ref",
-      message: `${spec.name} serves MRAID but the playable never references window.mraid`,
+      code: "no-cta-call",
+      message: "No click-through found — call window.PF.install() (or the network's CTA) from the playable",
+    });
+  }
+
+  // orientation: a portrait-/landscape-only network wants the creative to handle (or lock) orientation
+  if (spec.orientation !== "both" && !/orientation/i.test(sourceHtml)) {
+    issues.push({
+      level: "warning",
+      code: "no-orientation-handling",
+      message: `${spec.name} is ${spec.orientation}-only but the playable has no orientation handling (CSS @media (orientation) or screen.orientation)`,
     });
   }
 
@@ -48,6 +88,14 @@ export function validate(bytes: Uint8Array, html: string, spec: NetworkSpec): Va
   }
 
   return issues;
+}
+
+function hostOf(ref: string): string {
+  try {
+    return new URL(ref.startsWith("//") ? `https:${ref}` : ref).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
 }
 
 function fmt(bytes: number): string {

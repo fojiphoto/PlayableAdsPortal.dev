@@ -89,7 +89,7 @@ describe("validation", () => {
         ),
       },
     };
-    const r = await pack(src, getNetwork("mintegral"), {});
+    const r = await pack(src, getNetwork("tiktok"), {});
     expect(r.ok).toBe(false);
     expect(r.validation.some((v) => v.code === "size-exceeded")).toBe(true);
   });

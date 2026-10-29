@@ -15,7 +15,8 @@ export async function pack(
   spec: NetworkSpec,
   opts: PackOptions = {},
 ): Promise<PackResult> {
-  const html = injectRuntime(inlineToSingleHtml(source), spec, opts);
+  const inlined = inlineToSingleHtml(source);
+  const html = injectRuntime(inlined, spec, opts);
 
   let bytes: Uint8Array;
   if (spec.format === "zip") {
@@ -30,7 +31,7 @@ export async function pack(
     bytes = new TextEncoder().encode(html);
   }
 
-  const validation = validate(bytes, html, spec);
+  const validation = validate(bytes, html, spec, inlined, Object.keys(source.files));
   const filename = `${sanitize(opts.name ?? "playable")}_${spec.id}.${spec.ext}`;
 
   return {

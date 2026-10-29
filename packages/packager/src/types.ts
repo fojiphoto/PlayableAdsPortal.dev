@@ -13,8 +13,23 @@ export type NetworkFormat =
 
 export type Orientation = "portrait" | "landscape" | "both";
 
-/** The click-through mechanism the injected runtime should use. */
+/** Coarse click-through family (kept for compatibility; `ctaHook` is the precise mechanism). */
 export type ClickMode = "mraid" | "window-open";
+
+/**
+ * The exact, network-specific mechanism the injected runtime uses to fire the CTA and report
+ * lifecycle. Each network injects its own SDK global at serve time; emitting the wrong call is
+ * the #1 reason a playable is rejected or ships with a dead install button.
+ */
+export type CtaHook =
+  | "mraid" // window.mraid.open(url), gated on mraid "ready"; viewableChange → pause/resume
+  | "window-open" // window.open(url)
+  | "google-exitapi" // Google Ads / DV360: ExitApi.exit() (requires their exitapi.js)
+  | "meta-fb" // Meta Audience Network: FbPlayableAd.onCTAClick()
+  | "mintegral" // Mintegral: window.gameReady() on load, window.install() on CTA
+  | "pangle" // TikTok / Pangle: window.openAppStore(); window.gameEnd() on finish
+  | "ironsource-dapi" // ironSource / LevelPlay: dapi.openStoreUrl(), gated on dapi ready + viewable
+  | "vungle"; // Vungle / Liftoff legacy: parent.postMessage("download"|"complete", "*")
 
 /** A declarative description of one ad network's playable requirements. */
 export interface NetworkSpec {
@@ -26,7 +41,10 @@ export interface NetworkSpec {
   /** hard size cap in bytes; exceeding it is an error (would be rejected at review) */
   maxSizeBytes: number;
   orientation: Orientation;
+  /** coarse click family (see `ctaHook` for the precise call) */
   clickMode: ClickMode;
+  /** the precise CTA / lifecycle mechanism the runtime shim emits for this network */
+  ctaHook: CtaHook;
   /**
    * MRAID networks inject `mraid.js` themselves at serve time, so we must NOT bundle it —
    * we only reference `window.mraid`. When false, the playable is standalone.
@@ -35,7 +53,12 @@ export interface NetworkSpec {
   /** output file extension */
   ext: "html" | "zip";
   /**
-   * Caveats about this spec (e.g. "verify current cap", "Google uses ExitApi, not window.open").
+   * External hosts this network REQUIRES the playable to load (e.g. Google's exitapi.js).
+   * These are exempt from the self-containment check; everything else external is an error.
+   */
+  allowedExternalHosts?: string[];
+  /**
+   * Caveats about this spec (e.g. "cap per public docs", "Google uses ExitApi, not window.open").
    * The engine is correct; the exact numbers/macros are data to keep current (blueprint risk #3).
    */
   notes?: string;

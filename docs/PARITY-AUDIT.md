@@ -15,7 +15,8 @@ with plans/quota, Stripe billing, 2FA, team, preloader, domain token). Against t
 - **The core differentiator — a Unity C# → interactive web-playable compiler — is absent by design**, replaced by a
   pixel‑capture flipbook (PHASE2.md "approach B").
 - Several DONE‑looking features are **shells**: the domain gate gates nothing, team roles authorize nothing,
-  in‑playable analytics is a no‑op, and the validator cannot catch the per‑network CTA hooks that actually get ads rejected.
+  in‑playable analytics is a no‑op. *(Fixed 2026-10-29: the runtime now emits each network's real CTA/lifecycle hook and
+  the validator checks bundled SDKs, a real click-through, orientation and allowlisted externals — see Gap #1.)*
 
 ## Live state (added by the build session, 2026-10-29)
 
@@ -190,7 +191,7 @@ landing; two extra networks; a capture-based Unity path that ships *something* w
 
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
-| 1 | **Per-network CTA/lifecycle hooks + real validator** (Google ExitApi, Meta FbPlayableAd, Mintegral gameReady/install, Pangle openAppStore, ironSource dapi, AppLovin CHALLENGE; orientation; fix dead mraid check; verified caps) | The core promise is "passes each network's review"; today most outputs would be rejected or have a broken CTA | M per network / L all |
+| 1 | ~~**Per-network CTA/lifecycle hooks + real validator**~~ **DONE 2026-10-29** — `ctaHook` per network (Google/DV360 `ExitApi.exit` + exitapi.js, Meta `FbPlayableAd.onCTAClick`, Mintegral `gameReady`/`install`, Pangle `openAppStore`/`gameEnd`, ironSource `dapi` ready+viewable, Vungle `postMessage`, ready-gated `mraid.open` + viewableChange→pause/resume); validator: bundled-SDK error, real click-through check, orientation, per-network external allowlist; caps reviewed. Remaining: AppLovin `CHALLENGE_*` analytics events (optional), live review-tool confirmation per network. | Core promise — was the #1 rejection risk | done |
 | 2 | **Unity compiler / interactive playable from the game itself** | Competitor's moat and the headline; flipbook is a different product | XL |
 | 3 | **Enforce the domain-verification gate** | Currently cosmetic; also anti-abuse | S |
 | 4 | **Password reset + email verification + mail transport** | Table-stakes SaaS auth; no recovery today | M |

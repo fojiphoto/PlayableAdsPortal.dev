@@ -35,6 +35,15 @@ export function injectRuntime(html: string, spec: NetworkSpec, opts: PackOptions
     out = ensureInHead(out, '<meta charset="utf-8">');
   }
 
+  // Google Ads / DV360 fire the CTA through ExitApi.exit(), which lives in Google's own
+  // exitapi.js — the one external script those networks require (allowlisted in the validator).
+  if (spec.ctaHook === "google-exitapi" && !/exitapi\.js/i.test(out)) {
+    out = ensureInHead(
+      out,
+      '<script src="https://tpc.googlesyndication.com/pagead/gadgets/html5/api/exitapi.js"></script>',
+    );
+  }
+
   // custom preloader / splash — injected at the top of <body> so it covers the playable
   if (opts.preloader && (opts.preloader.logoDataUri || opts.preloader.bg)) {
     const pl = buildPreloader(opts.preloader);
@@ -44,6 +53,7 @@ export function injectRuntime(html: string, spec: NetworkSpec, opts: PackOptions
 
   const shim = buildRuntimeShim({
     clickMode: spec.clickMode,
+    ctaHook: spec.ctaHook,
     usesMraid: spec.usesMraid,
     ctaUrl: opts.ctaUrl ?? "",
     iosUrl: opts.iosUrl ?? "",
