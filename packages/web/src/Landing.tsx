@@ -55,27 +55,19 @@ export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
             </div>
           </div>
 
-          {/* report / export card */}
-          <div className="fx-report">
-            <div className="fx-rp-bar">
-              <i style={{ background: "#ff6b5e" }} /><i style={{ background: "var(--gold)" }} /><i style={{ background: "var(--leaf2)" }} />
-              <span>castle_v2 — export</span>
-            </div>
-            <div className="fx-rp-body">
-              {[
-                ["AppLovin", "2.5 KB / 5 MB"],
-                ["Meta (zip)", "1.5 KB / 2 MB"],
-                ["Mintegral", "2.5 KB / 2 MB"],
-                ["Unity Ads", "2.5 KB / 5 MB"],
-                ["ironSource", "2.5 KB / 5 MB"],
-              ].map(([n, s]) => (
-                <div className="fx-rp-row" key={n}>
-                  <span><span className="fx-rp-ok">✓</span> {n}</span>
-                  <b>{s}</b>
-                </div>
-              ))}
-              <div style={{ marginTop: 14, fontSize: ".78rem", color: "var(--leaf2)", fontWeight: 600 }}>
-                5 networks packaged · 0 errors
+          {/* live playable-ad demos — running in mobile frames */}
+          <div className="fx-demos">
+            <div className="fx-demos-eyebrow">▶ Live playable ads</div>
+            <div className="fx-phones">
+              <div className="fx-phone">
+                <span className="fx-phone-notch" />
+                <iframe className="fx-phone-screen" src="/demos/block-blast.html" title="Block Blast playable ad" loading="lazy" />
+                <div className="fx-phone-cap"><b>Block Blast</b><span>Puzzle</span></div>
+              </div>
+              <div className="fx-phone">
+                <span className="fx-phone-notch" />
+                <iframe className="fx-phone-screen" src="/demos/snack-io.html" title="Snack.IO playable ad" loading="lazy" />
+                <div className="fx-phone-cap"><b>Snack.IO</b><span>Arcade .io</span></div>
               </div>
             </div>
           </div>

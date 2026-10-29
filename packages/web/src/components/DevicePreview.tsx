@@ -31,7 +31,7 @@ export function DevicePreview({ src, label }: { src: string | null; label?: stri
           />
         ) : (
           <div
-            className="flex items-center justify-center rounded-[1.4rem] text-center text-sm text-slate-600"
+            className="flex items-center justify-center rounded-[1.4rem] text-center text-sm text-slate-400"
             style={{ width: w, height: h }}
           >
             Export a network, then preview it here

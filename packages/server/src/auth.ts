@@ -48,7 +48,10 @@ export function verifyToken(token: string): TokenPayload | null {
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   const [h, p, s] = parts as [string, string, string];
-  if (sign(`${h}.${p}`) !== s) return null;
+  // timing-safe signature comparison
+  const expected = Buffer.from(sign(`${h}.${p}`));
+  const got = Buffer.from(s);
+  if (expected.length !== got.length || !timingSafeEqual(expected, got)) return null;
   try {
     const payload = JSON.parse(Buffer.from(p, "base64url").toString()) as TokenPayload;
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;

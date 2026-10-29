@@ -284,9 +284,12 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         androidUrl: body.androidUrl ?? stored.androidUrl,
         preloader: preloaderForExport(req.user!.id),
       };
+      // only count a network toward quota the first time this creative exports it —
+      // re-exporting an unchanged creative must not keep burning the 30-day allowance
+      const already = new Set(listExports(cr.id).map((e) => e.network));
       const results = await packAll(source, opts, ids);
       for (const r of results) upsertExport(cr.id, r);
-      for (const id of ids) addExportUsage(req.user!.id, id); // count usage toward quota
+      for (const id of ids) if (!already.has(id)) addExportUsage(req.user!.id, id);
       return { id: cr.id, exported: results.map(packView) };
     },
   );

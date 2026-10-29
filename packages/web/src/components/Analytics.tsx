@@ -13,7 +13,7 @@ export function Analytics() {
   }, []);
 
   if (err) return <div className="text-sm text-red-400">{err}</div>;
-  if (!data) return <div className="text-sm text-slate-500">Loading…</div>;
+  if (!data) return <div className="text-sm text-slate-400">Loading…</div>;
 
   const maxDaily = Math.max(1, ...data.daily.map((d) => d.count));
   const maxNet = Math.max(1, ...data.byNetwork.map((n) => n.count));
@@ -33,7 +33,7 @@ export function Analytics() {
       <section className="mb-6 rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-5">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-amber-400">Exports · last 30 days</h2>
         {data.total === 0 ? (
-          <p className="text-sm text-slate-500">No exports yet — export a playable to see it here.</p>
+          <p className="text-sm text-slate-400">No exports yet — export a playable to see it here.</p>
         ) : (
           <>
             <div className="flex h-36 items-end gap-[3px]">
@@ -46,7 +46,7 @@ export function Analytics() {
                 </div>
               ))}
             </div>
-            <div className="mt-2 flex justify-between text-[10px] text-slate-500">
+            <div className="mt-2 flex justify-between text-[10px] text-slate-400">
               <span>{first}</span>
               <span>{last}</span>
             </div>
@@ -57,7 +57,7 @@ export function Analytics() {
       <section className="rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-5">
         <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-amber-400">By network</h2>
         {data.byNetwork.length === 0 ? (
-          <p className="text-sm text-slate-500">No exports yet.</p>
+          <p className="text-sm text-slate-400">No exports yet.</p>
         ) : (
           <div className="grid gap-2">
             {data.byNetwork.map((n) => (

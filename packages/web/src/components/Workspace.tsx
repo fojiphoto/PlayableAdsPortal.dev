@@ -141,7 +141,7 @@ export function Workspace({
                 <button className="text-amber-400 hover:underline" onClick={() => setSelected(new Set(networks.map((n) => n.id)))}>
                   all
                 </button>
-                <button className="text-slate-500 hover:underline" onClick={() => setSelected(new Set())}>
+                <button className="text-slate-400 hover:underline" onClick={() => setSelected(new Set())}>
                   none
                 </button>
               </div>

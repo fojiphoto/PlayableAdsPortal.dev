@@ -78,7 +78,7 @@ export function UploadForm({
           ) : (
             <>
               <div className="text-lg font-medium">Drop an HTML5 playable</div>
-              <div className="text-sm text-slate-500 mt-1">.zip (folder) or a single .html — or click to browse</div>
+              <div className="text-sm text-slate-400 mt-1">.zip (folder) or a single .html — or click to browse</div>
             </>
           )}
         </div>
@@ -117,7 +117,7 @@ const inputCls =
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
+      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">{label}</span>
       {children}
     </label>
   );

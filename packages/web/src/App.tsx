@@ -116,7 +116,7 @@ export default function App() {
                 className={`rounded-lg border px-3 py-1.5 ${page === "plans" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-200 hover:border-[#7cb342]"}`}
               >
                 {status.planName}
-                {status.limit != null && <span className="text-slate-500"> · {status.used}/{status.limit}</span>}
+                {status.limit != null && <span className="text-slate-400"> · {status.used}/{status.limit}</span>}
               </button>
             )}
             <button
@@ -186,7 +186,7 @@ export default function App() {
                 }`}
               >
                 <span className="truncate">{a.name}</span>
-                {a.conceptCount ? <span className="text-xs text-slate-500">{a.conceptCount}</span> : null}
+                {a.conceptCount ? <span className="text-xs text-slate-400">{a.conceptCount}</span> : null}
               </button>
             ))}
           </div>
@@ -207,7 +207,7 @@ export default function App() {
                     {c.name}
                   </button>
                 ))}
-                {concepts.length === 0 && <div className="px-2.5 py-1 text-xs text-slate-600">No concepts yet</div>}
+                {concepts.length === 0 && <div className="px-2.5 py-1 text-xs text-slate-400">No concepts yet</div>}
               </div>
               <CreateRow value={newConcept} onChange={setNewConcept} onAdd={addConcept} placeholder="New concept…" />
             </div>
@@ -225,7 +225,7 @@ export default function App() {
               onExported={() => getBillingStatus().then(setStatus).catch(() => {})}
             />
           ) : (
-            <div className="flex h-full min-h-[50vh] items-center justify-center text-center text-slate-500">
+            <div className="flex h-full min-h-[50vh] items-center justify-center text-center text-slate-400">
               {apps.length === 0
                 ? "Create your first app on the left to get started."
                 : activeApp
@@ -241,7 +241,7 @@ export default function App() {
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
-  return <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{children}</div>;
+  return <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{children}</div>;
 }
 
 function CreateRow({

@@ -6,7 +6,7 @@ import type { AuthUser, PlanStatus, TeamMember } from "../types";
 const input =
   "w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500";
 const panel = "rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-5";
-const label = "mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500";
+const label = "mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400";
 
 export function Settings({ user, status }: { user: AuthUser; status: PlanStatus | null }) {
   const [cur, setCur] = useState("");
@@ -211,11 +211,11 @@ function TeamSection() {
         People you add can see and work on your apps. They need a Factorial AdLab account first.
       </p>
       <div className="mb-3 grid gap-1">
-        {members.length === 0 && <div className="text-sm text-slate-600">No members yet.</div>}
+        {members.length === 0 && <div className="text-sm text-slate-400">No members yet.</div>}
         {members.map((m) => (
           <div key={m.id} className="flex items-center justify-between rounded-lg border border-[#1b5540] bg-[#06281c] px-3 py-2 text-sm">
             <span className="text-slate-100">
-              {m.email} <span className="text-xs text-slate-500">· {m.role}</span>
+              {m.email} <span className="text-xs text-slate-400">· {m.role}</span>
             </span>
             <button onClick={() => remove(m.id)} className="text-xs text-red-400 hover:underline">
               Remove

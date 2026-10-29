@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getPreloader, savePreloader } from "../api";
 
 const panel = "rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-5";
-const label = "mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500";
+const label = "mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400";
 
 export function Preloader() {
   const [enabled, setEnabled] = useState(false);

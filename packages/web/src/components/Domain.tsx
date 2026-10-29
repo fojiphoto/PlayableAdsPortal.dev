@@ -64,7 +64,7 @@ export function Domain() {
       </div>
 
       <section className={`${panel} mb-5`}>
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Company domain</label>
+        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">Company domain</label>
         <div className="flex gap-2">
           <input className={input} value={domain} onChange={(e) => setDomainInput(e.target.value)} placeholder="factorialstudio.dev" />
           <button onClick={save} disabled={busy || !domain.trim()} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">

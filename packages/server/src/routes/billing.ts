@@ -53,7 +53,11 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     if (!user) return reply.code(404).send({ error: "user not found" });
 
     if (!stripeEnabled()) {
-      // dev mode: no Stripe keys → just set the plan
+      // No Stripe keys. In production that must NOT hand out paid plans for free.
+      if (config.isProduction) {
+        return reply.code(503).send({ error: "billing is not configured" });
+      }
+      // dev/local/staging: switch instantly so the flow is testable without keys
       setUserPlan(user.id, plan);
       return { dev: true, status: planStatus(user.id) };
     }

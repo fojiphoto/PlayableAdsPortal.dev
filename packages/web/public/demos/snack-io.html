@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Snack.IO</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; background: #08121f; }
+  #wrap { position: absolute; inset: 0; display: flex; flex-direction: column; background: #08121f; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; color: #fff; z-index: 3; }
+  .logo { font-weight: 800; letter-spacing: .5px; font-size: 14px; }
+  .logo b { color: #7cf29c; }
+  .score { font-weight: 800; font-size: 13px; background: rgba(255,255,255,.1); padding: 4px 11px; border-radius: 10px; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .cta { position: absolute; left: 14px; right: 14px; bottom: 14px; padding: 12px; text-align: center; font-weight: 800; font-size: 15px;
+    color: #05231a; background: linear-gradient(180deg, #7cf29c, #28c76f); border-radius: 13px; box-shadow: 0 5px 0 #159a4f;
+    animation: p 1.1s ease-in-out infinite; z-index: 3; }
+  @keyframes p { 0%,100% { transform: scale(1); } 50% { transform: scale(1.045); } }
+  .badge { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); font-size: 9px; letter-spacing: 1.5px;
+    color: #bfe; background: rgba(0,0,0,.3); padding: 3px 9px; border-radius: 999px; z-index: 4; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+  <header><div class="logo">SNACK<b>.IO</b></div><div class="score" id="sc">0</div></header>
+  <div class="cta">▶ PLAY FREE</div>
+</div>
+<script>
+(function () {
+  var cv = document.getElementById('c'), x = cv.getContext('2d');
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  var scEl = document.getElementById('sc'), W, H;
+  function size() { cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr; W = cv.width; H = cv.height; }
+  window.addEventListener('resize', size); size();
+
+  var snake = { x: W / 2, y: H / 2, a: 0, seg: [], len: 16, hue: 140, score: 0 };
+  var rival = { x: W * 0.3, y: H * 0.35, a: 1, seg: [], len: 12, hue: 350 };
+  var i;
+  for (i = 0; i < 40; i++) { snake.seg.push({ x: snake.x, y: snake.y }); rival.seg.push({ x: rival.x, y: rival.y }); }
+
+  var food = [];
+  function spawn() { food.push({ x: 34 * dpr + Math.random() * (W - 68 * dpr), y: 64 * dpr + Math.random() * (H - 150 * dpr), h: (Math.random() * 360) | 0 }); }
+  for (i = 0; i < 5; i++) spawn();
+
+  function nearest(px, py) { var b = null, bd = 1e12; for (var i = 0; i < food.length; i++) { var dx = food[i].x - px, dy = food[i].y - py, d = dx * dx + dy * dy; if (d < bd) { bd = d; b = food[i]; } } return b; }
+  function steer(e, sp, wander) {
+    var f = nearest(e.x, e.y), ta = f ? Math.atan2(f.y - e.y, f.x - e.x) : e.a;
+    if (wander) ta += Math.sin(performance.now() / 600 + e.hue) * 0.7;
+    var da = ((ta - e.a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    e.a += Math.max(-0.09, Math.min(0.09, da));
+    e.x += Math.cos(e.a) * sp; e.y += Math.sin(e.a) * sp;
+    if (e.x < 26 * dpr) { e.x = 26 * dpr; e.a = Math.PI - e.a; }
+    if (e.x > W - 26 * dpr) { e.x = W - 26 * dpr; e.a = Math.PI - e.a; }
+    if (e.y < 56 * dpr) { e.y = 56 * dpr; e.a = -e.a; }
+    if (e.y > H - 80 * dpr) { e.y = H - 80 * dpr; e.a = -e.a; }
+    e.seg.unshift({ x: e.x, y: e.y }); while (e.seg.length > e.len * 3) e.seg.pop();
+  }
+  function eat(e) {
+    for (var i = food.length - 1; i >= 0; i--) { var dx = food[i].x - e.x, dy = food[i].y - e.y; if (dx * dx + dy * dy < (17 * dpr) * (17 * dpr)) { food.splice(i, 1); e.len += 2; if (e === snake) { snake.score += 1; scEl.textContent = snake.score; } spawn(); } }
+  }
+  function drawSnake(s, hue) {
+    for (var i = s.seg.length - 1; i >= 0; i -= 2) {
+      var p = s.seg[i], t = 1 - i / s.seg.length, rad = (4 + 7 * t) * dpr;
+      x.beginPath(); x.fillStyle = 'hsl(' + hue + ',80%,' + (42 + 20 * t) + '%)'; x.arc(p.x, p.y, rad, 0, 7); x.fill();
+    }
+    var h = s.seg[0]; x.beginPath(); x.fillStyle = 'hsl(' + hue + ',85%,62%)'; x.arc(h.x, h.y, 10 * dpr, 0, 7); x.fill();
+    x.fillStyle = '#fff';
+    x.beginPath(); x.arc(h.x + Math.cos(s.a + 0.5) * 5 * dpr, h.y + Math.sin(s.a + 0.5) * 5 * dpr, 2.6 * dpr, 0, 7);
+    x.arc(h.x + Math.cos(s.a - 0.5) * 5 * dpr, h.y + Math.sin(s.a - 0.5) * 5 * dpr, 2.6 * dpr, 0, 7); x.fill();
+    x.fillStyle = '#111';
+    x.beginPath(); x.arc(h.x + Math.cos(s.a + 0.5) * 6 * dpr, h.y + Math.sin(s.a + 0.5) * 6 * dpr, 1.1 * dpr, 0, 7);
+    x.arc(h.x + Math.cos(s.a - 0.5) * 6 * dpr, h.y + Math.sin(s.a - 0.5) * 6 * dpr, 1.1 * dpr, 0, 7); x.fill();
+  }
+  function loop() {
+    x.fillStyle = '#08121f'; x.fillRect(0, 0, W, H);
+    x.fillStyle = 'rgba(255,255,255,.045)';
+    for (var gx = 0; gx < W; gx += 26 * dpr) for (var gy = 0; gy < H; gy += 26 * dpr) x.fillRect(gx, gy, 2, 2);
+    for (var i = 0; i < food.length; i++) {
+      var f = food[i], g = x.createRadialGradient(f.x, f.y, 0, f.x, f.y, 15 * dpr);
+      g.addColorStop(0, 'hsl(' + f.h + ',90%,65%)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      x.fillStyle = g; x.beginPath(); x.arc(f.x, f.y, 15 * dpr, 0, 7); x.fill();
+      x.fillStyle = 'hsl(' + f.h + ',95%,72%)'; x.beginPath(); x.arc(f.x, f.y, 5 * dpr, 0, 7); x.fill();
+    }
+    steer(rival, 2.0 * dpr, true); eat(rival); drawSnake(rival, rival.hue);
+    steer(snake, 2.5 * dpr, false); eat(snake); drawSnake(snake, snake.hue);
+    if (snake.len > 46) { snake.len = 16; snake.seg.length = 20; snake.score = 0; scEl.textContent = 0; }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
