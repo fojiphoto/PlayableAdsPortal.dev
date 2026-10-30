@@ -85,6 +85,34 @@ already have.** No new server compiler needed for the MVP — the packager does 
   stay on the capture path.
 - **2.4+ (long-term moat):** C#→JS transpile + purpose-built renderer for sub-MB output (approach C).
 
+## Real-build validation (2026-10-30)
+
+Headless Unity **6000.2.6f2** build of a one-cube tap game (Physics + IMGUI, nothing else) through the
+plugin's playable settings (compression off, Managed Stripping High, exceptions None, strip engine code,
+IL2CPP size-optimised, minimal template) → `compileUnityWebGL` → export → browser:
+
+| Part | Size |
+|---|---|
+| `.wasm` (Unity player + game) | 11.80 MB |
+| `.data` (default resources, 99 % textures) | 3.08 MB |
+| `.framework.js` | 0.37 MB |
+| `.loader.js` | 0.02 MB |
+| **single-file playable** | **20.35 MB** |
+
+- The pipeline works end to end: the engine boots from one HTML (wasm/data/framework as `blob:` URLs,
+  WebGL 2 context, physics, input), the PF shim is injected and the analytics beacons arrive at the
+  collector (impression / start / custom, flagged as preview).
+- **The Unity 6 player alone is ~4× any ad cap.** No asset trimming fixes that, so approach B is a real
+  compiler and an honest size diagnostic, not a route to ad networks. The capture pipeline stays the
+  shipping path; the competitor's headline needs the transpiler + custom renderer (approach C).
+- Lessons baked in: components created only at runtime (e.g. `CreatePrimitive` colliders) are removed by
+  engine-code stripping — reference them in a scene or add a `link.xml`; the Personal-licence splash
+  cannot be disabled; `runInBackground` is forced on for playable builds so ad webviews never pause it;
+  the plugin now has a headless CLI entry (`-executeMethod FactorialAdLab.Editor.WebGLCompileUploader.BuildFromCommandLine -adlabOut <dir>`).
+- The validation also caught a shipped regression: the runtime shim had a SyntaxError (an escaped regex
+  lost its backslashes), so `window.PF` was undefined in every export since the analytics commit. Fixed in
+  `ef4528d`; `shim-runtime.test.ts` now executes the generated shim in a sandbox.
+
 ## Integration note
 
 The plugin uploads frames to **`/api/concepts/:id/capture`**, a sibling of the web dashboard's

@@ -276,6 +276,13 @@ else start();
     warnings.push(
       `The playable is ${formatBytes(breakdown.embedded)} — above every network's cap (2–5 MB). Base64 embedding adds ~33%, so the raw build must be ≈3.5 MB or less for a 5 MB network.`,
     );
+  }
+  if (breakdown.wasm > 8 * MB) {
+    // Measured 2026-10-30: a one-cube test game on Unity 6000.2 with High stripping, no exceptions and engine
+    // stripping still produced an 11.8 MB .wasm — the Unity player itself is far above ad caps.
+    warnings.push(
+      `The Unity player alone is ${formatBytes(breakdown.wasm)} of code — no asset trimming can bring this under an ad cap. For ad networks use the capture pipeline (record gameplay → flipbook playable); this build still works as a web demo or landing-page embed.`,
+    );
   } else if (breakdown.embedded > 2 * MB) {
     warnings.push(`At ${formatBytes(breakdown.embedded)} the playable fits 5 MB networks (AppLovin, Unity Ads, ironSource…) but not 2 MB ones (Meta, TikTok, Chartboost, Tencent).`);
   }

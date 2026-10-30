@@ -27,6 +27,13 @@ The compile path sets Player Settings for a playable (WebGL compression off, Hig
 no exceptions, strip engine code, IL2CPP size-optimised, minimal template, no data caching) for the
 build only and restores your settings afterwards. Requires the **WebGL Build Support** module.
 
+**Measured on Unity 6000.2 (one-cube test game, every size setting on): 11.8 MB wasm → 20 MB single file.** The
+Unity 6 player alone is far above the 2–5 MB caps, so use the compile path to measure and to make web demos, and
+the capture path to ship to networks. Components your scripts create only at runtime (e.g. a `CreatePrimitive`
+collider) are removed by engine-code stripping — reference them in a scene or add a `link.xml`.
+
+Headless build (CI): `Unity -batchmode -nographics -quit -projectPath <proj> -buildTarget WebGL -executeMethod FactorialAdLab.Editor.WebGLCompileUploader.BuildFromCommandLine -adlabOut <dir>`.
+
 Your game talks to the ad through `FactorialAdLab.Playable.InstallFullGame()`, `LifeCycle.GameStarted()/GameEnded()`
 and `Analytics.LogEvent("name")` — a WebGL `.jslib` bridges them to the per-network runtime shim.
 
