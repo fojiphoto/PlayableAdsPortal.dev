@@ -12,7 +12,7 @@ import { appRoutes } from "./routes/apps.js";
 import { creativeRoutes } from "./routes/creatives.js";
 import { billingRoutes } from "./routes/billing.js";
 import { accountRoutes } from "./routes/account.js";
-import { teamRoutes } from "./routes/team.js";
+import { orgRoutes } from "./routes/orgs.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { preloaderRoutes } from "./routes/preloader.js";
 import { domainRoutes } from "./routes/domain.js";
@@ -37,7 +37,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(creativeRoutes);
   await app.register(billingRoutes);
   await app.register(accountRoutes);
-  await app.register(teamRoutes);
+  await app.register(orgRoutes);
   await app.register(analyticsRoutes);
   await app.register(preloaderRoutes);
   await app.register(domainRoutes);

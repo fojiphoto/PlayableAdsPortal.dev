@@ -10,7 +10,11 @@ import type {
   PackResultView,
   Plan,
   PlanStatus,
-  TeamMember,
+  WorkspaceRef,
+  WorkspaceListItem,
+  OrgDetail,
+  OrgRole,
+  InviteInfo,
   Analytics,
   PreloaderSettings,
   DomainStatus,
@@ -111,9 +115,20 @@ async function delJson<T>(path: string): Promise<T> {
   if (!res.ok) return toError(res);
   return res.json();
 }
-export const listTeam = () => getJson<TeamMember[]>("/team");
-export const inviteTeam = (email: string) => postJson<TeamMember[]>("/team/invite", { email });
-export const removeTeam = (memberId: string) => delJson<TeamMember[]>(`/team/${memberId}`);
+// ── workspaces (organizations) + roles ──
+export const listWorkspaces = () => getJson<WorkspaceListItem[]>("/workspaces");
+export const switchWorkspace = (orgId: string) => postJson<WorkspaceRef>("/workspaces/switch", { orgId });
+export const createWorkspace = (name: string) => postJson<WorkspaceRef>("/orgs", { name });
+export const getOrg = () => getJson<OrgDetail>("/orgs/current");
+export const renameOrg = (name: string) => patchJson<OrgDetail>("/orgs/current", { name });
+export const inviteMember = (email: string, role: OrgRole) => postJson<OrgDetail>("/orgs/current/invites", { email, role });
+export const revokeInvite = (id: string) => delJson<OrgDetail>(`/orgs/current/invites/${id}`);
+export const setMemberRole = (userId: string, role: OrgRole) => patchJson<OrgDetail>(`/orgs/current/members/${userId}`, { role });
+export const removeMember = (userId: string) => delJson<OrgDetail>(`/orgs/current/members/${userId}`);
+export const leaveWorkspace = () => delJson<{ left: boolean; workspace: WorkspaceRef }>("/orgs/current/members/me");
+export const transferOwnership = (userId: string) => postJson<OrgDetail>("/orgs/current/transfer", { userId });
+export const getInvite = (token: string) => getJson<InviteInfo>(`/invites/${encodeURIComponent(token)}`);
+export const acceptInvite = (token: string) => postJson<{ joined: boolean; workspace: WorkspaceRef }>("/invites/accept", { token });
 
 // ── analytics ──
 export const getAnalytics = (days = 30, includePreview = false) =>

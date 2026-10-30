@@ -1,14 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
-import { changePassword, inviteTeam, listTeam, removeTeam, twofaBegin, twofaConfirm, twofaDisable, twofaStatus } from "../api";
-import type { AuthUser, PlanStatus, TeamMember } from "../types";
+import { changePassword, twofaBegin, twofaConfirm, twofaDisable, twofaStatus } from "../api";
+import { getOrg, renameOrg, inviteMember, revokeInvite, setMemberRole, removeMember, leaveWorkspace, transferOwnership } from "../api";
+import type { AuthUser, OrgDetail, OrgRole, PlanStatus } from "../types";
 
 const input =
   "w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500";
 const panel = "rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-5";
 const label = "mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400";
 
-export function Settings({ user, status }: { user: AuthUser; status: PlanStatus | null }) {
+export function Settings({ user, status, onWorkspaceChanged }: { user: AuthUser; status: PlanStatus | null; onWorkspaceChanged?: () => void }) {
   const [cur, setCur] = useState("");
   const [nw, setNw] = useState("");
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -166,70 +167,178 @@ export function Settings({ user, status }: { user: AuthUser; status: PlanStatus 
         )}
       </section>
 
-      <TeamSection />
+      <WorkspaceSection me={user} onChanged={onWorkspaceChanged} />
     </div>
   );
 }
 
-function TeamSection() {
-  const [members, setMembers] = useState<TeamMember[]>([]);
+const ROLE_HELP: Record<OrgRole, string> = {
+  viewer: "preview & download",
+  member: "+ upload, capture, compile, export",
+  admin: "+ delete, members, domain, preloader",
+  owner: "+ billing, ownership",
+};
+
+function WorkspaceSection({ me, onChanged }: { me: AuthUser; onChanged?: () => void }) {
+  const [org, setOrg] = useState<OrgDetail | null>(null);
   const [email, setEmail] = useState("");
+  const [role, setRole] = useState<OrgRole>("member");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    listTeam().then(setMembers).catch(() => {});
+    getOrg().then(setOrg).catch((e) => setErr((e as Error).message));
   }, []);
 
-  async function invite(e: FormEvent) {
-    e.preventDefault();
-    if (!email.trim()) return;
+  async function run(action: () => Promise<OrgDetail>) {
     setBusy(true);
     setErr(null);
     try {
-      setMembers(await inviteTeam(email.trim()));
-      setEmail("");
+      setOrg(await action());
     } catch (er) {
       setErr((er as Error).message);
     } finally {
       setBusy(false);
     }
   }
-  async function remove(id: string) {
-    setErr(null);
+  async function invite(e: FormEvent) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    await run(() => inviteMember(email.trim(), role));
+    setEmail("");
+  }
+  async function rename() {
+    if (!org) return;
+    const name = window.prompt("Workspace name", org.name)?.trim();
+    if (!name || name === org.name) return;
+    await run(() => renameOrg(name));
+    onChanged?.();
+  }
+  async function leave() {
+    if (!window.confirm("Leave this workspace? You will lose access to its apps.")) return;
+    setBusy(true);
     try {
-      setMembers(await removeTeam(id));
+      await leaveWorkspace();
+      onChanged?.();
+      setOrg(await getOrg());
     } catch (er) {
       setErr((er as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
+  async function transfer(userId: string, toEmail: string) {
+    if (!window.confirm(`Transfer ownership of "${org?.name}" to ${toEmail}? You become an admin.`)) return;
+    await run(() => transferOwnership(userId));
+    onChanged?.();
+  }
+
+  if (!org) return <section className={`${panel} mt-5 text-sm text-slate-400`}>{err ?? "Loading workspace…"}</section>;
+  const isOwner = org.role === "owner";
+  const isAdmin = isOwner || org.role === "admin";
+  const canEditRow = (m: { id: string; role: OrgRole }) => isAdmin && m.role !== "owner" && (isOwner || m.role !== "admin");
 
   return (
     <section className={`${panel} mt-5`}>
-      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-amber-400">Team members</h2>
-      <p className="mb-3 text-sm text-slate-400">
-        People you add can see and work on your apps. They need a Factorial AdLab account first.
-      </p>
-      <div className="mb-3 grid gap-1">
-        {members.length === 0 && <div className="text-sm text-slate-400">No members yet.</div>}
-        {members.map((m) => (
-          <div key={m.id} className="flex items-center justify-between rounded-lg border border-[#1b5540] bg-[#06281c] px-3 py-2 text-sm">
-            <span className="text-slate-100">
-              {m.email} <span className="text-xs text-slate-400">· {m.role}</span>
-            </span>
-            <button onClick={() => remove(m.id)} className="text-xs text-red-400 hover:underline">
-              Remove
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+          Workspace · <span className="text-slate-100 normal-case tracking-normal">{org.name}</span>
+        </h2>
+        <div className="flex items-center gap-3 text-xs">
+          <span className="text-slate-400">
+            you are <b className="text-slate-200">{org.role}</b>
+          </span>
+          {isAdmin && (
+            <button onClick={() => void rename()} className="text-amber-400 hover:underline">
+              Rename
             </button>
+          )}
+          {!isOwner && (
+            <button onClick={() => void leave()} disabled={busy} className="text-red-400 hover:underline disabled:opacity-40">
+              Leave
+            </button>
+          )}
+        </div>
+      </div>
+      <p className="mb-3 text-sm text-slate-400">
+        Apps, plan, domain verification and the export quota belong to the workspace; the owner ({org.owner.email}) is billed. Roles: viewer →
+        member → admin → owner.
+      </p>
+
+      <div className="mb-3 grid gap-1">
+        {org.members.map((m) => (
+          <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#1b5540] bg-[#06281c] px-3 py-2 text-sm">
+            <span className="text-slate-100">
+              {m.email}
+              {m.id === me.id && <span className="text-xs text-slate-500"> (you)</span>}
+            </span>
+            <span className="flex items-center gap-2 text-xs">
+              {canEditRow(m) ? (
+                <select
+                  value={m.role}
+                  disabled={busy}
+                  onChange={(e) => void run(() => setMemberRole(m.id, e.target.value as OrgRole))}
+                  className="rounded border border-[#1f6b4a] bg-[#0a3a28] px-1.5 py-0.5 text-slate-200"
+                  title={ROLE_HELP[m.role]}
+                >
+                  <option value="viewer">viewer</option>
+                  <option value="member">member</option>
+                  {isOwner && <option value="admin">admin</option>}
+                </select>
+              ) : (
+                <span className="text-slate-400" title={ROLE_HELP[m.role]}>
+                  {m.role}
+                </span>
+              )}
+              {isOwner && m.role !== "owner" && (
+                <button onClick={() => void transfer(m.id, m.email)} disabled={busy} className="text-slate-400 hover:text-amber-300 hover:underline disabled:opacity-40">
+                  make owner
+                </button>
+              )}
+              {canEditRow(m) && (
+                <button onClick={() => void run(() => removeMember(m.id))} disabled={busy} className="text-red-400 hover:underline disabled:opacity-40">
+                  Remove
+                </button>
+              )}
+            </span>
           </div>
         ))}
       </div>
+
+      {isAdmin && org.invites.length > 0 && (
+        <div className="mb-3">
+          <div className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">Pending invites</div>
+          <div className="grid gap-1">
+            {org.invites.map((i) => (
+              <div key={i.id} className="flex items-center justify-between rounded-lg border border-dashed border-[#1b5540] px-3 py-1.5 text-sm text-slate-300">
+                <span>
+                  {i.email} <span className="text-xs text-slate-500">· {i.role} · expires {new Date(i.expiresAt).toLocaleDateString()}</span>
+                </span>
+                <button onClick={() => void run(() => revokeInvite(i.id))} disabled={busy} className="text-xs text-red-400 hover:underline disabled:opacity-40">
+                  Revoke
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {err && <div className="mb-2 text-sm text-red-400">{err}</div>}
-      <form onSubmit={invite} className="flex gap-2">
-        <input className={input} type="email" placeholder="teammate@studio.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <button type="submit" disabled={busy} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
-          {busy ? "…" : "Invite"}
-        </button>
-      </form>
+
+      {isAdmin && (
+        <form onSubmit={invite} className="flex flex-wrap gap-2">
+          <input className={`${input} min-w-[200px] flex-1`} type="email" placeholder="teammate@studio.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <select value={role} onChange={(e) => setRole(e.target.value as OrgRole)} className={`${input} w-auto`} title={ROLE_HELP[role]}>
+            <option value="viewer">viewer</option>
+            <option value="member">member</option>
+            {isOwner && <option value="admin">admin</option>}
+          </select>
+          <button type="submit" disabled={busy} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
+            {busy ? "…" : "Send invite"}
+          </button>
+          <p className="w-full text-xs text-slate-500">They get an email link; no account needed in advance. Invites expire after 7 days.</p>
+        </form>
+      )}
     </section>
   );
 }

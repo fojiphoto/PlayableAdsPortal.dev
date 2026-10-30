@@ -999,30 +999,172 @@ describe("compile jobs: Unity WebGL build → single-file playable", () => {
   });
 });
 
-describe("team / shared access", () => {
-  it("invited member accesses the owner's apps; removal revokes it", async () => {
-    const owner = await signup("teamowner@factorialstudio.com");
-    const member = await signup("teammember@factorialstudio.com");
-    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(owner), payload: { name: "Shared" } })).json().id;
+describe("organizations / workspaces / roles", () => {
+  const ws = async (token: string) => (await app.inject({ method: "GET", url: "/api/workspaces", headers: bearer(token) })).json();
+  const me = async (token: string) => (await app.inject({ method: "GET", url: "/api/me", headers: bearer(token) })).json();
+  const org = async (token: string) => (await app.inject({ method: "GET", url: "/api/orgs/current", headers: bearer(token) })).json();
+  const invite = (token: string, email: string, role = "member") =>
+    app.inject({ method: "POST", url: "/api/orgs/current/invites", headers: bearer(token), payload: { email, role } });
+  const accept = (token: string, invToken: string) => app.inject({ method: "POST", url: "/api/invites/accept", headers: bearer(token), payload: { token: invToken } });
+  const switchTo = (token: string, orgId: string) => app.inject({ method: "POST", url: "/api/workspaces/switch", headers: bearer(token), payload: { orgId } });
+  const inviteTokenFor = (email: string) => {
+    const m = [...outbox].reverse().find((x) => x.to === email && x.html.includes("?invite="));
+    if (!m) throw new Error("no invite mail for " + email);
+    return m.html.match(/[?&]invite=([a-f0-9]+)/)![1]!;
+  };
 
-    // before invite: member can't see it
-    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(member) })).statusCode).toBe(404);
+  it("signup creates a personal workspace; /api/me and /api/workspaces expose it", async () => {
+    const token = await signup("solo@factorialstudio.com");
+    const m = await me(token);
+    expect(m.workspace).toMatchObject({ name: "solo's workspace", role: "owner", ownerEmail: "solo@factorialstudio.com" });
+    const list = await ws(token);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ role: "owner", memberCount: 1, isCurrent: true });
+    const detail = await org(token);
+    expect(detail.members).toEqual([expect.objectContaining({ email: "solo@factorialstudio.com", role: "owner" })]);
+    // rename (admin+), create a second workspace and switch
+    expect((await app.inject({ method: "PATCH", url: "/api/orgs/current", headers: bearer(token), payload: { name: "Solo Studio" } })).json().name).toBe("Solo Studio");
+    const created = await app.inject({ method: "POST", url: "/api/orgs", headers: bearer(token), payload: { name: "Side Project" } });
+    expect(created.statusCode).toBe(201);
+    expect((await me(token)).workspace.name).toBe("Side Project");
+    expect((await ws(token)).map((w: { name: string }) => w.name).sort()).toEqual(["Side Project", "Solo Studio"]);
+  });
 
-    const inv = await app.inject({ method: "POST", url: "/api/team/invite", headers: bearer(owner), payload: { email: "teammember@factorialstudio.com" } });
+  it("email invite → accept (no prior account) → switch → shared apps; apps are isolated per workspace", async () => {
+    const owner = await signup("orgowner@factorialstudio.com");
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(owner), payload: { name: "Shared App" } })).json().id;
+
+    // invite someone who has NO account yet
+    const inv = await invite(owner, "newbie@factorialstudio.com", "member");
     expect(inv.statusCode).toBe(201);
-    expect(inv.json()).toHaveLength(1);
+    expect(inv.json().invites).toEqual([expect.objectContaining({ email: "newbie@factorialstudio.com", role: "member" })]);
+    const raw = inviteTokenFor("newbie@factorialstudio.com");
+    // public lookup tells the auth screen what the link is for
+    const info = (await app.inject({ method: "GET", url: `/api/invites/${raw}` })).json();
+    expect(info).toMatchObject({ org: "orgowner's workspace", email: "newbie@factorialstudio.com", role: "member", expired: false, accepted: false });
 
-    // now member can access it and it shows in their app list
-    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(member) })).statusCode).toBe(200);
-    const memberApps = (await app.inject({ method: "GET", url: "/api/apps", headers: bearer(member) })).json();
-    expect(memberApps.map((a: { id: string }) => a.id)).toContain(appId);
+    // the wrong account cannot accept it
+    const stranger = await signup("stranger2@factorialstudio.com");
+    expect((await accept(stranger, raw)).statusCode).toBe(403);
 
-    // inviting a non-existent user → 404
-    expect((await app.inject({ method: "POST", url: "/api/team/invite", headers: bearer(owner), payload: { email: "nobody@x.com" } })).statusCode).toBe(404);
+    const newbie = await signup("newbie@factorialstudio.com");
+    expect((await me(newbie)).workspace.name).toBe("newbie's workspace");
+    const acc = await accept(newbie, raw);
+    expect(acc.statusCode).toBe(200);
+    expect(acc.json().workspace).toMatchObject({ name: "orgowner's workspace", role: "member" });
+    expect((await accept(newbie, raw)).statusCode).toBe(410); // single use
 
-    // remove revokes access
-    const memberId = inv.json()[0].id as string;
-    await app.inject({ method: "DELETE", url: `/api/team/${memberId}`, headers: bearer(owner) });
-    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(member) })).statusCode).toBe(404);
+    // now in the owner's workspace: sees the shared app
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(newbie) })).statusCode).toBe(200);
+    const list = await ws(newbie);
+    expect(list).toHaveLength(2);
+    const own = list.find((w: { role: string }) => w.role === "owner");
+    // switch back to the personal workspace: the shared app is not visible there
+    expect((await switchTo(newbie, own.id)).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(newbie) })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/api/apps", headers: bearer(newbie) })).json()).toEqual([]);
+    // cannot switch to a workspace they are not in
+    expect((await switchTo(stranger, own.id)).statusCode).toBe(404);
+    // owner sees 2 members; the invite is consumed
+    const detail = await org(owner);
+    expect(detail.members.map((m: { email: string; role: string }) => [m.email, m.role])).toEqual([
+      ["orgowner@factorialstudio.com", "owner"],
+      ["newbie@factorialstudio.com", "member"],
+    ]);
+    expect(detail.invites).toEqual([]);
+  });
+
+  it("roles are enforced: viewer reads only, member creates/exports, admin manages, owner bills; plan + quota follow the owner", async () => {
+    const owner = await signup("roles-owner@factorialstudio.com");
+    verifyDomain("roles-owner@factorialstudio.com");
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(owner), payload: { plan: "studio" } });
+    const ownerOrg = (await me(owner)).workspace.id;
+    const join = async (email: string, role: string) => {
+      await invite(owner, email, role);
+      const t = await signup(email);
+      expect((await accept(t, inviteTokenFor(email))).statusCode).toBe(200);
+      return t;
+    };
+    const viewer = await join("viewer@factorialstudio.com", "viewer");
+    const member = await join("member@factorialstudio.com", "member");
+    const admin = await join("admin@factorialstudio.com", "admin");
+
+    // everyone in the workspace sees the OWNER's plan (studio), not their own free plan
+    for (const t of [viewer, member, admin]) expect((await me(t)).plan).toBe("studio");
+
+    // viewer: read yes, create no
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(member), payload: { name: "Team App", platform: "ios" } })).json().id;
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(viewer) })).statusCode).toBe(200);
+    const denied = await app.inject({ method: "POST", url: "/api/apps", headers: bearer(viewer), payload: { name: "Nope" } });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({ code: "role-insufficient", role: "viewer", required: "member" });
+    expect((await invite(viewer, "x@factorialstudio.com")).statusCode).toBe(403);
+
+    // member: upload + export (domain gate uses the OWNER's verified domain; quota charged to the owner)
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(member), payload: { name: "c" } })).json().id;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "sample.zip", contentType: "application/zip" });
+    const up = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(member), ...form.getHeaders() }, payload: form.getBuffer() });
+    expect(up.statusCode).toBe(201);
+    const exp = await app.inject({ method: "POST", url: `/api/creatives/${up.json().id}/export`, headers: bearer(member), payload: { networks: ["applovin", "meta"] } });
+    expect(exp.statusCode).toBe(200);
+    expect((await me(owner)).used).toBe(2); // owner's allowance was spent
+    expect((await me(member)).used).toBe(2); // and that is what the member sees too
+    // member cannot delete, invite, or touch billing
+    expect((await app.inject({ method: "DELETE", url: `/api/apps/${appId}`, headers: bearer(member) })).statusCode).toBe(403);
+    expect((await invite(member, "y@factorialstudio.com")).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(member), payload: { plan: "starter" } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/api/billing/checkout", headers: bearer(member), payload: { plan: "starter" } })).statusCode).toBe(403);
+
+    // admin: invites members, changes roles, removes members — but not the owner, and cannot mint admins
+    expect((await invite(admin, "z@factorialstudio.com", "member")).statusCode).toBe(201);
+    expect((await invite(admin, "w@factorialstudio.com", "admin")).statusCode).toBe(403);
+    const viewerId = (await org(admin)).members.find((m: { email: string }) => m.email === "viewer@factorialstudio.com").id;
+    const ownerId = (await org(admin)).owner.id;
+    expect((await app.inject({ method: "PATCH", url: `/api/orgs/current/members/${viewerId}`, headers: bearer(admin), payload: { role: "member" } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "PATCH", url: `/api/orgs/current/members/${viewerId}`, headers: bearer(admin), payload: { role: "admin" } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PATCH", url: `/api/orgs/current/members/${ownerId}`, headers: bearer(admin), payload: { role: "member" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "DELETE", url: `/api/orgs/current/members/${ownerId}`, headers: bearer(admin) })).statusCode).toBe(400);
+    expect((await app.inject({ method: "DELETE", url: `/api/apps/${appId}`, headers: bearer(admin) })).statusCode).toBe(200);
+    // promoted ex-viewer can now create
+    expect((await app.inject({ method: "POST", url: "/api/apps", headers: bearer(viewer), payload: { name: "Now allowed" } })).statusCode).toBe(201);
+
+    // a member leaves → falls back to their personal workspace
+    const left = await app.inject({ method: "DELETE", url: "/api/orgs/current/members/me", headers: bearer(member) });
+    expect(left.statusCode).toBe(200);
+    expect(left.json().workspace).toMatchObject({ name: "member's workspace", role: "owner" });
+    expect((await ws(member)).some((w: { id: string }) => w.id === ownerOrg)).toBe(false);
+
+    // ownership transfer: owner → admin; old owner becomes admin
+    const adminId = (await org(owner)).members.find((m: { email: string }) => m.email === "admin@factorialstudio.com").id;
+    const tr = await app.inject({ method: "POST", url: "/api/orgs/current/transfer", headers: bearer(owner), payload: { userId: adminId } });
+    expect(tr.statusCode).toBe(200);
+    expect((await me(admin)).workspace.role).toBe("owner");
+    expect((await me(owner)).workspace.role).toBe("admin");
+    expect((await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(owner), payload: { plan: "starter" } })).statusCode).toBe(403);
+  });
+
+  it("migration: pre-orgs data gets a workspace, apps attach to it, legacy memberships carry over", async () => {
+    const owner = await signup("legacy-owner@factorialstudio.com");
+    const friend = await signup("legacy-friend@factorialstudio.com");
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(owner), payload: { name: "Old App" } })).json().id;
+    const o = getUserByEmail("legacy-owner@factorialstudio.com")!;
+    const f = getUserByEmail("legacy-friend@factorialstudio.com")!;
+    // simulate a database from before orgs existed, then run the startup migration on it
+    const { getDb, migrateOrgs } = await import("../src/db.js");
+    const db = getDb();
+    db.exec("DELETE FROM org_members; DELETE FROM orgs; UPDATE users SET current_org_id = NULL; UPDATE apps SET org_id = NULL");
+    db.prepare("INSERT INTO memberships (id, owner_user_id, member_user_id, role, created_at) VALUES ('m1', ?, ?, 'admin', '2026-01-01T00:00:00.000Z')").run(o.id, f.id);
+    migrateOrgs(db);
+
+    expect((await me(owner)).workspace).toMatchObject({ name: "legacy-owner's workspace", role: "owner" });
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(owner) })).statusCode).toBe(200);
+    const shared = (await ws(friend)).find((w: { name: string }) => w.name === "legacy-owner's workspace");
+    expect(shared).toMatchObject({ role: "admin" });
+    expect((await switchTo(friend, shared.id)).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(friend) })).statusCode).toBe(200);
+    // running it again changes nothing
+    migrateOrgs(db);
+    expect((await ws(owner)).length).toBe(1);
   });
 });

@@ -6,6 +6,7 @@ import { authed } from "../auth.js";
 import { createCreative, createUpload, deleteUpload, getConceptOwned, getUpload, getJobOwned } from "../repo.js";
 import { enqueue, registerJobHandler, JobError, jobView } from "../jobs.js";
 import { rateLimit } from "../rate-limit.js";
+import { needs } from "../orgs.js";
 
 /**
  * Compile jobs (parity gap #2): a Unity WebGL build (zip of index.html + Build/ [+ StreamingAssets/])
@@ -115,10 +116,10 @@ export async function compileRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(202).send({ jobId: job.id, status: job.status, statusUrl: `/api/jobs/${job.id}`, uploadBytes: file.length });
   }
 
-  app.post<{ Params: { conceptId: string } }>("/api/concepts/:conceptId/compile", authed, (req, reply) => startCompile(req, reply, () => req.params.conceptId));
+  app.post<{ Params: { conceptId: string } }>("/api/concepts/:conceptId/compile", needs("member"), (req, reply) => startCompile(req, reply, () => req.params.conceptId));
 
   // competitor-shaped aliases: POST /api/compile/jobs (conceptId as a form field), GET /api/compile/jobs/:id
-  app.post("/api/compile/jobs", authed, (req, reply) => startCompile(req, reply, (f) => f.conceptId));
+  app.post("/api/compile/jobs", needs("member"), (req, reply) => startCompile(req, reply, (f) => f.conceptId));
   app.get<{ Params: { id: string } }>("/api/compile/jobs/:id", authed, async (req, reply) => {
     const j = getJobOwned(req.params.id, req.user!.id);
     if (!j || j.kind !== "compile") return reply.code(404).send({ error: "not found" });

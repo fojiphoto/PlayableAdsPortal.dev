@@ -4,13 +4,6 @@ import { getDb } from "./db.js";
 
 const now = () => new Date().toISOString();
 
-/** Owner ids whose apps `userId` can access: themselves + anyone who added them as a member. */
-function accessibleOwnerIds(userId: string): string[] {
-  const rows = getDb()
-    .prepare("SELECT owner_user_id AS o FROM memberships WHERE member_user_id = ?")
-    .all(userId) as unknown as { o: string }[];
-  return [userId, ...rows.map((r) => r.o)];
-}
 
 // ── row types ────────────────────────────────────────────────────────────────
 export interface UserRow {
@@ -29,6 +22,7 @@ export interface UserRow {
   plan_status: string | null;
   email_verified: number;
   analytics_enabled: number;
+  current_org_id: string | null;
   email_verify_hash: string | null;
   email_verify_expires: string | null;
   plan_renews_at: string | null;
@@ -38,6 +32,7 @@ export interface UserRow {
 export interface AppRow {
   id: string;
   user_id: string;
+  org_id: string | null;
   name: string;
   platform: string | null;
   created_at: string;
@@ -79,11 +74,13 @@ export function createUser(email: string, passwordHash: string): UserRow {
     totp_secret: null, totp_enabled: 0, totp_last_step: null, domain: null, domain_token: null, domain_verified: 0,
     stripe_customer_id: null, stripe_subscription_id: null, plan_status: null,
     email_verified: 0, email_verify_hash: null, email_verify_expires: null,
-    plan_renews_at: null, plan_cancel_at_period_end: 0, analytics_enabled: 1, created_at: now(),
+    plan_renews_at: null, plan_cancel_at_period_end: 0, analytics_enabled: 1, current_org_id: null, created_at: now(),
   };
   getDb()
     .prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
     .run(row.id, row.email, row.password_hash, row.created_at);
+  const org = createOrg(row.id, defaultOrgName(email)); // everyone owns a personal workspace
+  row.current_org_id = org.id;
   return row;
 }
 export function getUserByEmail(email: string): UserRow | undefined {
@@ -211,24 +208,23 @@ export function exportByNetwork(userId: string): { network: string; n: number }[
 }
 
 // ── apps ─────────────────────────────────────────────────────────────────────
-export function createApp(userId: string, name: string, platform?: string): AppRow {
-  const row: AppRow = { id: randomUUID(), user_id: userId, name, platform: platform ?? null, created_at: now() };
+/** Create an app in a workspace (`userId` = creator, kept for attribution). */
+export function createApp(userId: string, orgId: string, name: string, platform?: string): AppRow {
+  const row: AppRow = { id: randomUUID(), user_id: userId, org_id: orgId, name, platform: platform ?? null, created_at: now() };
   getDb()
-    .prepare("INSERT INTO apps (id, user_id, name, platform, created_at) VALUES (?, ?, ?, ?, ?)")
-    .run(row.id, row.user_id, row.name, row.platform, row.created_at);
+    .prepare("INSERT INTO apps (id, user_id, org_id, name, platform, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(row.id, row.user_id, row.org_id, row.name, row.platform, row.created_at);
   return row;
 }
+/** Apps of the user's CURRENT workspace. */
 export function listApps(userId: string): AppRow[] {
-  const ids = accessibleOwnerIds(userId);
-  const ph = ids.map(() => "?").join(",");
   return getDb()
-    .prepare(`SELECT * FROM apps WHERE user_id IN (${ph}) ORDER BY created_at DESC`)
-    .all(...ids) as unknown as AppRow[];
+    .prepare("SELECT * FROM apps WHERE org_id = ? ORDER BY created_at DESC")
+    .all(currentOrgFor(userId).org.id) as unknown as AppRow[];
 }
+/** An app in the user's current workspace (any role), else undefined. */
 export function getAppOwned(id: string, userId: string): AppRow | undefined {
-  const ids = accessibleOwnerIds(userId);
-  const ph = ids.map(() => "?").join(",");
-  return getDb().prepare(`SELECT * FROM apps WHERE id = ? AND user_id IN (${ph})`).get(id, ...ids) as AppRow | undefined;
+  return getDb().prepare("SELECT * FROM apps WHERE id = ? AND org_id = ?").get(id, currentOrgFor(userId).org.id) as AppRow | undefined;
 }
 /** Rename / re-platform an app the user can access. */
 export function updateApp(id: string, userId: string, patch: { name?: string; platform?: string | null }): boolean {
@@ -240,7 +236,7 @@ export function updateApp(id: string, userId: string, patch: { name?: string; pl
   return true;
 }
 export function deleteApp(id: string, userId: string): boolean {
-  return getDb().prepare("DELETE FROM apps WHERE id = ? AND user_id = ?").run(id, userId).changes > 0;
+  return getDb().prepare("DELETE FROM apps WHERE id = ? AND org_id = ?").run(id, currentOrgFor(userId).org.id).changes > 0;
 }
 
 // ── concepts ─────────────────────────────────────────────────────────────────
@@ -255,11 +251,9 @@ export function listConcepts(appId: string): ConceptRow[] {
   return getDb().prepare("SELECT * FROM concepts WHERE app_id = ? ORDER BY created_at DESC").all(appId) as unknown as ConceptRow[];
 }
 export function getConceptOwned(id: string, userId: string): ConceptRow | undefined {
-  const ids = accessibleOwnerIds(userId);
-  const ph = ids.map(() => "?").join(",");
   return getDb()
-    .prepare(`SELECT c.* FROM concepts c JOIN apps a ON a.id = c.app_id WHERE c.id = ? AND a.user_id IN (${ph})`)
-    .get(id, ...ids) as ConceptRow | undefined;
+    .prepare("SELECT c.* FROM concepts c JOIN apps a ON a.id = c.app_id WHERE c.id = ? AND a.org_id = ?")
+    .get(id, currentOrgFor(userId).org.id) as ConceptRow | undefined;
 }
 /** Rename a concept and/or set its custom export network order (null = default). */
 export function updateConcept(
@@ -276,10 +270,8 @@ export function updateConcept(
 export function deleteConcept(id: string, userId: string): boolean {
   return (
     getDb()
-      .prepare(
-        `DELETE FROM concepts WHERE id = ? AND app_id IN (SELECT id FROM apps WHERE user_id = ?)`,
-      )
-      .run(id, userId).changes > 0
+      .prepare("DELETE FROM concepts WHERE id = ? AND app_id IN (SELECT id FROM apps WHERE org_id = ?)")
+      .run(id, currentOrgFor(userId).org.id).changes > 0
   );
 }
 
@@ -318,9 +310,9 @@ export function getCreativeOwned(id: string, userId: string): CreativeRow | unde
       `SELECT cr.* FROM creatives cr
        JOIN concepts c ON c.id = cr.concept_id
        JOIN apps a ON a.id = c.app_id
-       WHERE cr.id = ? AND a.user_id IN (${accessibleOwnerIds(userId).map(() => "?").join(",")})`,
+       WHERE cr.id = ? AND a.org_id = ?`,
     )
-    .get(id, ...accessibleOwnerIds(userId)) as CreativeRow | undefined;
+    .get(id, currentOrgFor(userId).org.id) as CreativeRow | undefined;
 }
 /** Rename a creative and/or replace its stored pack options (CTA / store URLs). */
 export function updateCreative(id: string, userId: string, patch: { name?: string; optionsJson?: string }): boolean {
@@ -331,11 +323,13 @@ export function updateCreative(id: string, userId: string, patch: { name?: strin
     .run(patch.name ?? cr.name, patch.optionsJson ?? cr.options_json, id);
   return true;
 }
-/** The user who owns the app a creative lives under (the publisher whose domain must be verified). */
+/** The workspace owner a creative belongs to — whose plan, domain verification, billing and quota apply. */
 export function creativeOwnerId(creativeId: string): string | undefined {
   const row = getDb()
     .prepare(
-      `SELECT a.user_id AS uid FROM creatives cr JOIN concepts c ON c.id = cr.concept_id JOIN apps a ON a.id = c.app_id WHERE cr.id = ?`,
+      `SELECT COALESCE(o.owner_user_id, a.user_id) AS uid
+       FROM creatives cr JOIN concepts c ON c.id = cr.concept_id JOIN apps a ON a.id = c.app_id LEFT JOIN orgs o ON o.id = a.org_id
+       WHERE cr.id = ?`,
     )
     .get(creativeId) as { uid: string } | undefined;
   return row?.uid;
@@ -348,9 +342,9 @@ export function deleteCreative(id: string, userId: string): boolean {
   return getDb()
     .prepare(
       `DELETE FROM creatives WHERE id = ? AND concept_id IN (
-         SELECT c.id FROM concepts c JOIN apps a ON a.id = c.app_id WHERE a.user_id = ?)`,
+         SELECT c.id FROM concepts c JOIN apps a ON a.id = c.app_id WHERE a.org_id = ?)`,
     )
-    .run(id, userId).changes > 0;
+    .run(id, currentOrgFor(userId).org.id).changes > 0;
 }
 
 // ── exports ──────────────────────────────────────────────────────────────────
@@ -387,35 +381,143 @@ export function getExport(creativeId: string, network: string): ExportRow | unde
     .get(creativeId, network) as ExportRow | undefined;
 }
 
-// ── memberships / team ──
-export interface MemberView {
+// ── organizations / workspaces / roles ──
+export type OrgRole = "owner" | "admin" | "member" | "viewer";
+export interface OrgRow {
+  id: string;
+  name: string;
+  owner_user_id: string;
+  created_at: string;
+}
+export interface OrgMemberView {
   id: string;
   email: string;
-  role: string;
+  role: OrgRole;
   createdAt: string;
 }
-
-export function addMember(ownerId: string, memberId: string, role = "member"): void {
-  getDb()
-    .prepare(
-      `INSERT INTO memberships (id, owner_user_id, member_user_id, role, created_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(owner_user_id, member_user_id) DO UPDATE SET role = excluded.role`,
-    )
-    .run(randomUUID(), ownerId, memberId, role, now());
+export interface OrgInviteRow {
+  id: string;
+  org_id: string;
+  email: string;
+  role: OrgRole;
+  token_hash: string;
+  invited_by: string;
+  expires_at: string;
+  accepted_at: string | null;
+  created_at: string;
 }
 
-export function listMembers(ownerId: string): MemberView[] {
+export const defaultOrgName = (email: string): string => `${email.split("@")[0] || "my"}'s workspace`;
+
+/** Create a workspace owned by `ownerId` (also becomes their current workspace if they have none). */
+export function createOrg(ownerId: string, name: string): OrgRow {
+  const row: OrgRow = { id: randomUUID(), name, owner_user_id: ownerId, created_at: now() };
+  const db = getDb();
+  db.prepare("INSERT INTO orgs (id, name, owner_user_id, created_at) VALUES (?, ?, ?, ?)").run(row.id, row.name, row.owner_user_id, row.created_at);
+  db.prepare("INSERT INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)").run(row.id, ownerId, now());
+  db.prepare("UPDATE users SET current_org_id = ? WHERE id = ? AND current_org_id IS NULL").run(row.id, ownerId);
+  return row;
+}
+export function getOrg(id: string): OrgRow | undefined {
+  return getDb().prepare("SELECT * FROM orgs WHERE id = ?").get(id) as OrgRow | undefined;
+}
+export function renameOrg(id: string, name: string): void {
+  getDb().prepare("UPDATE orgs SET name = ? WHERE id = ?").run(name, id);
+}
+export function getRole(orgId: string, userId: string): OrgRole | undefined {
+  const r = getDb().prepare("SELECT role FROM org_members WHERE org_id = ? AND user_id = ?").get(orgId, userId) as { role: OrgRole } | undefined;
+  return r?.role;
+}
+export function listUserOrgs(userId: string): (OrgRow & { role: OrgRole; member_count: number; owner_email: string })[] {
   return getDb()
     .prepare(
-      `SELECT m.member_user_id AS id, u.email AS email, m.role AS role, m.created_at AS createdAt
-       FROM memberships m JOIN users u ON u.id = m.member_user_id
-       WHERE m.owner_user_id = ? ORDER BY m.created_at`,
+      `SELECT o.*, m.role AS role, u.email AS owner_email,
+              (SELECT COUNT(*) FROM org_members x WHERE x.org_id = o.id) AS member_count
+       FROM org_members m JOIN orgs o ON o.id = m.org_id JOIN users u ON u.id = o.owner_user_id
+       WHERE m.user_id = ? ORDER BY o.created_at`,
     )
-    .all(ownerId) as unknown as MemberView[];
+    .all(userId) as unknown as (OrgRow & { role: OrgRole; member_count: number; owner_email: string })[];
 }
-
-export function removeMember(ownerId: string, memberId: string): boolean {
-  return getDb().prepare("DELETE FROM memberships WHERE owner_user_id = ? AND member_user_id = ?").run(ownerId, memberId).changes > 0;
+/**
+ * The user's current workspace + their role in it. Self-healing: a missing or stale pointer falls
+ * back to the first workspace they belong to, and a user with none gets a personal one.
+ */
+export function currentOrgFor(userId: string): { org: OrgRow; role: OrgRole } {
+  const u = getUserById(userId);
+  if (!u) throw new Error("user not found");
+  if (u.current_org_id) {
+    const role = getRole(u.current_org_id, userId);
+    const org = getOrg(u.current_org_id);
+    if (org && role) return { org, role };
+  }
+  const first = listUserOrgs(userId)[0];
+  if (first) {
+    getDb().prepare("UPDATE users SET current_org_id = ? WHERE id = ?").run(first.id, userId);
+    return { org: { id: first.id, name: first.name, owner_user_id: first.owner_user_id, created_at: first.created_at }, role: first.role };
+  }
+  const org = createOrg(userId, defaultOrgName(u.email));
+  getDb().prepare("UPDATE users SET current_org_id = ? WHERE id = ?").run(org.id, userId);
+  return { org, role: "owner" };
+}
+export function setCurrentOrg(userId: string, orgId: string): boolean {
+  if (!getRole(orgId, userId)) return false;
+  getDb().prepare("UPDATE users SET current_org_id = ? WHERE id = ?").run(orgId, userId);
+  return true;
+}
+export function listOrgMembers(orgId: string): OrgMemberView[] {
+  return getDb()
+    .prepare(
+      `SELECT u.id AS id, u.email AS email, m.role AS role, m.created_at AS createdAt
+       FROM org_members m JOIN users u ON u.id = m.user_id WHERE m.org_id = ?
+       ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END, m.created_at`,
+    )
+    .all(orgId) as unknown as OrgMemberView[];
+}
+export function upsertOrgMember(orgId: string, userId: string, role: OrgRole): void {
+  getDb()
+    .prepare(
+      `INSERT INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(org_id, user_id) DO UPDATE SET role = excluded.role`,
+    )
+    .run(orgId, userId, role, now());
+}
+export function removeOrgMember(orgId: string, userId: string): boolean {
+  const db = getDb();
+  const changed = db.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").run(orgId, userId).changes > 0;
+  db.prepare("UPDATE users SET current_org_id = NULL WHERE id = ? AND current_org_id = ?").run(userId, orgId);
+  return changed;
+}
+export function transferOrgOwnership(orgId: string, newOwnerId: string): void {
+  const db = getDb();
+  const org = getOrg(orgId);
+  if (!org) return;
+  db.prepare("UPDATE orgs SET owner_user_id = ? WHERE id = ?").run(newOwnerId, orgId);
+  db.prepare("UPDATE org_members SET role = 'admin' WHERE org_id = ? AND user_id = ?").run(orgId, org.owner_user_id);
+  db.prepare("UPDATE org_members SET role = 'owner' WHERE org_id = ? AND user_id = ?").run(orgId, newOwnerId);
+}
+export function createOrgInvite(orgId: string, email: string, role: OrgRole, tokenHash: string, invitedBy: string, expiresIso: string): OrgInviteRow {
+  const row: OrgInviteRow = { id: randomUUID(), org_id: orgId, email, role, token_hash: tokenHash, invited_by: invitedBy, expires_at: expiresIso, accepted_at: null, created_at: now() };
+  getDb()
+    .prepare("INSERT INTO org_invites (id, org_id, email, role, token_hash, invited_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(row.id, row.org_id, row.email, row.role, row.token_hash, row.invited_by, row.expires_at, row.created_at);
+  return row;
+}
+export function findInviteByHash(hash: string): (OrgInviteRow & { org_name: string }) | undefined {
+  return getDb()
+    .prepare("SELECT i.*, o.name AS org_name FROM org_invites i JOIN orgs o ON o.id = i.org_id WHERE i.token_hash = ?")
+    .get(hash) as (OrgInviteRow & { org_name: string }) | undefined;
+}
+/** Pending (unaccepted, unexpired) invites of a workspace. */
+export function listOrgInvites(orgId: string): OrgInviteRow[] {
+  return getDb()
+    .prepare("SELECT * FROM org_invites WHERE org_id = ? AND accepted_at IS NULL AND expires_at > ? ORDER BY created_at DESC")
+    .all(orgId, now()) as unknown as OrgInviteRow[];
+}
+export function deleteInvite(id: string, orgId: string): boolean {
+  return getDb().prepare("DELETE FROM org_invites WHERE id = ? AND org_id = ?").run(id, orgId).changes > 0;
+}
+export function markInviteAccepted(id: string): void {
+  getDb().prepare("UPDATE org_invites SET accepted_at = ? WHERE id = ?").run(now(), id);
 }
 
 // ── preloader ──
@@ -545,11 +647,10 @@ export function insertEvent(creativeId: string, network: string, event: EventKin
     .run(randomUUID(), creativeId, network, event, name, session, preview ? 1 : 0, now());
 }
 
-/** Shared FROM/WHERE for owner-scoped event aggregates (apps the user owns or is a member of). */
+/** Shared FROM/WHERE for event aggregates scoped to the user's current workspace. */
 function eventScope(userId: string, sinceIso: string, includePreview: boolean, creativeId?: string) {
-  const owners = accessibleOwnerIds(userId);
-  const where = [`a.user_id IN (${owners.map(() => "?").join(",")})`, "ev.created_at >= ?"];
-  const params: unknown[] = [...owners, sinceIso];
+  const where = ["a.org_id = ?", "ev.created_at >= ?"];
+  const params: unknown[] = [currentOrgFor(userId).org.id, sinceIso];
   if (!includePreview) where.push("ev.preview = 0");
   if (creativeId) {
     where.push("ev.creative_id = ?");

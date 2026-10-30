@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { authed } from "../auth.js";
+import { billingOwnerId, needs } from "../orgs.js";
 import { config } from "../config.js";
 import {
   setUserPlan,
@@ -61,11 +62,11 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/billing/plans", async () => allPlans());
 
   // current user's plan + usage + subscription state
-  app.get("/api/billing/status", authed, async (req) => planStatus(req.user!.id));
+  app.get("/api/billing/status", authed, async (req) => planStatus(billingOwnerId(req.user!.id)));
 
   // Start an upgrade. With Stripe configured → a Checkout Session URL; without it → an instant
   // dev switch (so local/staging work with no keys). Enterprise → "contact us".
-  app.post<{ Body: { plan?: string } }>("/api/billing/checkout", authed, async (req, reply) => {
+  app.post<{ Body: { plan?: string } }>("/api/billing/checkout", needs("owner"), async (req, reply) => {
     const plan = req.body?.plan;
     if (!plan || !isPlanId(plan)) return reply.code(400).send({ error: "unknown plan" });
     if (plan === "enterprise") return { contact: true };
@@ -127,7 +128,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Open the Stripe billing portal (payment method, invoices, full management).
-  app.post("/api/billing/portal", authed, async (req, reply) => {
+  app.post("/api/billing/portal", needs("owner"), async (req, reply) => {
     if (!stripeEnabled()) return reply.code(400).send({ error: "billing portal is not configured" });
     const user = getUserById(req.user!.id);
     if (!user?.stripe_customer_id) return reply.code(400).send({ error: "no billing account yet" });
@@ -141,7 +142,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   // ── in-app subscription control ──
 
   // Cancel at the end of the current period (access continues until then).
-  app.post("/api/billing/cancel", authed, async (req, reply) => {
+  app.post("/api/billing/cancel", needs("owner"), async (req, reply) => {
     const user = getUserById(req.user!.id);
     if (!user) return reply.code(404).send({ error: "user not found" });
     if (!user.stripe_subscription_id) {
@@ -162,7 +163,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Undo a pending cancellation.
-  app.post("/api/billing/resume", authed, async (req, reply) => {
+  app.post("/api/billing/resume", needs("owner"), async (req, reply) => {
     const user = getUserById(req.user!.id);
     if (!user) return reply.code(404).send({ error: "user not found" });
     if (!user.stripe_subscription_id || !stripeEnabled()) {
@@ -177,7 +178,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Re-read the subscription from Stripe and reconcile local state (covers a missed webhook).
-  app.post("/api/billing/sync", authed, async (req, reply) => {
+  app.post("/api/billing/sync", needs("owner"), async (req, reply) => {
     const user = getUserById(req.user!.id);
     if (!user) return reply.code(404).send({ error: "user not found" });
     if (!stripeEnabled()) return reply.code(400).send({ error: "billing is not configured" });
@@ -197,7 +198,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
 
   // Dev-only direct switch (used by tests and keyless local/staging). Blocked in production
   // once Stripe is configured — real plan changes must flow through Checkout + the webhook.
-  app.post<{ Body: { plan?: string } }>("/api/billing/plan", authed, async (req, reply) => {
+  app.post<{ Body: { plan?: string } }>("/api/billing/plan", needs("owner"), async (req, reply) => {
     if (stripeEnabled() && config.isProduction) {
       return reply.code(403).send({ error: "use /api/billing/checkout" });
     }

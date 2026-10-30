@@ -4,6 +4,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { authed } from "../auth.js";
 import { getUserById, setDomainVerified, setUserDomain } from "../repo.js";
+import { billingOwnerId, needs } from "../orgs.js";
 
 const VERIFY_FILE = "factorialadlab-verify.txt";
 
@@ -68,24 +69,24 @@ function cleanDomain(input: string): string | null {
 }
 
 export async function domainRoutes(app: FastifyInstance): Promise<void> {
-  app.get("/api/domain", authed, async (req) => domainView(req.user!.id));
+  app.get("/api/domain", authed, async (req) => domainView(billingOwnerId(req.user!.id)));
 
-  app.post<{ Body: { domain?: string } }>("/api/domain", authed, async (req, reply) => {
+  app.post<{ Body: { domain?: string } }>("/api/domain", needs("admin"), async (req, reply) => {
     const d = cleanDomain(req.body?.domain ?? "");
     if (!d) return reply.code(400).send({ error: "Enter a valid domain, e.g. factorialstudio.dev" });
-    const u = getUserById(req.user!.id);
+    const u = getUserById(billingOwnerId(req.user!.id));
     const token = u?.domain === d && u?.domain_token ? u.domain_token : `fav-${randomBytes(16).toString("hex")}`;
-    setUserDomain(req.user!.id, d, token);
-    return domainView(req.user!.id);
+    setUserDomain(billingOwnerId(req.user!.id), d, token);
+    return domainView(billingOwnerId(req.user!.id));
   });
 
-  app.post("/api/domain/check", authed, async (req, reply) => {
-    const u = getUserById(req.user!.id);
+  app.post("/api/domain/check", needs("admin"), async (req, reply) => {
+    const u = getUserById(billingOwnerId(req.user!.id));
     if (!u?.domain || !u.domain_token) return reply.code(400).send({ error: "Set a domain first" });
     const token = u.domain_token;
     // SSRF guard: only probe domains that resolve to public addresses
     if (!(await resolvesPublic(u.domain))) {
-      setDomainVerified(req.user!.id, 0);
+      setDomainVerified(billingOwnerId(req.user!.id), 0);
       return reply.code(400).send({ error: "Domain does not resolve to a public address" });
     }
     const urls = [`https://${u.domain}/${VERIFY_FILE}`, `https://${u.domain}/app-ads.txt`];
@@ -104,7 +105,7 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
         checked.push(`${url} → ${(e as Error).name}`);
       }
     }
-    setDomainVerified(req.user!.id, found ? 1 : 0);
+    setDomainVerified(billingOwnerId(req.user!.id), found ? 1 : 0);
     return { verified: found, checked };
   });
 }

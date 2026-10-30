@@ -24,6 +24,13 @@ npm run test -w @forge/server
 | GET | `/api/jobs?limit=` | the caller's recent jobs |
 | POST | `/api/concepts/:conceptId/compile` | multipart `file` = zipped Unity WebGL build (+ `name`, `iosUrl`, `androidUrl`, `companyName`) → 202 compile job; result = creative id + size breakdown + warnings + `fitsNetworks` |
 | POST / GET | `/api/compile/jobs` (`conceptId` field) / `/api/compile/jobs/:id` | competitor-shaped aliases |
+| GET / POST | `/api/workspaces`, `/api/workspaces/switch` | the caller's workspaces (role, isCurrent) / set the current one |
+| POST | `/api/orgs` | create a workspace (you become owner) |
+| GET / PATCH | `/api/orgs/current` | members + pending invites / rename (admin) |
+| PATCH / DELETE | `/api/orgs/current/members/:userId` | change role / remove (admin; `me` = leave) |
+| POST | `/api/orgs/current/transfer` | hand ownership to a member (owner) |
+| POST / DELETE | `/api/orgs/current/invites[/:id]` | email invite with a 7-day link / revoke (admin) |
+| GET / POST | `/api/invites/:token`, `/api/invites/accept` | what an invite is for (public) / join (signed in as the invited email) |
 | GET | `/api/analytics?days=30&preview=0` | in-playable funnel (impressions, engagement, CTA, CTR; by network / creative; custom events) + export usage |
 | GET | `/api/creatives/:id/analytics` | per-creative funnel |
 | PATCH | `/api/analytics/settings` | `{ enabled }` — embed beacons in future exports |

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -53,6 +54,34 @@ CREATE TABLE IF NOT EXISTS export_usage (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_user_time ON export_usage(user_id, created_at);
 
+CREATE TABLE IF NOT EXISTS orgs (
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS org_members (
+  org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL,              -- owner | admin | member | viewer
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (org_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id);
+CREATE TABLE IF NOT EXISTS org_invites (
+  id          TEXT PRIMARY KEY,
+  org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  email       TEXT NOT NULL,
+  role        TEXT NOT NULL,
+  token_hash  TEXT NOT NULL,
+  invited_by  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  accepted_at TEXT,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_org_invites_hash ON org_invites(token_hash);
+
+-- legacy flat sharing (pre-orgs); migrated into org_members at startup, no longer written
 CREATE TABLE IF NOT EXISTS memberships (
   id             TEXT PRIMARY KEY,
   owner_user_id  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -183,6 +212,8 @@ export function initDb(path: string = config.dbPath): DB {
     "ALTER TABLE users ADD COLUMN plan_renews_at TEXT",
     "ALTER TABLE users ADD COLUMN plan_cancel_at_period_end INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN analytics_enabled INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE users ADD COLUMN current_org_id TEXT",
+    "ALTER TABLE apps ADD COLUMN org_id TEXT",
   ]) {
     try {
       db.exec(stmt);
@@ -190,7 +221,38 @@ export function initDb(path: string = config.dbPath): DB {
       /* column already present */
     }
   }
+  migrateOrgs(db);
   return db;
+}
+
+/**
+ * Orgs migration (idempotent, runs at every start): every user owns a personal workspace, apps
+ * without a workspace join their creator's, the current-workspace pointer is set, and the legacy
+ * flat `memberships` rows become org memberships of the owner's workspace.
+ */
+export function migrateOrgs(db: DB): void {
+  const nowIso = new Date().toISOString();
+  const orphans = db
+    .prepare("SELECT u.id, u.email FROM users u WHERE NOT EXISTS (SELECT 1 FROM orgs o WHERE o.owner_user_id = u.id)")
+    .all() as unknown as { id: string; email: string }[];
+  const insOrg = db.prepare("INSERT INTO orgs (id, name, owner_user_id, created_at) VALUES (?, ?, ?, ?)");
+  const insMem = db.prepare("INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)");
+  for (const u of orphans) {
+    const id = randomUUID();
+    insOrg.run(id, `${u.email.split("@")[0] || "my"}'s workspace`, u.id, nowIso);
+    insMem.run(id, u.id, nowIso);
+  }
+  db.exec(
+    "UPDATE apps SET org_id = (SELECT o.id FROM orgs o WHERE o.owner_user_id = apps.user_id ORDER BY o.created_at LIMIT 1) WHERE org_id IS NULL",
+  );
+  db.exec(
+    "UPDATE users SET current_org_id = (SELECT o.id FROM orgs o WHERE o.owner_user_id = users.id ORDER BY o.created_at LIMIT 1) WHERE current_org_id IS NULL",
+  );
+  db.exec(
+    `INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at)
+     SELECT o.id, m.member_user_id, CASE WHEN m.role = 'admin' THEN 'admin' ELSE 'member' END, m.created_at
+     FROM memberships m JOIN orgs o ON o.owner_user_id = m.owner_user_id`,
+  );
 }
 
 export function getDb(): DB {

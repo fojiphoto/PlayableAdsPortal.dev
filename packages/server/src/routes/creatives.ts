@@ -23,6 +23,7 @@ import { parseNetworkOrder } from "./apps.js";
 import { checkExport } from "../plan-status.js";
 import { preloaderForExport } from "../preloader-config.js";
 import { publicBase } from "../site.js";
+import { needs } from "../orgs.js";
 
 function networkName(id: string): string {
   try {
@@ -108,8 +109,8 @@ export function prepareExport(userId: string, creativeId: string, body: ExportBo
     return { ok: false, status: 400, body: { error: (e as Error).message } };
   }
 
-  // plan gate: allowed networks + rolling-30-day quota
-  const gate = checkExport(userId, ids);
+  // plan gate: the WORKSPACE OWNER's plan — allowed networks + rolling-30-day quota
+  const gate = checkExport(owner.id, ids);
   if (!gate.ok) return { ok: false, status: 402, body: gate as unknown as Record<string, unknown> };
 
   const stored = JSON.parse(cr.options_json) as PackOptions;
@@ -118,13 +119,14 @@ export function prepareExport(userId: string, creativeId: string, body: ExportBo
     ctaUrl: body.ctaUrl ?? stored.ctaUrl,
     iosUrl: body.iosUrl ?? stored.iosUrl,
     androidUrl: body.androidUrl ?? stored.androidUrl,
-    preloader: preloaderForExport(userId),
+    preloader: preloaderForExport(owner.id),
     analytics: analyticsBase && owner.analytics_enabled ? { endpoint: `${analyticsBase}/api/t`, creativeId: cr.id } : undefined,
   };
   // only count a network toward quota the first time this creative exports it —
   // re-exporting an unchanged creative must not keep burning the 30-day allowance
   const already = new Set(listExports(cr.id).map((e) => e.network));
-  return { ok: true, userId, cr, ids, opts, already };
+  // `userId` carried here is the quota account = the workspace owner (members spend the org's allowance)
+  return { ok: true, userId: owner.id, cr, ids, opts, already };
 }
 
 /** Pack every requested network (sequentially, so progress is meaningful), persist, charge quota. */
@@ -180,7 +182,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   // upload a playable under a concept
   app.post<{ Params: { conceptId: string } }>(
     "/api/concepts/:conceptId/creatives",
-    authed,
+    needs("member"),
     async (req, reply) => {
       const concept = getConceptOwned(req.params.conceptId, req.user!.id);
       if (!concept) return reply.code(404).send({ error: "concept not found" });
@@ -247,7 +249,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   // sequence; we build a lightweight HTML5 flipbook playable and store it as a creative.
   app.post<{ Params: { conceptId: string } }>(
     "/api/concepts/:conceptId/capture",
-    authed,
+    needs("member"),
     async (req, reply) => {
       const concept = getConceptOwned(req.params.conceptId, req.user!.id);
       if (!concept) return reply.code(404).send({ error: "concept not found" });
@@ -370,7 +372,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   // rename / update stored CTA + store URLs
   app.patch<{ Params: { id: string }; Body: { name?: string; ctaUrl?: string | null; iosUrl?: string | null; androidUrl?: string | null } }>(
     "/api/creatives/:id",
-    authed,
+    needs("member"),
     async (req, reply) => {
       const cr = getCreativeOwned(req.params.id, req.user!.id);
       if (!cr) return reply.code(404).send({ error: "not found" });
@@ -396,7 +398,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   // The gates (404/403/400/402) are checked up-front either way so callers get an immediate answer.
   app.post<{ Params: { id: string }; Querystring: { async?: string }; Body: ExportBody & { async?: boolean } }>(
     "/api/creatives/:id/export",
-    authed,
+    needs("member"),
     async (req, reply) => {
       const body = req.body ?? {};
       const analyticsBase = publicBase(req);
@@ -422,7 +424,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.delete<{ Params: { id: string } }>("/api/creatives/:id", authed, async (req, reply) => {
+  app.delete<{ Params: { id: string } }>("/api/creatives/:id", needs("admin"), async (req, reply) => {
     return deleteCreative(req.params.id, req.user!.id)
       ? { deleted: true }
       : reply.code(404).send({ error: "not found" });

@@ -17,6 +17,7 @@ import {
   type FunnelCounts,
 } from "../repo.js";
 import { since30dIso } from "../plan-status.js";
+import { billingOwnerId, needs } from "../orgs.js";
 
 function networkName(id: string): string {
   try {
@@ -80,10 +81,11 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get<{ Querystring: { days?: string; preview?: string } }>("/api/analytics", authed, async (req) => {
     const uid = req.user!.id;
+    const owner = billingOwnerId(uid); // export usage + tracking setting belong to the workspace owner
     const w = windowFrom(req.query ?? {});
     const since = since30dIso();
 
-    const rows = new Map(exportDaily(uid, since).map((r) => [r.d, r.n]));
+    const rows = new Map(exportDaily(owner, since).map((r) => [r.d, r.n]));
     const daily: { date: string; count: number }[] = [];
     for (let i = 29; i >= 0; i--) {
       const date = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
@@ -92,12 +94,12 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
 
     return {
       // ── export usage (billing side) ──
-      total: countExportUsage(uid),
-      last30: countExportUsageSince(uid, since),
+      total: countExportUsage(owner),
+      last30: countExportUsageSince(owner, since),
       daily,
-      byNetwork: exportByNetwork(uid).map((r) => ({ network: r.network, networkName: networkName(r.network), count: r.n })),
+      byNetwork: exportByNetwork(owner).map((r) => ({ network: r.network, networkName: networkName(r.network), count: r.n })),
       // ── in-playable performance ──
-      tracking: { enabled: !!getUserById(uid)?.analytics_enabled },
+      tracking: { enabled: !!getUserById(owner)?.analytics_enabled },
       window: { days: w.days, includePreview: w.includePreview },
       playable: {
         ...playableBlock(uid, w),
@@ -125,9 +127,9 @@ export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
   );
 
   /** Toggle in-playable tracking for future exports (existing packages keep whatever they were built with). */
-  app.patch<{ Body: { enabled?: boolean } }>("/api/analytics/settings", authed, async (req, reply) => {
+  app.patch<{ Body: { enabled?: boolean } }>("/api/analytics/settings", needs("admin"), async (req, reply) => {
     if (typeof req.body?.enabled !== "boolean") return reply.code(400).send({ error: "enabled (boolean) is required" });
-    setAnalyticsEnabled(req.user!.id, req.body.enabled);
+    setAnalyticsEnabled(billingOwnerId(req.user!.id), req.body.enabled);
     return { enabled: req.body.enabled };
   });
 }

@@ -10,7 +10,10 @@ import {
   setTotpLastStep,
   updatePassword,
   verifyEmailByHash,
+  currentOrgFor,
 } from "../repo.js";
+import { siteUrl } from "../site.js";
+import { billingOwnerId, workspaceView } from "../orgs.js";
 import { authed, createOpaqueToken, hashOpaqueToken, hashPassword, signToken, verifyPassword } from "../auth.js";
 import { planStatus } from "../plan-status.js";
 import { matchTotpStep } from "../totp.js";
@@ -28,20 +31,6 @@ const WINDOW = 15 * 60 * 1000; // 15 min
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 h
 const VERIFY_TTL_MS = 48 * 60 * 60 * 1000; // 48 h
 
-/** The SPA origin to build email links against (request Origin, else PUBLIC_URL). */
-function siteUrl(req: FastifyRequest): string {
-  const origin = (req.headers.origin as string) || "";
-  if (origin) return origin.replace(/\/$/, "");
-  const ref = (req.headers.referer as string) || "";
-  if (ref) {
-    try {
-      return new URL(ref).origin;
-    } catch {
-      /* ignore */
-    }
-  }
-  return (config.publicUrl || "https://app.factorialstudio.dev").replace(/\/$/, "");
-}
 
 function userView(u: { id: string; email: string; email_verified?: number }) {
   return { id: u.id, email: u.email, emailVerified: !!u.email_verified };
@@ -113,9 +102,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     return { token: signToken(u), user: userView(u) };
   });
 
+  // plan/quota shown are the current workspace owner's (a member sees the org's plan, not their own)
   app.get("/api/me", authed, async (req) => {
     const u = getUserById(req.user!.id);
-    return { user: u ? userView(u) : req.user, ...planStatus(req.user!.id) };
+    const ws = currentOrgFor(req.user!.id);
+    return { user: u ? userView(u) : req.user, workspace: workspaceView(ws, getUserById(ws.org.owner_user_id)?.email), ...planStatus(billingOwnerId(req.user!.id)) };
   });
 
   // ── email verification ──

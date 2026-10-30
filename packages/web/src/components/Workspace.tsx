@@ -9,10 +9,13 @@ export function Workspace({
   conceptId,
   networks,
   onExported,
+  readOnly = false,
 }: {
   conceptId: string;
   networks: Network[];
   onExported?: () => void;
+  /** viewer role: preview/download only — no upload, no export */
+  readOnly?: boolean;
 }) {
   const [creatives, setCreatives] = useState<CreativeRef[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -117,22 +120,29 @@ export function Workspace({
             {c.name}
           </button>
         ))}
-        <button
-          onClick={() => {
-            setUploading(true);
-            setActiveId(null);
-          }}
-          className="rounded-lg border border-dashed border-[#1f6b4a] px-3 py-1.5 text-sm text-slate-400 hover:border-[#7cb342]"
-        >
-          + Upload
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => {
+              setUploading(true);
+              setActiveId(null);
+            }}
+            className="rounded-lg border border-dashed border-[#1f6b4a] px-3 py-1.5 text-sm text-slate-400 hover:border-[#7cb342]"
+          >
+            + Upload
+          </button>
+        )}
+        {readOnly && <span className="text-xs text-slate-500">View-only access — ask a workspace admin for the member role to upload or export.</span>}
       </div>
 
       {err && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">{err}</div>}
 
       {uploading || !activeId ? (
         <div className="py-6">
-          <UploadForm conceptId={conceptId} onUploaded={onUploaded} />
+          {readOnly ? (
+            <div className="text-center text-sm text-slate-400">{creatives.length ? "Pick a creative above." : "No creatives in this concept yet."}</div>
+          ) : (
+            <UploadForm conceptId={conceptId} onUploaded={onUploaded} />
+          )}
         </div>
       ) : (
         <div className="grid gap-8 lg:grid-cols-[1fr_auto]">
@@ -167,7 +177,8 @@ export function Workspace({
 
             <button
               onClick={() => void doExport()}
-              disabled={busy || selected.size === 0}
+              disabled={busy || selected.size === 0 || readOnly}
+              title={readOnly ? "Viewers cannot export" : undefined}
               className="mt-4 w-full rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40"
             >
               {busy ? (job?.status === "queued" ? "Queued…" : "Exporting…") : `Export ${selected.size} network${selected.size === 1 ? "" : "s"}`}

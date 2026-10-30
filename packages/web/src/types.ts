@@ -97,15 +97,57 @@ export interface PlanStatus {
   hasSubscription: boolean;
 }
 
-export interface MeResponse extends PlanStatus {
-  user: AuthUser;
-}
+export type OrgRole = "owner" | "admin" | "member" | "viewer";
 
-export interface TeamMember {
+/** The caller's current workspace (from /api/me). */
+export interface WorkspaceRef {
+  id: string;
+  name: string;
+  role: OrgRole;
+  ownerId: string;
+  ownerEmail: string | null;
+}
+export interface WorkspaceListItem {
+  id: string;
+  name: string;
+  role: OrgRole;
+  ownerEmail: string;
+  memberCount: number;
+  isCurrent: boolean;
+}
+export interface OrgMember {
   id: string;
   email: string;
-  role: string;
+  role: OrgRole;
   createdAt: string;
+}
+export interface OrgInvite {
+  id: string;
+  email: string;
+  role: OrgRole;
+  expiresAt: string;
+  createdAt: string;
+}
+export interface OrgDetail {
+  id: string;
+  name: string;
+  role: OrgRole;
+  owner: { id: string; email: string | null };
+  members: OrgMember[];
+  invites: OrgInvite[];
+  createdAt: string;
+}
+export interface InviteInfo {
+  org: string;
+  email: string;
+  role: OrgRole;
+  expired: boolean;
+  accepted: boolean;
+}
+
+export interface MeResponse extends PlanStatus {
+  user: AuthUser;
+  workspace: WorkspaceRef;
 }
 
 /** In-playable funnel counts (unique play sessions) + derived rates in percent. */

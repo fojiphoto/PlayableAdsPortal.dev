@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getToken, setToken, me, getNetworks, listApps, createApp, getApp, createConcept, getBillingStatus } from "./api";
 import { renameApp, renameConcept, verifyEmail, resendVerification } from "./api";
-import type { App as AppT, AuthUser, Concept, Network, PlanStatus } from "./types";
+import { listWorkspaces, switchWorkspace, createWorkspace, getInvite, acceptInvite } from "./api";
+import type { App as AppT, AuthUser, Concept, Network, PlanStatus, WorkspaceRef, WorkspaceListItem } from "./types";
 import { AuthScreen } from "./components/AuthScreen";
 import { Workspace } from "./components/Workspace";
 import { Landing } from "./Landing";
@@ -27,6 +28,10 @@ export default function App() {
   const [page, setPage] = useState<"app" | "plans" | "settings" | "analytics" | "preloader" | "domain">("app");
   const [notice, setNotice] = useState<string | null>(null);
   const [resetToken, setResetToken] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceRef | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([]);
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
+  const canEdit = !workspace || workspace.role !== "viewer";
 
   useEffect(() => {
     // deep links from emails / Stripe: ?reset=<token>, ?verify=<token>, ?billing=success|cancel
@@ -34,9 +39,11 @@ export default function App() {
     const reset = q.get("reset");
     const verify = q.get("verify");
     const billing = q.get("billing");
-    if (reset || verify || billing) {
+    const invite = q.get("invite");
+    if (reset || verify || billing || invite) {
       window.history.replaceState({}, "", window.location.pathname);
     }
+    if (invite) setInviteToken(invite);
     if (reset) {
       setResetToken(reset);
       setView("auth");
@@ -55,7 +62,10 @@ export default function App() {
     getNetworks().then(setNetworks).catch(() => {});
     if (getToken()) {
       me()
-        .then((r) => setUser(r.user))
+        .then((r) => {
+          setUser(r.user);
+          setWorkspace(r.workspace);
+        })
         .catch(() => setToken(null))
         .finally(() => setChecking(false));
     } else {
@@ -64,11 +74,65 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (user) {
-      listApps().then(setApps).catch((e) => setErr((e as Error).message));
-      getBillingStatus().then(setStatus).catch(() => {});
-    }
+    if (user) void refreshWorkspace();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  // invite link: signed out → tell the auth screen who to sign in as; signed in → accept
+  useEffect(() => {
+    if (!inviteToken || checking) return;
+    if (!user) {
+      getInvite(inviteToken)
+        .then((i) => {
+          setNotice(i.expired ? "That invitation has expired — ask for a new one." : i.accepted ? "That invitation was already used." : `Sign in or sign up as ${i.email} to join ${i.org}.`);
+          setView("auth");
+        })
+        .catch((e) => setNotice((e as Error).message));
+      return;
+    }
+    const token = inviteToken;
+    setInviteToken(null);
+    acceptInvite(token)
+      .then((r) => {
+        setNotice(`You joined ${r.workspace.name} as ${r.workspace.role}.`);
+        return refreshWorkspace();
+      })
+      .catch((e) => setNotice((e as Error).message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inviteToken, user, checking]);
+
+  /** Re-read everything that depends on the current workspace. */
+  async function refreshWorkspace() {
+    setActiveApp(null);
+    setActiveConcept(null);
+    setConcepts([]);
+    try {
+      const r = await me();
+      setWorkspace(r.workspace);
+      setUser(r.user);
+    } catch {
+      /* keep going with what we have */
+    }
+    listWorkspaces().then(setWorkspaces).catch(() => {});
+    listApps().then(setApps).catch((e) => setErr((e as Error).message));
+    getBillingStatus().then(setStatus).catch(() => {});
+  }
+
+  async function pickWorkspace(value: string) {
+    try {
+      if (value === "__new") {
+        const name = window.prompt("Name the new workspace")?.trim();
+        if (!name) return;
+        await createWorkspace(name);
+      } else if (value !== workspace?.id) {
+        await switchWorkspace(value);
+      } else return;
+      setPage("app");
+      await refreshWorkspace();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
 
   async function openApp(a: AppT) {
     setActiveApp(a);
@@ -202,6 +266,21 @@ export default function App() {
             >
               Settings
             </button>
+            {workspace && (
+              <select
+                value={workspace.id}
+                onChange={(e) => void pickWorkspace(e.target.value)}
+                title={`Workspace · you are ${workspace.role}`}
+                className="max-w-[180px] rounded-lg border border-[#1b5540] bg-[#0a3a28] px-2 py-1.5 text-slate-200 outline-none focus:border-amber-500"
+              >
+                {(workspaces.length ? workspaces : [{ id: workspace.id, name: workspace.name, role: workspace.role }]).map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name} · {w.role}
+                  </option>
+                ))}
+                <option value="__new">＋ New workspace…</option>
+              </select>
+            )}
             <span className="hidden sm:inline">{user.email}</span>
             <button onClick={logout} className="rounded-lg border border-[#1f6b4a] px-3 py-1.5 text-slate-300 hover:border-[#7cb342]">
               Sign out
@@ -216,7 +295,7 @@ export default function App() {
         </main>
       ) : page === "settings" ? (
         <main className="min-w-0 flex-1 p-6">
-          <Settings user={user} status={status} />
+          <Settings user={user} status={status} onWorkspaceChanged={() => void refreshWorkspace()} />
         </main>
       ) : page === "analytics" ? (
         <main className="min-w-0 flex-1 p-6">
@@ -259,7 +338,11 @@ export default function App() {
               </div>
             ))}
           </div>
-          <CreateRow value={newApp} onChange={setNewApp} onAdd={addApp} placeholder="New app…" />
+          {canEdit ? (
+            <CreateRow value={newApp} onChange={setNewApp} onAdd={addApp} placeholder="New app…" />
+          ) : (
+            <div className="px-1 text-[11px] text-slate-500">View-only · {workspace?.name}</div>
+          )}
 
           {activeApp && (
             <div className="mt-6">
@@ -288,7 +371,7 @@ export default function App() {
                 ))}
                 {concepts.length === 0 && <div className="px-2.5 py-1 text-xs text-slate-400">No concepts yet</div>}
               </div>
-              <CreateRow value={newConcept} onChange={setNewConcept} onAdd={addConcept} placeholder="New concept…" />
+              {canEdit && <CreateRow value={newConcept} onChange={setNewConcept} onAdd={addConcept} placeholder="New concept…" />}
             </div>
           )}
         </aside>
@@ -315,12 +398,15 @@ export default function App() {
               key={activeConcept.id}
               conceptId={activeConcept.id}
               networks={networks}
+              readOnly={!canEdit}
               onExported={() => getBillingStatus().then(setStatus).catch(() => {})}
             />
           ) : (
             <div className="flex h-full min-h-[50vh] items-center justify-center text-center text-slate-400">
               {apps.length === 0
-                ? "Create your first app on the left to get started."
+                ? canEdit
+                  ? "Create your first app on the left to get started."
+                  : "This workspace has no apps yet."
                 : activeApp
                   ? "Pick or create a concept."
                   : "Pick an app on the left."}
