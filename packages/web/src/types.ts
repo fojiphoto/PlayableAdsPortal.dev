@@ -91,6 +91,10 @@ export interface PlanStatus {
   limit: number | null; // null = unlimited
   used: number;
   networks: "all" | string[];
+  status: string | null;
+  renewsAt: string | null;
+  cancelAtPeriodEnd: boolean;
+  hasSubscription: boolean;
 }
 
 export interface MeResponse extends PlanStatus {

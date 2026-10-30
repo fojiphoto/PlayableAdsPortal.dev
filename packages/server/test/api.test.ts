@@ -7,7 +7,7 @@ import FormData from "form-data";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "../src/db.js";
-import { getUserByEmail, setDomainVerified, setUserDomain } from "../src/repo.js";
+import { getUserByEmail, setDomainVerified, setUserDomain, setStripeCustomer, setUserBilling } from "../src/repo.js";
 import { outbox, clearOutbox } from "../src/mail.js";
 import { loadFromDir } from "@forge/packager";
 
@@ -594,6 +594,109 @@ describe("auth recovery: email verification + password reset (dev mail outbox)",
       if (last === 429) break;
     }
     expect(last).toBe(429);
+  });
+});
+
+describe("billing state: period end, cancel/resume, sync", () => {
+  const PRICE = "price_studio_state";
+  const PERIOD_END = 1_900_000_000; // unix seconds
+  /** A Stripe subscription as the 2025+ API shapes it (period end lives on the item). */
+  const subObj = (over: Partial<{ status: string; cancel_at_period_end: boolean; price: string }> = {}) => ({
+    id: "sub_1",
+    object: "subscription",
+    customer: "cus_1",
+    status: over.status ?? "active",
+    cancel_at_period_end: over.cancel_at_period_end ?? false,
+    items: { data: [{ price: { id: over.price ?? PRICE }, current_period_end: PERIOD_END }] },
+  });
+  const seed = (email: string) => {
+    const u = getUserByEmail(email)!;
+    setStripeCustomer(u.id, "cus_1");
+    setUserBilling(u.id, "studio", "sub_1", "active", { renewsAt: null, cancelAtPeriodEnd: false });
+    return u.id;
+  };
+  const status = async (token: string) => (await app.inject({ method: "GET", url: "/api/billing/status", headers: bearer(token) })).json();
+
+  it("webhook subscription.updated stores renewal date + cancel flag (items-level current_period_end)", async () => {
+    const WH = "whsec_state";
+    process.env.STRIPE_WEBHOOK_SECRET = WH;
+    process.env.STRIPE_PRICE_STUDIO = PRICE;
+    try {
+      const token = await signup("state@factorialstudio.com");
+      seed("state@factorialstudio.com");
+      const payload = JSON.stringify({ type: "customer.subscription.updated", data: { object: subObj({ cancel_at_period_end: true }) } });
+      const t = Math.floor(Date.now() / 1000);
+      const sig = createHmac("sha256", WH).update(`${t}.${payload}`).digest("hex");
+      const r = await app.inject({ method: "POST", url: "/api/billing/webhook", headers: { "content-type": "application/json", "stripe-signature": `t=${t},v1=${sig}` }, payload });
+      expect(r.statusCode).toBe(200);
+      const st = await status(token);
+      expect(st.plan).toBe("studio");
+      expect(st.hasSubscription).toBe(true);
+      expect(st.cancelAtPeriodEnd).toBe(true);
+      expect(st.renewsAt).toBe(new Date(PERIOD_END * 1000).toISOString());
+      expect(st.status).toBe("active");
+    } finally {
+      delete process.env.STRIPE_WEBHOOK_SECRET;
+      delete process.env.STRIPE_PRICE_STUDIO;
+    }
+  });
+
+  it("dev mode (no Stripe): cancel drops to free immediately; resume has nothing to do", async () => {
+    const token = await signup("devcancel@factorialstudio.com");
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
+    const c = await app.inject({ method: "POST", url: "/api/billing/cancel", headers: bearer(token), payload: {} });
+    expect(c.statusCode).toBe(200);
+    expect(c.json().plan).toBe("free");
+    expect((await app.inject({ method: "POST", url: "/api/billing/resume", headers: bearer(token), payload: {} })).statusCode).toBe(400);
+  });
+
+  it("Stripe mode: cancel/resume flip cancel_at_period_end via the API; sync reconciles from Stripe", async () => {
+    const realFetch = globalThis.fetch;
+    const calls: { url: string; method: string; body: string }[] = [];
+    let remote = subObj(); // what "Stripe" currently holds
+    process.env.STRIPE_SECRET_KEY = "sk_test_stub";
+    process.env.STRIPE_PRICE_STUDIO = PRICE;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = typeof init?.body === "string" ? init.body : "";
+      calls.push({ url, method, body });
+      if (/\/v1\/subscriptions\/sub_1$/.test(url)) {
+        if (method === "POST") remote = { ...remote, cancel_at_period_end: /cancel_at_period_end=true/.test(body) };
+        return new Response(JSON.stringify(remote), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ error: { message: "unexpected call" } }), { status: 404 });
+    }) as typeof fetch;
+    try {
+      const token = await signup("stripestate@factorialstudio.com");
+      seed("stripestate@factorialstudio.com");
+
+      const c = await app.inject({ method: "POST", url: "/api/billing/cancel", headers: bearer(token), payload: {} });
+      expect(c.statusCode).toBe(200);
+      expect(c.json().cancelAtPeriodEnd).toBe(true);
+      expect(c.json().plan).toBe("studio"); // access continues until period end
+      expect(c.json().renewsAt).toBe(new Date(PERIOD_END * 1000).toISOString());
+      expect(calls.at(-1)).toMatchObject({ method: "POST" });
+      expect(calls.at(-1)!.body).toContain("cancel_at_period_end=true");
+
+      const r = await app.inject({ method: "POST", url: "/api/billing/resume", headers: bearer(token), payload: {} });
+      expect(r.statusCode).toBe(200);
+      expect(r.json().cancelAtPeriodEnd).toBe(false);
+      expect(calls.at(-1)!.body).toContain("cancel_at_period_end=false");
+
+      // Stripe-side change we never got a webhook for → sync picks it up
+      remote = subObj({ status: "past_due", cancel_at_period_end: true });
+      const sync = await app.inject({ method: "POST", url: "/api/billing/sync", headers: bearer(token), payload: {} });
+      expect(sync.statusCode).toBe(200);
+      expect(sync.json().plan).toBe("free"); // past_due is not active → free
+      expect(sync.json().status).toBe("past_due");
+      expect(sync.json().cancelAtPeriodEnd).toBe(true);
+      expect(calls.at(-1)).toMatchObject({ method: "GET" });
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.STRIPE_SECRET_KEY;
+      delete process.env.STRIPE_PRICE_STUDIO;
+    }
   });
 });
 

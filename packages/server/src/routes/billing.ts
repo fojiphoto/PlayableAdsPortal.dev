@@ -7,6 +7,7 @@ import {
   setUserBilling,
   getUserById,
   getUserByStripeCustomer,
+  type UserRow,
 } from "../repo.js";
 import { allPlans, isPlanId } from "../plans.js";
 import { planStatus } from "../plan-status.js";
@@ -18,6 +19,10 @@ import {
   createCheckoutSession,
   createPortalSession,
   verifyWebhook,
+  getSubscription,
+  setCancelAtPeriodEnd,
+  subscriptionSummary,
+  type StripeSubscription,
 } from "../stripe.js";
 
 /** The SPA origin to send Checkout/Portal returns back to (request Origin, else PUBLIC_URL). */
@@ -35,11 +40,27 @@ function baseUrl(req: FastifyRequest): string {
   return (config.publicUrl || "").replace(/\/$/, "");
 }
 
+/**
+ * Reconcile a user's local plan state from a Stripe subscription (webhook payload or API read).
+ * Active/trialing → the plan for its price (fall back to the current plan if the price is
+ * unknown); anything else (canceled, unpaid, past_due…) → free. Period end + cancel flag are
+ * stored so the UI can say "renews on" / "cancels on".
+ */
+function applySubscription(u: UserRow, sub: StripeSubscription | Record<string, unknown>): void {
+  const s = subscriptionSummary(sub);
+  const active = s.status === "active" || s.status === "trialing";
+  const plan = active ? ((s.priceId && planForPrice(s.priceId)) || u.plan) : "free";
+  setUserBilling(u.id, plan, (sub as StripeSubscription).id ?? u.stripe_subscription_id, s.status, {
+    renewsAt: s.renewsAt,
+    cancelAtPeriodEnd: s.cancelAtPeriodEnd,
+  });
+}
+
 export async function billingRoutes(app: FastifyInstance): Promise<void> {
   // the plan catalog (public)
   app.get("/api/billing/plans", async () => allPlans());
 
-  // current user's plan + usage
+  // current user's plan + usage + subscription state
   app.get("/api/billing/status", authed, async (req) => planStatus(req.user!.id));
 
   // Start an upgrade. With Stripe configured → a Checkout Session URL; without it → an instant
@@ -105,7 +126,7 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  // Open the Stripe billing portal to manage/cancel a subscription.
+  // Open the Stripe billing portal (payment method, invoices, full management).
   app.post("/api/billing/portal", authed, async (req, reply) => {
     if (!stripeEnabled()) return reply.code(400).send({ error: "billing portal is not configured" });
     const user = getUserById(req.user!.id);
@@ -115,6 +136,63 @@ export async function billingRoutes(app: FastifyInstance): Promise<void> {
     } catch (e) {
       return reply.code(502).send({ error: `Stripe portal failed: ${(e as Error).message}` });
     }
+  });
+
+  // ── in-app subscription control ──
+
+  // Cancel at the end of the current period (access continues until then).
+  app.post("/api/billing/cancel", authed, async (req, reply) => {
+    const user = getUserById(req.user!.id);
+    if (!user) return reply.code(404).send({ error: "user not found" });
+    if (!user.stripe_subscription_id) {
+      if (!stripeEnabled() && user.plan !== "free") {
+        // dev mode: no real period to run out — drop to free now
+        setUserBilling(user.id, "free", null, "canceled", { renewsAt: null, cancelAtPeriodEnd: false });
+        return planStatus(user.id);
+      }
+      return reply.code(400).send({ error: "no active subscription to cancel" });
+    }
+    if (!stripeEnabled()) return reply.code(400).send({ error: "billing is not configured" });
+    try {
+      applySubscription(user, await setCancelAtPeriodEnd(user.stripe_subscription_id, true));
+      return planStatus(user.id);
+    } catch (e) {
+      return reply.code(502).send({ error: `Stripe cancel failed: ${(e as Error).message}` });
+    }
+  });
+
+  // Undo a pending cancellation.
+  app.post("/api/billing/resume", authed, async (req, reply) => {
+    const user = getUserById(req.user!.id);
+    if (!user) return reply.code(404).send({ error: "user not found" });
+    if (!user.stripe_subscription_id || !stripeEnabled()) {
+      return reply.code(400).send({ error: "nothing to resume" });
+    }
+    try {
+      applySubscription(user, await setCancelAtPeriodEnd(user.stripe_subscription_id, false));
+      return planStatus(user.id);
+    } catch (e) {
+      return reply.code(502).send({ error: `Stripe resume failed: ${(e as Error).message}` });
+    }
+  });
+
+  // Re-read the subscription from Stripe and reconcile local state (covers a missed webhook).
+  app.post("/api/billing/sync", authed, async (req, reply) => {
+    const user = getUserById(req.user!.id);
+    if (!user) return reply.code(404).send({ error: "user not found" });
+    if (!stripeEnabled()) return reply.code(400).send({ error: "billing is not configured" });
+    if (!user.stripe_subscription_id) return planStatus(user.id); // nothing to sync — report as-is
+    try {
+      applySubscription(user, await getSubscription(user.stripe_subscription_id));
+    } catch (e) {
+      // the subscription is gone on Stripe's side → we're on free
+      if (/no such subscription/i.test((e as Error).message)) {
+        setUserBilling(user.id, "free", null, "canceled", { renewsAt: null, cancelAtPeriodEnd: false });
+      } else {
+        return reply.code(502).send({ error: `Stripe sync failed: ${(e as Error).message}` });
+      }
+    }
+    return planStatus(user.id);
   });
 
   // Dev-only direct switch (used by tests and keyless local/staging). Blocked in production
@@ -172,20 +250,13 @@ function handleStripeEvent(event: StripeEvent): void {
     case "customer.subscription.updated": {
       const customer = obj.customer as string | undefined;
       const u = customer ? getUserByStripeCustomer(customer) : undefined;
-      if (!u) break;
-      const status = obj.status as string | undefined;
-      const items = obj.items as { data?: { price?: { id?: string } }[] } | undefined;
-      const priceId = items?.data?.[0]?.price?.id;
-      const plan = priceId ? planForPrice(priceId) : undefined;
-      const active = status === "active" || status === "trialing";
-      if (plan && active) setUserBilling(u.id, plan, (obj.id as string) ?? null, status ?? null);
-      else if (!active) setUserBilling(u.id, "free", (obj.id as string) ?? null, status ?? null);
+      if (u) applySubscription(u, obj);
       break;
     }
     case "customer.subscription.deleted": {
       const customer = obj.customer as string | undefined;
       const u = customer ? getUserByStripeCustomer(customer) : undefined;
-      if (u) setUserBilling(u.id, "free", null, "canceled");
+      if (u) setUserBilling(u.id, "free", null, "canceled", { renewsAt: null, cancelAtPeriodEnd: false });
       break;
     }
   }

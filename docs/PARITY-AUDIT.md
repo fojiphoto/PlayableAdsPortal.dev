@@ -200,7 +200,7 @@ landing; two extra networks; a capture-based Unity path that ships *something* w
 | 7 | **In-playable analytics ingestion** | Theirs = ad performance; ours = billing usage | M |
 | 8 | ~~Missing 9 networks~~ **DONE 2026-10-29** — Remerge, Tencent, Aarki, LINE, Appreciate, RevX, Adikteev, YouAppi + MRAID generic added (all MRAID 2.0 specs, caps noted) → **29 networks** | Marketing now accurate | done |
 | 9 | ~~Rename/update endpoints; network-order~~ **DONE 2026-10-29** — `PATCH /api/apps/:id` (name/platform), `PATCH /api/concepts/:id` (name + Enterprise-gated `networkOrder`, validated, used as the default `/export` set), `PATCH /api/creatives/:id` (name + CTA/store URLs); sidebar rename UI | The advertised Enterprise feature now exists | done |
-| 10 | **Billing: surface subscription state, in-app cancel/resume, sync** | Users can't see renewal/cancel state | S–M |
+| 10 | ~~Billing: subscription state, cancel/resume, sync~~ **DONE 2026-10-30** — `/billing/status` now carries `status`, `renewsAt`, `cancelAtPeriodEnd`, `hasSubscription` (stored from the webhook, items-level `current_period_end` for 2025+ API versions); `POST /billing/cancel` (cancel at period end, access continues), `/billing/resume`, `/billing/sync` (re-read from Stripe; handles missed webhooks); Plans page shows renews-on / cancels-on with Cancel/Resume/Sync + portal | Users can now see and control their subscription in-app | done |
 | 11 | **Runtime API completeness** + actually read `[AdLabField]` | Half-declared contract | S declare / L wire |
 | 12 | Preloader kit templates, per-concept kit, server preview | Template library | M |
 | 13 | Plugin distribution (download/version/self-update, licensing) | No way to ship/revoke the plugin | M |

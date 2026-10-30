@@ -49,6 +49,13 @@ export function toForm(obj: Record<string, unknown>, prefix = ""): string {
   return parts.filter(Boolean).join("&");
 }
 
+async function stripeGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${API}/${path}`, { headers: { authorization: `Bearer ${secretKey()}` } });
+  const json = (await res.json()) as T & { error?: { message?: string } };
+  if (!res.ok) throw new Error(json?.error?.message || `Stripe ${path} failed (${res.status})`);
+  return json;
+}
+
 async function stripePost<T>(path: string, params: Record<string, unknown>): Promise<T> {
   const res = await fetch(`${API}/${path}`, {
     method: "POST",
@@ -120,5 +127,51 @@ export function verifyWebhook(rawBody: Buffer | string, header: string | undefin
   return v1.some((sig) => {
     const got = Buffer.from(sig);
     return got.length === exp.length && timingSafeEqual(got, exp);
+  });
+}
+
+// ── subscriptions: read / update / summarise ─────────────────────────────────
+
+/** The parts of a Stripe Subscription object we act on. */
+export interface StripeSubscription {
+  id: string;
+  customer?: string;
+  status?: string;
+  cancel_at_period_end?: boolean;
+  /** API versions before 2025 carried the period on the subscription… */
+  current_period_end?: number;
+  /** …newer versions carry it on each item. */
+  items?: { data?: { price?: { id?: string }; current_period_end?: number }[] };
+}
+
+export interface SubscriptionSummary {
+  status: string | null;
+  priceId: string | null;
+  /** ISO timestamp of the end of the current billing period (renewal or cancellation date) */
+  renewsAt: string | null;
+  cancelAtPeriodEnd: boolean;
+}
+
+/** Normalise a subscription (webhook payload or API read) across API versions. */
+export function subscriptionSummary(sub: StripeSubscription | Record<string, unknown>): SubscriptionSummary {
+  const o = sub as StripeSubscription;
+  const item = o.items?.data?.[0];
+  const end = typeof o.current_period_end === "number" ? o.current_period_end : item?.current_period_end;
+  return {
+    status: o.status ?? null,
+    priceId: item?.price?.id ?? null,
+    renewsAt: typeof end === "number" ? new Date(end * 1000).toISOString() : null,
+    cancelAtPeriodEnd: !!o.cancel_at_period_end,
+  };
+}
+
+export function getSubscription(id: string): Promise<StripeSubscription> {
+  return stripeGet<StripeSubscription>(`subscriptions/${encodeURIComponent(id)}`);
+}
+
+/** Flip cancel-at-period-end (cancel keeps access until the period ends; resume undoes it). */
+export function setCancelAtPeriodEnd(id: string, cancel: boolean): Promise<StripeSubscription> {
+  return stripePost<StripeSubscription>(`subscriptions/${encodeURIComponent(id)}`, {
+    cancel_at_period_end: cancel ? "true" : "false",
   });
 }

@@ -9,6 +9,13 @@ export interface PlanStatus {
   limit: number | null; // null = unlimited
   used: number;
   networks: "all" | string[];
+  // ── subscription state (null/false when there is no Stripe subscription) ──
+  /** Stripe subscription status: active | trialing | past_due | canceled | … */
+  status: string | null;
+  /** end of the current billing period — the renewal date, or the end date if cancelling */
+  renewsAt: string | null;
+  cancelAtPeriodEnd: boolean;
+  hasSubscription: boolean;
 }
 
 export function planStatus(userId: string): PlanStatus {
@@ -20,6 +27,10 @@ export function planStatus(userId: string): PlanStatus {
     limit: plan.exportsPer30d,
     used: countExportUsageSince(userId, since30dIso()),
     networks: plan.networks,
+    status: user?.plan_status ?? null,
+    renewsAt: user?.plan_renews_at ?? null,
+    cancelAtPeriodEnd: !!user?.plan_cancel_at_period_end,
+    hasSubscription: !!user?.stripe_subscription_id,
   };
 }
 

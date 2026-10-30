@@ -30,6 +30,8 @@ export interface UserRow {
   email_verified: number;
   email_verify_hash: string | null;
   email_verify_expires: string | null;
+  plan_renews_at: string | null;
+  plan_cancel_at_period_end: number;
   created_at: string;
 }
 export interface AppRow {
@@ -75,7 +77,8 @@ export function createUser(email: string, passwordHash: string): UserRow {
     id: randomUUID(), email, password_hash: passwordHash, plan: "free",
     totp_secret: null, totp_enabled: 0, totp_last_step: null, domain: null, domain_token: null, domain_verified: 0,
     stripe_customer_id: null, stripe_subscription_id: null, plan_status: null,
-    email_verified: 0, email_verify_hash: null, email_verify_expires: null, created_at: now(),
+    email_verified: 0, email_verify_hash: null, email_verify_expires: null,
+    plan_renews_at: null, plan_cancel_at_period_end: 0, created_at: now(),
   };
   getDb()
     .prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
@@ -98,11 +101,25 @@ export function setStripeCustomer(id: string, customerId: string): void {
   getDb().prepare("UPDATE users SET stripe_customer_id = ? WHERE id = ?").run(customerId, id);
 }
 
-/** Set plan + subscription id + status together (called from the Stripe webhook). */
-export function setUserBilling(id: string, plan: string, subscriptionId: string | null, status: string | null): void {
-  getDb()
-    .prepare("UPDATE users SET plan = ?, stripe_subscription_id = ?, plan_status = ? WHERE id = ?")
-    .run(plan, subscriptionId, status, id);
+/** Set plan + subscription id/status (+ period end and cancel flag) together — from the webhook or a sync. */
+export function setUserBilling(
+  id: string,
+  plan: string,
+  subscriptionId: string | null,
+  status: string | null,
+  details?: { renewsAt?: string | null; cancelAtPeriodEnd?: boolean },
+): void {
+  if (details) {
+    getDb()
+      .prepare(
+        "UPDATE users SET plan = ?, stripe_subscription_id = ?, plan_status = ?, plan_renews_at = ?, plan_cancel_at_period_end = ? WHERE id = ?",
+      )
+      .run(plan, subscriptionId, status, details.renewsAt ?? null, details.cancelAtPeriodEnd ? 1 : 0, id);
+  } else {
+    getDb()
+      .prepare("UPDATE users SET plan = ?, stripe_subscription_id = ?, plan_status = ? WHERE id = ?")
+      .run(plan, subscriptionId, status, id);
+  }
 }
 
 export function getUserByStripeCustomer(customerId: string): UserRow | undefined {

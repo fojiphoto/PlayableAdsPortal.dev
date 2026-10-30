@@ -150,6 +150,9 @@ export const checkout = (plan: string) =>
   postJson<{ url?: string; dev?: boolean; contact?: boolean; status?: PlanStatus }>("/billing/checkout", { plan });
 /** Open the Stripe billing portal (returns a { url } to redirect to). */
 export const billingPortal = () => postJson<{ url: string }>("/billing/portal", {});
+export const cancelSubscription = () => postJson<PlanStatus>("/billing/cancel", {});
+export const resumeSubscription = () => postJson<PlanStatus>("/billing/resume", {});
+export const syncBilling = () => postJson<PlanStatus>("/billing/sync", {});
 
 // ── rename / update ──
 export const renameApp = (id: string, name: string) => patchJson<App>(`/apps/${id}`, { name });

@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS users (
   email_verified         INTEGER NOT NULL DEFAULT 0,
   email_verify_hash      TEXT,
   email_verify_expires   TEXT,
+  plan_renews_at         TEXT,
+  plan_cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL
 );
 
@@ -138,6 +140,8 @@ export function initDb(path: string = config.dbPath): DB {
     "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN email_verify_hash TEXT",
     "ALTER TABLE users ADD COLUMN email_verify_expires TEXT",
+    "ALTER TABLE users ADD COLUMN plan_renews_at TEXT",
+    "ALTER TABLE users ADD COLUMN plan_cancel_at_period_end INTEGER NOT NULL DEFAULT 0",
   ]) {
     try {
       db.exec(stmt);

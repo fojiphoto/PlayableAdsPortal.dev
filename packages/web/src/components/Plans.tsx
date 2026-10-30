@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { listPlans, checkout, billingPortal } from "../api";
+import { listPlans, checkout, billingPortal, cancelSubscription, resumeSubscription, syncBilling } from "../api";
 import type { Plan, PlanStatus } from "../types";
 
 export function Plans({ status, onChanged }: { status: PlanStatus | null; onChanged: (s: PlanStatus) => void }) {
@@ -32,6 +32,21 @@ export function Plans({ status, onChanged }: { status: PlanStatus | null; onChan
       setBusy(null);
     }
   }
+
+  async function subAction(kind: "cancel" | "resume" | "sync") {
+    if (kind === "cancel" && !window.confirm("Cancel your subscription? You keep access until the end of the current billing period.")) return;
+    setBusy("__" + kind);
+    setErr(null);
+    try {
+      const s = kind === "cancel" ? await cancelSubscription() : kind === "resume" ? await resumeSubscription() : await syncBilling();
+      onChanged(s);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+  const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 
   async function manageBilling() {
     setBusy("__portal");
@@ -114,10 +129,69 @@ export function Plans({ status, onChanged }: { status: PlanStatus | null; onChan
       </div>
 
       {status && status.plan !== "free" && status.plan !== "enterprise" && (
-        <div style={{ marginTop: 18 }}>
-          <button className="btn btn-ghost" disabled={busy === "__portal"} onClick={manageBilling}>
-            {busy === "__portal" ? "…" : "Manage billing"}
-          </button>
+        <div
+          style={{
+            marginTop: 18,
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            background: "rgba(255,255,255,.05)",
+            border: "2px solid rgba(163,217,119,.18)",
+            borderRadius: 18,
+            padding: "14px 20px",
+            fontSize: ".9rem",
+          }}
+        >
+          <div style={{ color: "var(--muted)" }}>
+            <b style={{ color: "#fff", fontWeight: 700 }}>Subscription</b>
+            {status.hasSubscription ? (
+              <>
+                {" · "}
+                {status.cancelAtPeriodEnd ? (
+                  <span style={{ color: "#ff8a7a" }}>
+                    cancels {status.renewsAt ? `on ${fmtDate(status.renewsAt)}` : "at period end"} — you keep access until then
+                  </span>
+                ) : status.renewsAt ? (
+                  <span>renews on {fmtDate(status.renewsAt)}</span>
+                ) : (
+                  <span>{status.status ?? "active"}</span>
+                )}
+                {status.status && status.status !== "active" && status.status !== "trialing" && (
+                  <span style={{ color: "#ff8a7a" }}> · {status.status.replace(/_/g, " ")}</span>
+                )}
+              </>
+            ) : (
+              <> · no Stripe subscription on file</>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {status.hasSubscription &&
+              (status.cancelAtPeriodEnd ? (
+                <button className="btn btn-gold" disabled={busy === "__resume"} onClick={() => void subAction("resume")}>
+                  {busy === "__resume" ? "…" : "Resume subscription"}
+                </button>
+              ) : (
+                <button className="btn btn-ghost" disabled={busy === "__cancel"} onClick={() => void subAction("cancel")}>
+                  {busy === "__cancel" ? "…" : "Cancel subscription"}
+                </button>
+              ))}
+            <button className="btn btn-ghost" disabled={busy === "__portal"} onClick={manageBilling}>
+              {busy === "__portal" ? "…" : "Manage billing"}
+            </button>
+            {status.hasSubscription && (
+              <button
+                type="button"
+                disabled={busy === "__sync"}
+                onClick={() => void subAction("sync")}
+                title="Re-read the subscription from Stripe"
+                style={{ background: "none", border: 0, color: "var(--muted)", cursor: "pointer", fontSize: ".82rem", textDecoration: "underline" }}
+              >
+                {busy === "__sync" ? "syncing…" : "Sync with Stripe"}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
