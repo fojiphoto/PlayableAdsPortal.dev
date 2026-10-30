@@ -79,7 +79,7 @@ Legend: **DONE** / **PARTIAL** / **MISSING**. Evidence is `file:line` or route.
 | `/concepts` create/list/get/remove | DONE | `routes/apps.ts` |
 | `/concepts/rename`, `/concepts/config`, `/concepts/network-order` | MISSING | — |
 | `/concepts/{id}/file` (source download) | MISSING | `source_zip` stored, no route serves it |
-| Dashboard-tunable custom variables (`[PlayableForgeField]` → UI) | MISSING | `[AdLabField]` declared in `Runtime/Playable.cs` but nothing reads it |
+| Dashboard-tunable custom variables (`[PlayableForgeField]` → UI) | DONE | `[AdLabField(displayName, order, section, Min, Max)]` + `[AdLabFieldStep]`; plugin scans them (`Editor/VariablesScanner.cs`) and sends the schema with the compile upload; creative stores schema + values (`server/variables.ts`: typed, clamped, free-form keys allowed); dashboard Variables panel per creative; exports inject `PF.vars`; Unity `Variables` applies them to fields at scene load |
 
 ### 1.5 Upload & packaging engine
 | Competitor feature | Status | Evidence / what's lacking |
@@ -146,9 +146,9 @@ Legend: **DONE** / **PARTIAL** / **MISSING**. Evidence is `file:line` or route.
 | Scene/asset dependency-closure collection; Roslyn API analysis | MISSING | N/A to capture approach |
 | `.pfu` bundle → `/compile/jobs` | DONE | Plugin runs a size-optimised WebGL build, zips `index.html + Build/ + StreamingAssets/`, `POST /api/concepts/:id/compile` (alias `/api/compile/jobs`) → 202 job, polled with progress (`Editor/WebGLCompileUploader.cs`). Capture path kept for heavy games |
 | **Server-side C# → interactive web playable compiler** | PARTIAL (approach B) | `packager/src/compile.ts`: Unity WebGL build → ONE self-contained HTML (loader inlined; framework/wasm/data as blob: URLs; StreamingAssets shimmed; gzip/brotli decompressed) + size breakdown + cap guidance; runs as a `compile` job; result is an ordinary creative. Not a C#→JS transpiler with a bespoke renderer — that remains the long-term track |
-| Runtime API `Playable.InstallFullGame/GetPlatform/SetLoadingProgress` | PARTIAL | Stubs; nothing consumes them |
-| `GetPreferredLanguage(s)`, `GamePaused/Resumed`, haptics, `Analytics` class | MISSING | — |
-| `[Field]` attribute w/ `order`, `[FieldStep]` | PARTIAL | `[AdLabField]` lacks `order`/`FieldStep`; unread |
+| Runtime API `Playable.InstallFullGame/GetPlatform/SetLoadingProgress` | DONE | All wired through the WebGL jslib to the shim; `SetLoadingProgress` drives the branded preloader bar (1 hides it) |
+| `GetPreferredLanguage(s)`, `GamePaused/Resumed`, haptics, `Analytics` class | DONE | `Playable.GetPreferredLanguage(s)`; `LifeCycle.GamePaused/Resumed/GameUpdated/GameEnded(details)/LevelChanged(details)/HapticTriggered` + `OnPause/OnResume` events raised from the container's viewability via SendMessage; `Analytics.LogEvent(name|EventType, value)` (values summed on the dashboard) + `Analytics.Applovin.LogChallenge*` |
+| `[Field]` attribute w/ `order`, `[FieldStep]` | DONE | Same shape as the competitor's; read by the scanner and the runtime |
 | `/plugin/download|version|downloads`, self-update, license watermark, bans | MISSING | Local UPM folder only |
 
 ### 1.14 Landing / marketing — DONE (+ live playable demos). Claims to tighten: "20+ networks" (exactly 20), "custom network ordering" (unimplemented), "validated against current spec" (caps are placeholders).
@@ -201,7 +201,7 @@ landing; two extra networks; a capture-based Unity path that ships *something* w
 | 8 | ~~Missing 9 networks~~ **DONE 2026-10-29** — Remerge, Tencent, Aarki, LINE, Appreciate, RevX, Adikteev, YouAppi + MRAID generic added (all MRAID 2.0 specs, caps noted) → **29 networks** | Marketing now accurate | done |
 | 9 | ~~Rename/update endpoints; network-order~~ **DONE 2026-10-29** — `PATCH /api/apps/:id` (name/platform), `PATCH /api/concepts/:id` (name + Enterprise-gated `networkOrder`, validated, used as the default `/export` set), `PATCH /api/creatives/:id` (name + CTA/store URLs); sidebar rename UI | The advertised Enterprise feature now exists | done |
 | 10 | ~~Billing: subscription state, cancel/resume, sync~~ **DONE 2026-10-30** — `/billing/status` now carries `status`, `renewsAt`, `cancelAtPeriodEnd`, `hasSubscription` (stored from the webhook, items-level `current_period_end` for 2025+ API versions); `POST /billing/cancel` (cancel at period end, access continues), `/billing/resume`, `/billing/sync` (re-read from Stripe; handles missed webhooks); Plans page shows renews-on / cancels-on with Cancel/Resume/Sync + portal | Users can now see and control their subscription in-app | done |
-| 11 | **Runtime API completeness** + actually read `[AdLabField]` | Half-declared contract | S declare / L wire |
+| 11 | ~~Runtime API completeness~~ **DONE 2026-10-30** — full `Playable` / `LifeCycle` / `Analytics` / `[AdLabField]`+`[AdLabFieldStep]` contract mirrored from the decompiled runtime, every call wired through the jslib to the shim (`PF` 0.4.0: vars/getVar, setLoadingProgress → preloader bar, languages, haptics, valued events, AppLovin challenge events, pause/resume → C# events); custom variables end to end (plugin scan → compile upload → creative schema/values → dashboard panel → `PF.vars` in exports → applied to fields at scene load); HTML5 playables use `PF.getVar` | Half-declared contract | done |
 | 12 | Preloader kit templates, per-concept kit, server preview | Template library | M |
 | 13 | Plugin distribution (download/version/self-update, licensing) | No way to ship/revoke the plugin | M |
 | 14 | Support/feedback/contact/reminders | Ops tooling (17 endpoints) | M |

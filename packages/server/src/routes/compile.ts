@@ -7,6 +7,7 @@ import { createCreative, createUpload, deleteUpload, getConceptOwned, getUpload,
 import { enqueue, registerJobHandler, JobError, jobView } from "../jobs.js";
 import { rateLimit } from "../rate-limit.js";
 import { needs } from "../orgs.js";
+import { defaultsOf, normalizeSchema, type VariableDef } from "../variables.js";
 
 /**
  * Compile jobs (parity gap #2): a Unity WebGL build (zip of index.html + Build/ [+ StreamingAssets/])
@@ -22,6 +23,8 @@ export interface CompileJobPayload {
   ctaUrl?: string;
   iosUrl?: string;
   androidUrl?: string;
+  /** [AdLabField] schema scanned by the plugin */
+  variableSchema?: VariableDef[];
 }
 
 registerJobHandler("compile", async (job, progress) => {
@@ -42,7 +45,15 @@ registerJobHandler("compile", async (job, progress) => {
     zip.file("index.html", r.bytes);
     const sourceZip = await zip.generateAsync({ type: "uint8array" });
     const name = p.name || up.filename.replace(/\.zip$/i, "") || "unity-playable";
-    const options: PackOptions = { name, ctaUrl: p.ctaUrl, iosUrl: p.iosUrl, androidUrl: p.androidUrl };
+    const variableSchema = p.variableSchema ?? [];
+    const options: PackOptions & { variableSchema: VariableDef[] } = {
+      name,
+      ctaUrl: p.ctaUrl,
+      iosUrl: p.iosUrl,
+      androidUrl: p.androidUrl,
+      variables: defaultsOf(variableSchema),
+      variableSchema,
+    };
     const row = createCreative({ conceptId: concept.id, name, entry: "index.html", sourceZip, optionsJson: JSON.stringify(options) });
 
     const fitsNetworks = allNetworks()
@@ -60,6 +71,7 @@ registerJobHandler("compile", async (job, progress) => {
       compression: r.compression,
       fitsNetworks,
       streamingAssetFiles: r.streamingAssetFiles,
+      variableCount: variableSchema.length,
     };
   } catch (e) {
     if (e instanceof CompileError) throw new JobError(e.message, e.code);
@@ -101,6 +113,14 @@ export async function compileRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: "Upload a .zip of the Unity WebGL build folder (index.html + Build/)." });
     }
 
+    let variableSchema: VariableDef[] = [];
+    if (fields.variables) {
+      try {
+        variableSchema = normalizeSchema(JSON.parse(fields.variables));
+      } catch (e) {
+        return reply.code(400).send({ error: `variables: ${(e as Error).message}` });
+      }
+    }
     const uploadId = createUpload(uid, filename, new Uint8Array(file));
     const payload: CompileJobPayload = {
       uploadId,
@@ -111,6 +131,7 @@ export async function compileRoutes(app: FastifyInstance): Promise<void> {
       ctaUrl: fields.ctaUrl || undefined,
       iosUrl: fields.iosUrl || undefined,
       androidUrl: fields.androidUrl || undefined,
+      variableSchema,
     };
     const job = enqueue(uid, "compile", payload);
     return reply.code(202).send({ jobId: job.id, status: job.status, statusUrl: `/api/jobs/${job.id}`, uploadBytes: file.length });

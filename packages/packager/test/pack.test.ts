@@ -110,6 +110,6 @@ describe("preloader", () => {
   it("omits the preloader when not configured", async () => {
     const src = await loadFromDir(fixture);
     const r = await pack(src, getNetwork("applovin"), {});
-    expect(new TextDecoder().decode(r.bytes)).not.toContain("__pf_pl");
+    expect(new TextDecoder().decode(r.bytes)).not.toContain('id="__pf_pl"'); // the shim references the bar id; the element itself must be absent
   });
 });

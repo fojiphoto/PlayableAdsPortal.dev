@@ -93,6 +93,10 @@ namespace FactorialAdLab.Editor
                 compileCfg.activeSceneOnly = EditorGUILayout.Toggle("Active scene only", compileCfg.activeSceneOnly);
                 compileCfg.aggressiveStripping = EditorGUILayout.Toggle("Aggressive stripping", compileCfg.aggressiveStripping);
                 if (EditorGUI.EndChangeCheck()) SaveCfg();
+                int varCount = VariablesScanner.Count();
+                GUILayout.Label(varCount > 0
+                    ? $"{varCount} [AdLabField] variable(s) found — tunable from the dashboard after compile."
+                    : "No [AdLabField] variables found (mark MonoBehaviour fields to tune them from the dashboard).", EditorStyles.miniLabel);
                 using (new EditorGUI.DisabledScope(Application.isPlaying || WebGLCompileUploader.Running || CaptureUploader.Running))
                 {
                     if (GUILayout.Button(WebGLCompileUploader.Running ? "Compiling…" : "Build, compile & upload playable", GUILayout.Height(30)))

@@ -64,6 +64,19 @@ export interface CreativeSummary {
   createdAt: string;
 }
 
+export type VariableValues = Record<string, number | string | boolean>;
+export interface VariableDef {
+  key: string;
+  displayName?: string;
+  section?: string;
+  order?: number;
+  type: "number" | "int" | "bool" | "string";
+  min?: number;
+  max?: number;
+  step?: number;
+  default: number | string | boolean;
+}
+
 export interface CreativeDetail {
   id: string;
   name: string;
@@ -71,6 +84,8 @@ export interface CreativeDetail {
   conceptId: string;
   createdAt: string;
   exports: PackResultView[];
+  variables: VariableValues;
+  variableSchema: VariableDef[];
 }
 
 export interface Plan {
@@ -165,7 +180,7 @@ export interface Funnel {
 export interface PlayableAnalytics extends Funnel {
   daily: { date: string; impressions: number; engagements: number; ctaClicks: number }[];
   byNetwork: (Funnel & { network: string; networkName: string })[];
-  customEvents: { name: string; hits: number; sessions: number }[];
+  customEvents: { name: string; hits: number; sessions: number; total: number | null }[];
 }
 
 export interface Analytics {

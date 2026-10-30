@@ -242,7 +242,7 @@ ${callsInstall ? "// the game calls Playable.InstallFullGame() → window.PF.ins
 function start(){
   if(started)return;started=true;
   if(typeof createUnityInstance!=="function"){fail("Unity loader missing");return;}
-  createUnityInstance(canvas,config,function(p){bar.style.width=Math.round(p*100)+"%";}).then(function(inst){
+  createUnityInstance(canvas,config,function(p){bar.style.width=Math.round(p*100)+"%";try{if(window.PF&&window.PF.setLoadingProgress)window.PF.setLoadingProgress(p*0.95);}catch(e){}}).then(function(inst){
     window.unityInstance=inst;
     ov.classList.add("hide");setTimeout(function(){if(ov.parentNode)ov.parentNode.removeChild(ov);},500);
     try{if(window.PF){window.PF.lifecycle.gameLoaded();if(window.PF.hidePreloader)window.PF.hidePreloader();

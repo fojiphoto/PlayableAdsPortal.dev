@@ -151,6 +151,7 @@ export function Analytics() {
                 <span className="truncate text-slate-200">{e.name}</span>
                 <span className="ml-3 shrink-0 tabular-nums text-slate-400">
                   {fmt(e.hits)} <span className="text-slate-500">· {fmt(e.sessions)} plays</span>
+                  {e.total != null && e.total !== 0 && <span className="text-slate-500"> · Σ {Number(e.total).toLocaleString()}</span>}
                 </span>
               </div>
             ))}

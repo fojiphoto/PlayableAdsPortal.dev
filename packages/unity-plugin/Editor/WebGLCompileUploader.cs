@@ -122,6 +122,7 @@ namespace FactorialAdLab.Editor
                     new MultipartFormDataSection("name", cfg.productName),
                     new MultipartFormDataSection("companyName", Application.companyName ?? ""),
                     new MultipartFormDataSection("unityVersion", Application.unityVersion ?? ""),
+                    new MultipartFormDataSection("variables", VariablesScanner.ManifestJson()),
                 };
                 if (!string.IsNullOrEmpty(cfg.iosUrl)) form.Add(new MultipartFormDataSection("iosUrl", cfg.iosUrl));
                 if (!string.IsNullOrEmpty(cfg.androidUrl)) form.Add(new MultipartFormDataSection("androidUrl", cfg.androidUrl));
@@ -260,12 +261,13 @@ namespace FactorialAdLab.Editor
         static string Summary(JobResult r)
         {
             if (r == null || string.IsNullOrEmpty(r.creativeId)) return "Compiled. Open your dashboard to export.";
+            string vars = r.variableCount > 0 ? $"\n{r.variableCount} custom variable(s) are editable on the creative in the dashboard." : "";
             var b = r.breakdown;
             string fits = r.fitsNetworks != null && r.fitsNetworks.Length > 0 ? $"fits {r.fitsNetworks.Length} networks" : "above every network cap";
             string s = $"Compiled: {Fmt(r.sizeBytes)} single-file playable ({fits}).\n" +
                        (b != null ? $"code {Fmt(b.wasm)} · assets {Fmt(b.data)} · framework {Fmt(b.framework)} · loader {Fmt(b.loader)}" : "");
             if (r.warnings != null && r.warnings.Length > 0) s += "\n• " + string.Join("\n• ", r.warnings);
-            s += "\nOpen your dashboard to export to every network.";
+            s += vars + "\nOpen your dashboard to export to every network.";
             return s;
         }
 
@@ -384,7 +386,7 @@ namespace FactorialAdLab.Editor
 
         [Serializable] class JobStart { public string jobId; public string status; }
         [Serializable] class JobRes { public string status; public int progress; public string label; public string error; public JobResult result; }
-        [Serializable] class JobResult { public string creativeId; public long sizeBytes; public string[] warnings; public string[] fitsNetworks; public Breakdown breakdown; }
+        [Serializable] class JobResult { public string creativeId; public long sizeBytes; public string[] warnings; public string[] fitsNetworks; public Breakdown breakdown; public int variableCount; }
         [Serializable] class Breakdown { public long loader, framework, wasm, data, streamingAssets, embedded; }
     }
 }

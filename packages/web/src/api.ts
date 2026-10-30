@@ -180,7 +180,7 @@ export const setNetworkOrder = (conceptId: string, order: string[] | null) =>
   patchJson<Concept>(`/concepts/${conceptId}`, { networkOrder: order });
 export const updateCreative = (
   id: string,
-  patch: { name?: string; ctaUrl?: string | null; iosUrl?: string | null; androidUrl?: string | null },
+  patch: { name?: string; ctaUrl?: string | null; iosUrl?: string | null; androidUrl?: string | null; variables?: Record<string, number | string | boolean | null> },
 ) => patchJson<CreativeDetail>(`/creatives/${id}`, patch);
 
 // ── networks ──

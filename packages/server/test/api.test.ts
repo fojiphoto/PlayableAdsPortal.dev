@@ -890,8 +890,8 @@ describe("in-playable analytics: collector + dashboard funnel", () => {
     expect(a.playable.byCreative).toHaveLength(1);
     expect(a.playable.byCreative[0]).toMatchObject({ creativeId, creative: "lumber", app: "Tracked App", concept: "c1", impressions: 4 });
     expect(a.playable.customEvents).toEqual([
-      { name: "level_2", hits: 2, sessions: 1 },
-      { name: "level_1", hits: 1, sessions: 1 },
+      { name: "level_2", hits: 2, sessions: 1, total: null },
+      { name: "level_1", hits: 1, sessions: 1, total: null },
     ]);
     // the daily series is padded to the window and today carries the plays
     expect(a.playable.daily).toHaveLength(7);
@@ -996,6 +996,97 @@ describe("compile jobs: Unity WebGL build → single-file playable", () => {
     // other users cannot see the job
     const other = await signup("compileother@factorialstudio.com");
     expect((await app.inject({ method: "GET", url: `/api/compile/jobs/${res2.json().jobId}`, headers: bearer(other) })).statusCode).toBe(404);
+  });
+});
+
+describe("runtime API: custom variables + valued events", () => {
+  async function creativeFor(email: string) {
+    const token = await signup(email);
+    verifyDomain(email);
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Vars", platform: "ios" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c" } })).json().id;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "sample.zip", contentType: "application/zip" });
+    const up = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
+    return { token, conceptId, creativeId: up.json().id as string };
+  }
+  const patchVars = (token: string, id: string, body: unknown) => app.inject({ method: "PATCH", url: `/api/creatives/${id}`, headers: bearer(token), payload: body });
+
+  it("schema from the plugin: defaults, typed/clamped edits, free-form keys, injection into the export", async () => {
+    const { token, creativeId } = await creativeFor("vars@factorialstudio.com");
+    const schema = [
+      { key: "TapCubeGame.tapsToWin", displayName: "Taps to win", section: "Gameplay", order: 2, type: "int", min: 1, max: 10, step: 1, default: 3 },
+      { key: "TapCubeGame.speed", type: "number", min: 0.5, max: 3, default: 1.0 },
+      { key: "TapCubeGame.title", type: "string", default: "Tap!" },
+      { key: "TapCubeGame.hard", type: "bool", default: false, order: 1 },
+      { key: "TapCubeGame.unbounded", type: "number", min: -3.4028235e38, max: 3.4028235e38, default: 7 },
+    ];
+    const set = await patchVars(token, creativeId, { variableSchema: schema });
+    expect(set.statusCode).toBe(200);
+    // sorted by order, then key; the float.MinValue/MaxValue "unbounded" range is dropped
+    expect(set.json().variableSchema.map((d: { key: string }) => d.key)).toEqual([
+      "TapCubeGame.speed", "TapCubeGame.title", "TapCubeGame.unbounded", "TapCubeGame.hard", "TapCubeGame.tapsToWin",
+    ]);
+    expect(set.json().variableSchema.find((d: { key: string }) => d.key === "TapCubeGame.unbounded")).not.toHaveProperty("min");
+    // schema-only patch leaves values untouched (empty here); detail exposes both
+    const detail = (await app.inject({ method: "GET", url: `/api/creatives/${creativeId}`, headers: bearer(token) })).json();
+    expect(detail.variableSchema).toHaveLength(5);
+    expect(detail.variables).toEqual({});
+
+    // edits: int rounds + clamps, number clamps, bool from string, free-form key accepted, null deletes
+    const edit = await patchVars(token, creativeId, {
+      variables: { "TapCubeGame.tapsToWin": "14.6", "TapCubeGame.speed": 0.1, "TapCubeGame.hard": "yes", "TapCubeGame.title": 42, promo: "SUMMER", lives: 3 },
+    });
+    expect(edit.statusCode).toBe(200);
+    expect(edit.json().variables).toEqual({ "TapCubeGame.tapsToWin": 10, "TapCubeGame.speed": 0.5, "TapCubeGame.hard": true, "TapCubeGame.title": "42", promo: "SUMMER", lives: 3 });
+    const del = await patchVars(token, creativeId, { variables: { promo: null } });
+    expect(del.json().variables).not.toHaveProperty("promo");
+    expect(del.json().variables.lives).toBe(3);
+    // bad input → 400, nothing changes
+    expect((await patchVars(token, creativeId, { variables: { "TapCubeGame.speed": "fast" } })).statusCode).toBe(400);
+    expect((await patchVars(token, creativeId, { variables: { "bad key!": 1 } })).statusCode).toBe(400);
+    expect((await patchVars(token, creativeId, { variables: { nested: { a: 1 } } })).statusCode).toBe(400);
+    expect((await patchVars(token, creativeId, { variableSchema: [{ key: "x", type: "colour" }] })).statusCode).toBe(400);
+
+    // the export carries the values as PF.vars
+    const exp = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["applovin"] } });
+    expect(exp.statusCode).toBe(200);
+    const html = (await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/preview/applovin` })).body;
+    expect(html).toContain('"vars":{"TapCubeGame.tapsToWin":10,"TapCubeGame.speed":0.5,"TapCubeGame.hard":true,"TapCubeGame.title":"42","lives":3}');
+  });
+
+  it("compile upload accepts the plugin's variable manifest and seeds defaults; valued custom events are summed", async () => {
+    const { token, conceptId, creativeId } = await creativeFor("varscompile@factorialstudio.com");
+    const zip = new JSZip();
+    zip.file("index.html", "<html></html>");
+    zip.file("Build/g.loader.js", "function createUnityInstance(){}");
+    zip.file("Build/g.framework.js", "var unityFramework = 1;");
+    zip.file("Build/g.wasm", Buffer.from([0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0]));
+    zip.file("Build/g.data", Buffer.from("UnityWebData1.0\0xx"));
+    const form = new FormData();
+    form.append("file", await zip.generateAsync({ type: "nodebuffer" }), { filename: "build.zip", contentType: "application/zip" });
+    form.append("variables", JSON.stringify([{ key: "Game.lives", type: "int", min: 1, max: 9, default: 3 }, { key: "Game.skin", type: "string", default: "red" }]));
+    const res = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/compile`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
+    expect(res.statusCode).toBe(202);
+    await drainJobs();
+    const j = (await app.inject({ method: "GET", url: `/api/jobs/${res.json().jobId}`, headers: bearer(token) })).json();
+    expect(j.status, j.error).toBe("done");
+    expect(j.result.variableCount).toBe(2);
+    const detail = (await app.inject({ method: "GET", url: `/api/creatives/${j.result.creativeId}`, headers: bearer(token) })).json();
+    expect(detail.variables).toEqual({ "Game.lives": 3, "Game.skin": "red" });
+    expect(detail.variableSchema.map((d: { key: string }) => d.key)).toEqual(["Game.lives", "Game.skin"]);
+    // malformed manifest is rejected before anything is queued
+    const bad = new FormData();
+    bad.append("file", await zip.generateAsync({ type: "nodebuffer" }), { filename: "build.zip", contentType: "application/zip" });
+    bad.append("variables", "not json");
+    expect((await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/compile`, headers: { ...bearer(token), ...bad.getHeaders() }, payload: bad.getBuffer() })).statusCode).toBe(400);
+
+    // valued events: ?v= is stored and summed per name
+    for (const v of [5, 7]) await app.inject({ method: "GET", url: `/api/t/${creativeId}/applovin?e=custom&n=coins&s=sessV1&v=${v}` });
+    await app.inject({ method: "GET", url: `/api/t/${creativeId}/applovin?e=custom&n=coins&s=sessV2&v=abc` }); // non-numeric → no value
+    const a = (await app.inject({ method: "GET", url: "/api/analytics", headers: bearer(token) })).json();
+    expect(a.playable.customEvents).toEqual([{ name: "coins", hits: 3, sessions: 2, total: 12 }]);
   });
 });
 

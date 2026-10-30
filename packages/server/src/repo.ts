@@ -641,10 +641,10 @@ export function creativeExists(id: string): boolean {
   return !!getDb().prepare("SELECT 1 FROM creatives WHERE id = ?").get(id);
 }
 
-export function insertEvent(creativeId: string, network: string, event: EventKind, session: string, name: string | null, preview: boolean): void {
+export function insertEvent(creativeId: string, network: string, event: EventKind, session: string, name: string | null, preview: boolean, value: number | null = null): void {
   getDb()
-    .prepare("INSERT INTO events (id, creative_id, network, event, name, session, preview, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(randomUUID(), creativeId, network, event, name, session, preview ? 1 : 0, now());
+    .prepare("INSERT INTO events (id, creative_id, network, event, name, session, preview, value, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(randomUUID(), creativeId, network, event, name, session, preview ? 1 : 0, value, now());
 }
 
 /** Shared FROM/WHERE for event aggregates scoped to the user's current workspace. */
@@ -701,11 +701,11 @@ export function eventByCreative(
     .prepare(`SELECT ev.creative_id, cr.name AS creative, c.name AS concept, a.name AS app, ${FUNNEL_COLS} ${sql} GROUP BY ev.creative_id ORDER BY impressions DESC LIMIT 50`)
     .all(...(params as never[])) as unknown as (FunnelCounts & { creative_id: string; creative: string; concept: string; app: string })[];
 }
-export function customEvents(userId: string, sinceIso: string, includePreview = false, creativeId?: string, limit = 25): { name: string; hits: number; sessions: number }[] {
+export function customEvents(userId: string, sinceIso: string, includePreview = false, creativeId?: string, limit = 25): { name: string; hits: number; sessions: number; total: number | null }[] {
   const { sql, params } = eventScope(userId, sinceIso, includePreview, creativeId);
   return getDb()
-    .prepare(`SELECT ev.name AS name, COUNT(*) AS hits, COUNT(DISTINCT ev.session) AS sessions ${sql} AND ev.event = 'custom' AND ev.name IS NOT NULL GROUP BY ev.name ORDER BY hits DESC LIMIT ?`)
-    .all(...(params as never[]), limit) as unknown as { name: string; hits: number; sessions: number }[];
+    .prepare(`SELECT ev.name AS name, COUNT(*) AS hits, COUNT(DISTINCT ev.session) AS sessions, SUM(ev.value) AS total ${sql} AND ev.event = 'custom' AND ev.name IS NOT NULL GROUP BY ev.name ORDER BY hits DESC LIMIT ?`)
+    .all(...(params as never[]), limit) as unknown as { name: string; hits: number; sessions: number; total: number | null }[];
 }
 /** Housekeeping: raw events older than `olderThanIso` are dropped (dashboards look back 90 days at most). */
 export function pruneEvents(olderThanIso: string): number {

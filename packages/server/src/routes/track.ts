@@ -8,7 +8,7 @@ const GIF = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SESSION = /^[A-Za-z0-9_-]{4,40}$/;
 
-type Q = { e?: string; s?: string; n?: string; p?: string; t?: string };
+type Q = { e?: string; s?: string; n?: string; p?: string; t?: string; v?: string };
 
 /**
  * Public in-playable analytics collector: `GET|POST /api/t/:creativeId/:network?e=<event>&s=<session>[&n=<name>][&p=1]`.
@@ -43,7 +43,8 @@ export async function trackRoutes(app: FastifyInstance): Promise<void> {
       network = "unknown";
     }
     const name = event === "custom" ? String(q.n ?? "").slice(0, 64) || null : null;
-    insertEvent(creativeId, network, event, session, name, q.p === "1");
+    const value = event === "custom" && q.v !== undefined && Number.isFinite(Number(q.v)) ? Number(q.v) : null;
+    insertEvent(creativeId, network, event, session, name, q.p === "1", value);
     return respond();
   };
 

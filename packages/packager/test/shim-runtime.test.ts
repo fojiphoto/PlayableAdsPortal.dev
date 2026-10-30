@@ -21,16 +21,27 @@ function runShim(cfg: Partial<ShimConfig> & { href?: string; ua?: string; mraid?
   const code = html.replace(/^<script>/, "").replace(/<\/script>$/, "");
   const beacons: string[] = [];
   const opened: string[] = [];
+  const vibrations: unknown[] = [];
   const listeners: Record<string, ((...a: unknown[]) => void)[]> = {};
+  const bar = { style: { width: "" } };
+  let preloaderHidden = 0;
   const sandbox: Record<string, unknown> = {
     console,
     setTimeout,
-    navigator: { userAgent: cfg.ua ?? "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)", sendBeacon: (u: string) => (beacons.push(u), true) },
+    navigator: {
+      userAgent: cfg.ua ?? "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+      language: "de-DE",
+      languages: ["de-DE", "en-US"],
+      sendBeacon: (u: string) => (beacons.push(u), true),
+      vibrate: (p: unknown) => (vibrations.push(p), true),
+    },
     location: { href: cfg.href ?? "https://cdn.network.example/creative/index.html" },
+    __pfHidePreloader: () => preloaderHidden++,
     document: {
       readyState: "complete",
       addEventListener: (t: string, fn: (...a: unknown[]) => void) => (listeners[t] ??= []).push(fn),
       removeEventListener: () => {},
+      getElementById: (id: string) => (id === "__pf_plbar" ? bar : null),
     },
     parent: { postMessage: () => {} },
     Image: class { set src(v: string) { beacons.push("img:" + v); } },
@@ -40,7 +51,18 @@ function runShim(cfg: Partial<ShimConfig> & { href?: string; ua?: string; mraid?
   if (cfg.mraid) sandbox.mraid = cfg.mraid;
   sandbox.window = sandbox;
   vm.runInNewContext(code, sandbox, { filename: "shim.js" });
-  return { win: sandbox as unknown as { PF: Record<string, unknown> & { install: () => void; analytics: { logEvent: (n: string) => void }; lifecycle: Record<string, () => void> } }, beacons, opened, listeners };
+  type PF = Record<string, unknown> & {
+    install: () => void;
+    analytics: { logEvent: (n: string, v?: number) => void; applovin: Record<string, () => void> };
+    lifecycle: Record<string, (...a: unknown[]) => void>;
+    vars: Record<string, unknown>;
+    getVar: (k: string, d?: unknown) => unknown;
+    setLoadingProgress: (p: number) => void;
+    getPreferredLanguage: () => string;
+    getPreferredLanguages: () => string[];
+    haptic: (t: string) => void;
+  };
+  return { win: sandbox as unknown as { PF: PF }, beacons, opened, listeners, vibrations, bar, hidden: () => preloaderHidden };
 }
 
 describe("runtime shim executes", () => {
@@ -77,6 +99,37 @@ describe("runtime shim executes", () => {
     const b = runShim({});
     b.win.PF.install();
     expect(b.beacons).toEqual([]);
+  });
+
+  it("runtime API completeness: vars, loading progress, languages, haptics, valued + AppLovin events", () => {
+    const { win, beacons, vibrations, bar, hidden } = runShim({
+      vars: { "TapCubeGame.tapsToWin": 5, "theme": "dark", "hard": true },
+      analytics: { endpoint: "https://x.test/api/t", creativeId: "c", network: "applovin" },
+    });
+    // custom variables
+    expect(win.PF.vars).toEqual({ "TapCubeGame.tapsToWin": 5, theme: "dark", hard: true });
+    expect(win.PF.getVar("TapCubeGame.tapsToWin", 3)).toBe(5);
+    expect(win.PF.getVar("missing", 3)).toBe(3);
+    // loading progress drives the preloader bar; 1 hides it through the global hook
+    win.PF.setLoadingProgress(0.42);
+    expect(bar.style.width).toBe("42%");
+    expect(hidden()).toBe(0);
+    win.PF.setLoadingProgress(1);
+    expect(hidden()).toBe(1);
+    // languages + haptics
+    expect(win.PF.getPreferredLanguage()).toBe("de-DE");
+    expect(win.PF.getPreferredLanguages()).toEqual(["de-DE", "en-US"]);
+    win.PF.haptic("success");
+    win.PF.lifecycle.hapticTriggered!("heavy");
+    expect(vibrations).toEqual([[10, 40, 10], 35]);
+    // valued custom events + AppLovin challenge events
+    win.PF.analytics.logEvent("coins", 12);
+    win.PF.analytics.applovin.logChallengeSolved!();
+    const custom = beacons.filter((b) => b.includes("e=custom"));
+    expect(custom[0]).toContain("n=coins");
+    expect(custom[0]).toContain("v=12");
+    expect(custom[1]).toContain("n=CHALLENGE_SOLVED");
+    expect(custom[1]).not.toContain("v=");
   });
 
   it("MRAID host: install() is queued until the SDK is ready", () => {

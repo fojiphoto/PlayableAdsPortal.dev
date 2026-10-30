@@ -24,6 +24,10 @@ import { checkExport } from "../plan-status.js";
 import { preloaderForExport } from "../preloader-config.js";
 import { publicBase } from "../site.js";
 import { needs } from "../orgs.js";
+import { mergeValues, normalizeSchema, type VariableDef } from "../variables.js";
+
+/** Pack options as stored on a creative: PackOptions + the custom-variable schema. */
+export type StoredOptions = PackOptions & { variableSchema?: VariableDef[] };
 
 function networkName(id: string): string {
   try {
@@ -119,6 +123,7 @@ export function prepareExport(userId: string, creativeId: string, body: ExportBo
     ctaUrl: body.ctaUrl ?? stored.ctaUrl,
     iosUrl: body.iosUrl ?? stored.iosUrl,
     androidUrl: body.androidUrl ?? stored.androidUrl,
+    variables: stored.variables,
     preloader: preloaderForExport(owner.id),
     analytics: analyticsBase && owner.analytics_enabled ? { endpoint: `${analyticsBase}/api/t`, creativeId: cr.id } : undefined,
   };
@@ -358,40 +363,53 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>("/api/creatives/:id", authed, async (req, reply) => {
     const cr = getCreativeOwned(req.params.id, req.user!.id);
     if (!cr) return reply.code(404).send({ error: "not found" });
+    const options = JSON.parse(cr.options_json) as StoredOptions;
     return {
       id: cr.id,
       name: cr.name,
       entry: cr.entry,
       conceptId: cr.concept_id,
-      options: JSON.parse(cr.options_json),
+      options,
+      variables: options.variables ?? {},
+      variableSchema: options.variableSchema ?? [],
       createdAt: cr.created_at,
       exports: listExports(cr.id).map(exportView),
     };
   });
 
   // rename / update stored CTA + store URLs
-  app.patch<{ Params: { id: string }; Body: { name?: string; ctaUrl?: string | null; iosUrl?: string | null; androidUrl?: string | null } }>(
-    "/api/creatives/:id",
-    needs("member"),
-    async (req, reply) => {
-      const cr = getCreativeOwned(req.params.id, req.user!.id);
-      if (!cr) return reply.code(404).send({ error: "not found" });
-      const name = req.body?.name?.trim();
-      if (req.body?.name !== undefined && !name) return reply.code(400).send({ error: "name cannot be empty" });
-      const stored = JSON.parse(cr.options_json) as PackOptions;
-      const pick = (v: string | null | undefined, cur: string | undefined) => (v === undefined ? cur : v || undefined);
-      const options: PackOptions = {
-        ...stored,
-        name: name ?? stored.name,
-        ctaUrl: pick(req.body?.ctaUrl, stored.ctaUrl),
-        iosUrl: pick(req.body?.iosUrl, stored.iosUrl),
-        androidUrl: pick(req.body?.androidUrl, stored.androidUrl),
-      };
-      updateCreative(cr.id, req.user!.id, { name, optionsJson: JSON.stringify(options) });
-      const fresh = getCreativeOwned(cr.id, req.user!.id)!;
-      return { id: fresh.id, name: fresh.name, entry: fresh.entry, conceptId: fresh.concept_id, options, createdAt: fresh.created_at };
-    },
-  );
+  // rename, store URLs, and custom variables (values are typed/clamped against the schema; unknown keys are free-form)
+  app.patch<{
+    Params: { id: string };
+    Body: { name?: string; ctaUrl?: string | null; iosUrl?: string | null; androidUrl?: string | null; variables?: unknown; variableSchema?: unknown };
+  }>("/api/creatives/:id", needs("member"), async (req, reply) => {
+    const cr = getCreativeOwned(req.params.id, req.user!.id);
+    if (!cr) return reply.code(404).send({ error: "not found" });
+    const name = req.body?.name?.trim();
+    if (req.body?.name !== undefined && !name) return reply.code(400).send({ error: "name cannot be empty" });
+    const stored = JSON.parse(cr.options_json) as StoredOptions;
+    const pick = (v: string | null | undefined, cur: string | undefined) => (v === undefined ? cur : v || undefined);
+    let variableSchema = stored.variableSchema ?? [];
+    let variables = stored.variables ?? {};
+    try {
+      if (req.body?.variableSchema !== undefined) variableSchema = normalizeSchema(req.body.variableSchema);
+      if (req.body?.variables !== undefined) variables = mergeValues(req.body.variables, variableSchema, variables);
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
+    const options: StoredOptions = {
+      ...stored,
+      name: name ?? stored.name,
+      ctaUrl: pick(req.body?.ctaUrl, stored.ctaUrl),
+      iosUrl: pick(req.body?.iosUrl, stored.iosUrl),
+      androidUrl: pick(req.body?.androidUrl, stored.androidUrl),
+      variables,
+      variableSchema,
+    };
+    updateCreative(cr.id, req.user!.id, { name, optionsJson: JSON.stringify(options) });
+    const fresh = getCreativeOwned(cr.id, req.user!.id)!;
+    return { id: fresh.id, name: fresh.name, entry: fresh.entry, conceptId: fresh.concept_id, options, variables, variableSchema, createdAt: fresh.created_at };
+  });
 
   // export: build packages and persist them. Sync by default; `async: true` (or ?async=1) enqueues a
   // background job and answers 202 { jobId } — poll GET /api/jobs/:id for progress and the result.

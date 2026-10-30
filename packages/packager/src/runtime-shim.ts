@@ -34,6 +34,8 @@ export interface ShimConfig {
   androidUrl: string;
   /** in-playable analytics collector; null = no beacons in this package */
   analytics: { endpoint: string; creativeId: string; network: string } | null;
+  /** dashboard-tunable custom variables → PF.vars */
+  vars?: Record<string, number | string | boolean>;
 }
 
 export function buildRuntimeShim(cfg: ShimConfig): string {
@@ -53,11 +55,12 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
   var SID = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
   var PREVIEW = new RegExp("/api/creatives/[^/]+/preview/").test(location.href) ? 1 : 0;
   var sentOnce = {};
-  function track(ev, name){
+  function track(ev, name, value){
     if (!AN || !AN.endpoint) return;
     if (ev !== "custom") { if (sentOnce[ev]) return; sentOnce[ev] = 1; }
     var q = "e=" + encodeURIComponent(ev) + "&s=" + SID + "&t=" + Date.now()
       + (name ? "&n=" + encodeURIComponent(String(name).slice(0, 64)) : "")
+      + (typeof value === "number" && isFinite(value) && value !== 0 ? "&v=" + encodeURIComponent(String(value)) : "")
       + (PREVIEW ? "&p=1" : "");
     var url = AN.endpoint + "/" + encodeURIComponent(AN.creativeId) + "/" + encodeURIComponent(AN.network) + "?" + q;
     try { if (navigator.sendBeacon && navigator.sendBeacon(url, "")) return; } catch (e) {}
@@ -71,6 +74,26 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
   if (AN) {
     ["pointerdown", "touchstart", "mousedown", "keydown"].forEach(function(t){ try { document.addEventListener(t, trackEngageOnce, true); } catch (e) {} });
     track("impression");
+  }
+
+  // ── custom variables (dashboard → PF.vars) ──
+  var VARS = CFG.vars || {};
+  function getVar(name, def){ return Object.prototype.hasOwnProperty.call(VARS, name) ? VARS[name] : def; }
+
+  // ── loading progress → the branded preloader's bar; 1 hides it ──
+  function setLoadingProgress(p){
+    var n = Math.max(0, Math.min(1, Number(p) || 0));
+    var bar = document.getElementById("__pf_plbar");
+    if (bar) bar.style.width = (n * 100) + "%";
+    if (n >= 1) hidePreloader();
+  }
+  function hidePreloader(){ try { if (window.__pfHidePreloader) window.__pfHidePreloader(); } catch (e) {} }
+
+  // ── haptics (where the device supports navigator.vibrate) ──
+  var HAPTICS = { light: 10, medium: 20, heavy: 35, success: [10, 40, 10], warning: [20, 40, 20], error: [40, 40, 40, 40, 40], selection: 5 };
+  function haptic(type){
+    var pat = HAPTICS[String(type || "light").toLowerCase()] || 10;
+    try { if (navigator.vibrate) navigator.vibrate(pat); } catch (e) {}
   }
 
   var listeners = { pause: [], resume: [], ready: [] };
@@ -139,28 +162,46 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
   }
 
   var PF = {
-    version: "0.3.0",
+    version: "0.4.0",
     network: HOOK,
     install: openStore,
     installFullGame: openStore,
     openStore: openStore,
     ready: function(){ onLoaded(); emit("ready"); },
-    setLoadingProgress: function(){},
+    setLoadingProgress: setLoadingProgress,
+    hidePreloader: hidePreloader,
     getPlatform: function(){ var ua = navigator.userAgent || ""; return /iPhone|iPad|iPod/i.test(ua) ? "ios" : /Android/i.test(ua) ? "android" : "web"; },
+    getPreferredLanguage: function(){ return (navigator.languages && navigator.languages[0]) || navigator.language || "en-US"; },
+    getPreferredLanguages: function(){ return (navigator.languages && navigator.languages.length) ? [].slice.call(navigator.languages) : [navigator.language || "en-US"]; },
+    haptic: haptic,
+    vars: VARS,
+    getVar: getVar,
     on: on,
     lifecycle: {
       gameLoaded: function(){ onLoaded(); emit("ready"); },
       gameStarted: function(){ track("start"); },
       gamePaused: function(){ emit("pause"); },
       gameResumed: function(){ emit("resume"); },
+      gameUpdated: function(){},
       gameEnded: onGameEnded,
-      levelChanged: function(level){ track("custom", "level_" + (level === undefined ? "changed" : level)); }
+      levelChanged: function(level){ track("custom", "level_" + (level === undefined || level === null ? "changed" : level)); },
+      hapticTriggered: haptic
     },
     analytics: {
       enabled: !!AN,
       sessionId: SID,
-      /** PF.analytics.logEvent("tutorial_done") — a custom event, counted per name on the Analytics page. */
-      logEvent: function(name){ if (name) track("custom", name); }
+      /** PF.analytics.logEvent("tutorial_done", 3) — a custom event, counted per name (values summed) on the Analytics page. */
+      logEvent: function(name, value){ if (name) track("custom", name, value); },
+      /** AppLovin's standard challenge events, named as the network expects. */
+      applovin: {
+        logChallengeStarted: function(){ track("custom", "CHALLENGE_STARTED"); },
+        logChallengeFailed: function(){ track("custom", "CHALLENGE_FAILED"); },
+        logChallengeRetry: function(){ track("custom", "CHALLENGE_RETRY"); },
+        logChallengePass25: function(){ track("custom", "CHALLENGE_PASS_25"); },
+        logChallengePass50: function(){ track("custom", "CHALLENGE_PASS_50"); },
+        logChallengePass75: function(){ track("custom", "CHALLENGE_PASS_75"); },
+        logChallengeSolved: function(){ track("custom", "CHALLENGE_SOLVED"); }
+      }
     }
   };
   window.PF = window.PlayableForge = PF;

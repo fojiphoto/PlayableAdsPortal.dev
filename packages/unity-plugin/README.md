@@ -34,8 +34,23 @@ collider) are removed by engine-code stripping — reference them in a scene or 
 
 Headless build (CI): `Unity -batchmode -nographics -quit -projectPath <proj> -buildTarget WebGL -executeMethod FactorialAdLab.Editor.WebGLCompileUploader.BuildFromCommandLine -adlabOut <dir>`.
 
-Your game talks to the ad through `FactorialAdLab.Playable.InstallFullGame()`, `LifeCycle.GameStarted()/GameEnded()`
-and `Analytics.LogEvent("name")` — a WebGL `.jslib` bridges them to the per-network runtime shim.
+## Runtime API (`using FactorialAdLab;`)
+
+| Call | Does |
+|---|---|
+| `Playable.InstallFullGame()` | opens the store the way the serving network requires |
+| `Playable.GetPlatform()` | `ios` / `android` / `web` (`editor` in the Editor) |
+| `Playable.SetLoadingProgress(0–1)` | drives the branded preloader bar; 1 hides it |
+| `Playable.GetPreferredLanguage()` / `GetPreferredLanguages()` | device languages |
+| `LifeCycle.GameLoaded/GameStarted/GamePaused/GameResumed/GameEnded/LevelChanged(n)` | network lifecycle signals + the analytics funnel |
+| `LifeCycle.HapticTriggered(HapticFeedbackType)` | vibration where supported |
+| `LifeCycle.OnPause` / `OnResume` | events raised when the ad container hides/shows the creative |
+| `Analytics.LogEvent("name", value)` / `LogEvent(EventType.LevelWon)` | custom events (values summed on the dashboard) |
+| `Analytics.Applovin.LogChallengeStarted()` … `LogChallengeSolved()` | AppLovin's standard challenge events |
+| `[AdLabField("Taps to win", order: 1, section: "Gameplay", Min = 1, Max = 10)] public int tapsToWin = 3;` + `[AdLabFieldStep(1)]` | a **dashboard-tunable variable**: the plugin uploads the field list, the dashboard shows an editor on the creative, exports inject the values and `Variables` applies them to your fields at scene load — change values and re-export, no rebuild |
+| `Variables.Get("key", fallback)` | read any value set in the dashboard |
+
+A WebGL `.jslib` bridges all of this to the per-network runtime shim (`window.PF`).
 
 ## Use
 

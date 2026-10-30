@@ -104,7 +104,14 @@ export interface PackOptions {
    * Omitted on networks with `allowsNetworkRequests: false`.
    */
   analytics?: AnalyticsConfig;
+  /**
+   * Dashboard-tunable custom variables, exposed to the playable as `PF.vars` / `PF.getVar(name, fallback)`
+   * and applied to Unity `[AdLabField]` fields at scene load.
+   */
+  variables?: VariableValues;
 }
+
+export type VariableValues = Record<string, number | string | boolean>;
 
 export interface AnalyticsConfig {
   /** collector base URL, e.g. https://app.factorialstudio.dev/api/t */

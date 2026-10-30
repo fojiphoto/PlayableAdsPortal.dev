@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getConcept, getCreative, exportCreativeAsync, downloadAllUrl, previewUrl } from "../api";
-import type { CreativeRef, Job, Network, PackResultView } from "../types";
+import type { CreativeRef, Job, Network, PackResultView, VariableDef, VariableValues } from "../types";
+import { VariablesPanel } from "./VariablesPanel";
 import { UploadForm } from "./UploadForm";
 import { ResultCard } from "./ResultCard";
 import { DevicePreview } from "./DevicePreview";
@@ -26,6 +27,8 @@ export function Workspace({
   const [uploading, setUploading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<Job | null>(null); // live progress of the running export job
+  const [variables, setVariables] = useState<VariableValues>({});
+  const [variableSchema, setVariableSchema] = useState<VariableDef[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
   // default-select the first 6 (priority) networks once loaded
@@ -57,6 +60,8 @@ export function Workspace({
     setPreview(null);
     try {
       const d = await getCreative(ref.id);
+      setVariables(d.variables ?? {});
+      setVariableSchema(d.variableSchema ?? []);
       if (d.exports.length) {
         setResults(d.exports);
         setPreview((d.exports.find((r) => r.ok) ?? d.exports[0])?.network ?? null);
@@ -72,6 +77,8 @@ export function Workspace({
     setActiveName(summary.name);
     setResults([]);
     setPreview(null);
+    setVariables({});
+    setVariableSchema([]);
     setUploading(false);
   }
 
@@ -218,6 +225,7 @@ export function Workspace({
 
           <div className="lg:sticky lg:top-8">
             <DevicePreview src={activeId && preview ? previewUrl(activeId, preview) : null} label={previewLabel} />
+            {activeId && <VariablesPanel creativeId={activeId} schema={variableSchema} values={variables} readOnly={readOnly} onSaved={setVariables} />}
           </div>
         </div>
       )}
