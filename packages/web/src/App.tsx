@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getToken, setToken, me, getNetworks, listApps, createApp, getApp, createConcept, getBillingStatus } from "./api";
-import { renameApp, renameConcept } from "./api";
+import { renameApp, renameConcept, verifyEmail, resendVerification } from "./api";
 import type { App as AppT, AuthUser, Concept, Network, PlanStatus } from "./types";
 import { AuthScreen } from "./components/AuthScreen";
 import { Workspace } from "./components/Workspace";
@@ -25,8 +25,33 @@ export default function App() {
   const [view, setView] = useState<"landing" | "auth">("landing");
   const [status, setStatus] = useState<PlanStatus | null>(null);
   const [page, setPage] = useState<"app" | "plans" | "settings" | "analytics" | "preloader" | "domain">("app");
+  const [notice, setNotice] = useState<string | null>(null);
+  const [resetToken, setResetToken] = useState<string | null>(null);
 
   useEffect(() => {
+    // deep links from emails / Stripe: ?reset=<token>, ?verify=<token>, ?billing=success|cancel
+    const q = new URLSearchParams(window.location.search);
+    const reset = q.get("reset");
+    const verify = q.get("verify");
+    const billing = q.get("billing");
+    if (reset || verify || billing) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (reset) {
+      setResetToken(reset);
+      setView("auth");
+    }
+    if (verify) {
+      verifyEmail(verify)
+        .then(() => {
+          setNotice("Email verified ✓");
+          setUser((u) => (u ? { ...u, emailVerified: true } : u));
+        })
+        .catch((e) => setNotice((e as Error).message));
+    }
+    if (billing === "success") setNotice("Payment received — your plan is updating.");
+    if (billing === "cancel") setNotice("Checkout cancelled — no changes made.");
+
     getNetworks().then(setNetworks).catch(() => {});
     if (getToken()) {
       me()
@@ -78,6 +103,15 @@ export default function App() {
       setErr((e as Error).message);
     }
   }
+  async function resendVerify() {
+    try {
+      const r = await resendVerification();
+      setNotice(r.verified ? "Your email is already verified." : "Verification email sent — check your inbox.");
+      if (r.verified) setUser((u) => (u ? { ...u, emailVerified: true } : u));
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  }
   async function addApp() {
     const name = newApp.trim();
     if (!name) return;
@@ -117,7 +151,9 @@ export default function App() {
   if (checking) return null;
   if (!user) {
     return view === "auth" ? (
-      <AuthScreen onAuth={setUser} onBack={() => setView("landing")} />
+      <AuthScreen
+          resetToken={resetToken ?? undefined}
+          onResetDone={() => setResetToken(null)} onAuth={setUser} onBack={() => setView("landing")} />
     ) : (
       <Landing onGetStarted={() => setView("auth")} onSignIn={() => setView("auth")} />
     );
@@ -259,6 +295,20 @@ export default function App() {
 
         {/* main */}
         <main className="min-w-0 flex-1 p-6">
+          {notice && (
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">
+              <span>{notice}</span>
+              <button onClick={() => setNotice(null)} className="text-emerald-300 hover:text-white" aria-label="Dismiss">x</button>
+            </div>
+          )}
+          {user && user.emailVerified === false && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-200">
+              <span>Please verify your email address - check your inbox for the link.</span>
+              <button onClick={() => void resendVerify()} className="rounded-md border border-amber-400/50 px-2.5 py-1 text-xs font-medium hover:bg-amber-500/20">
+                Resend email
+              </button>
+            </div>
+          )}
           {err && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">{err}</div>}
           {activeConcept ? (
             <Workspace

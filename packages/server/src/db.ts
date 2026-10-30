@@ -26,8 +26,21 @@ CREATE TABLE IF NOT EXISTS users (
   stripe_customer_id     TEXT,
   stripe_subscription_id TEXT,
   plan_status            TEXT,
+  email_verified         INTEGER NOT NULL DEFAULT 0,
+  email_verify_hash      TEXT,
+  email_verify_expires   TEXT,
   created_at    TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at    TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_resets_hash ON password_resets(token_hash);
 
 CREATE TABLE IF NOT EXISTS export_usage (
   id         TEXT PRIMARY KEY,
@@ -122,6 +135,9 @@ export function initDb(path: string = config.dbPath): DB {
     "ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT",
     "ALTER TABLE users ADD COLUMN plan_status TEXT",
     "ALTER TABLE concepts ADD COLUMN network_order TEXT",
+    "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN email_verify_hash TEXT",
+    "ALTER TABLE users ADD COLUMN email_verify_expires TEXT",
   ]) {
     try {
       db.exec(stmt);

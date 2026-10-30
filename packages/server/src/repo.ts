@@ -27,6 +27,9 @@ export interface UserRow {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   plan_status: string | null;
+  email_verified: number;
+  email_verify_hash: string | null;
+  email_verify_expires: string | null;
   created_at: string;
 }
 export interface AppRow {
@@ -71,7 +74,8 @@ export function createUser(email: string, passwordHash: string): UserRow {
   const row: UserRow = {
     id: randomUUID(), email, password_hash: passwordHash, plan: "free",
     totp_secret: null, totp_enabled: 0, totp_last_step: null, domain: null, domain_token: null, domain_verified: 0,
-    stripe_customer_id: null, stripe_subscription_id: null, plan_status: null, created_at: now(),
+    stripe_customer_id: null, stripe_subscription_id: null, plan_status: null,
+    email_verified: 0, email_verify_hash: null, email_verify_expires: null, created_at: now(),
   };
   getDb()
     .prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
@@ -103,6 +107,35 @@ export function setUserBilling(id: string, plan: string, subscriptionId: string 
 
 export function getUserByStripeCustomer(customerId: string): UserRow | undefined {
   return getDb().prepare("SELECT * FROM users WHERE stripe_customer_id = ?").get(customerId) as UserRow | undefined;
+}
+
+// ── email verification ──
+export function setEmailVerifyToken(id: string, hash: string, expiresIso: string): void {
+  getDb().prepare("UPDATE users SET email_verify_hash = ?, email_verify_expires = ? WHERE id = ?").run(hash, expiresIso, id);
+}
+/** Mark the user whose pending token hash matches as verified; undefined if unknown/expired. */
+export function verifyEmailByHash(hash: string): UserRow | undefined {
+  const u = getDb().prepare("SELECT * FROM users WHERE email_verify_hash = ?").get(hash) as UserRow | undefined;
+  if (!u || !u.email_verify_expires || u.email_verify_expires < now()) return undefined;
+  getDb()
+    .prepare("UPDATE users SET email_verified = 1, email_verify_hash = NULL, email_verify_expires = NULL WHERE id = ?")
+    .run(u.id);
+  return { ...u, email_verified: 1 };
+}
+
+// ── password resets (one-time, hashed, expiring) ──
+export function createPasswordReset(userId: string, tokenHash: string, expiresIso: string): void {
+  getDb()
+    .prepare("INSERT INTO password_resets (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(randomUUID(), userId, tokenHash, expiresIso, now());
+}
+export function findActiveReset(tokenHash: string): { id: string; user_id: string } | undefined {
+  return getDb()
+    .prepare("SELECT id, user_id FROM password_resets WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?")
+    .get(tokenHash, now()) as { id: string; user_id: string } | undefined;
+}
+export function consumeReset(id: string): void {
+  getDb().prepare("UPDATE password_resets SET used_at = ? WHERE id = ?").run(now(), id);
 }
 
 export function updatePassword(id: string, passwordHash: string): void {

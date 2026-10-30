@@ -8,6 +8,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "../src/db.js";
 import { getUserByEmail, setDomainVerified, setUserDomain } from "../src/repo.js";
+import { outbox, clearOutbox } from "../src/mail.js";
 import { loadFromDir } from "@forge/packager";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -32,7 +33,17 @@ afterAll(async () => {
 });
 beforeEach(() => {
   resetDb();
+  clearOutbox();
 });
+
+/** Pull the one-time token out of the last dev-outbox mail's link (?reset=… / ?verify=…). */
+function tokenFromMail(kind: "reset" | "verify", to?: string): string {
+  const m = [...outbox].reverse().find((x) => (!to || x.to === to) && x.html.includes(`?${kind}=`));
+  if (!m) throw new Error(`no ${kind} mail in outbox`);
+  const match = m.html.match(new RegExp(`[?&]${kind}=([a-f0-9]+)`));
+  if (!match) throw new Error(`no ${kind} token in mail`);
+  return match[1]!;
+}
 
 async function signup(email = "dev@factorialstudio.com", password = "secret123"): Promise<string> {
   const res = await app.inject({ method: "POST", url: "/api/signup", payload: { email, password } });
@@ -516,6 +527,73 @@ describe("quick wins: domain gate, rename/update, network order", () => {
     const exp = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: {} });
     expect(exp.statusCode).toBe(200);
     expect(exp.json().exported.map((e: { network: string }) => e.network)).toEqual(["unityads", "applovin"]);
+  });
+});
+
+describe("auth recovery: email verification + password reset (dev mail outbox)", () => {
+  it("signup sends a verification mail; verifying flips /me.emailVerified; the link is single-use", async () => {
+    const token = await signup("new@factorialstudio.com");
+    expect(outbox.some((m) => m.to === "new@factorialstudio.com" && /Verify your email/.test(m.subject))).toBe(true);
+    expect((await app.inject({ method: "GET", url: "/api/me", headers: bearer(token) })).json().user.emailVerified).toBe(false);
+
+    const vt = tokenFromMail("verify", "new@factorialstudio.com");
+    expect((await app.inject({ method: "POST", url: "/api/signup/verify", payload: { token: "nope" } })).statusCode).toBe(400);
+    const ok = await app.inject({ method: "POST", url: "/api/signup/verify", payload: { token: vt } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().verified).toBe(true);
+    expect((await app.inject({ method: "GET", url: "/api/me", headers: bearer(token) })).json().user.emailVerified).toBe(true);
+    // consumed
+    expect((await app.inject({ method: "POST", url: "/api/signup/verify", payload: { token: vt } })).statusCode).toBe(400);
+  });
+
+  it("resend issues a fresh verification mail and is rate-limited", async () => {
+    const token = await signup("again@factorialstudio.com");
+    clearOutbox();
+    const r = await app.inject({ method: "POST", url: "/api/signup/resend", headers: bearer(token), payload: {} });
+    expect(r.statusCode).toBe(200);
+    expect(outbox.filter((m) => m.to === "again@factorialstudio.com").length).toBe(1);
+    let last = 200;
+    for (let i = 0; i < 5; i++) {
+      last = (await app.inject({ method: "POST", url: "/api/signup/resend", headers: bearer(token), payload: {} })).statusCode;
+      if (last === 429) break;
+    }
+    expect(last).toBe(429);
+  });
+
+  it("forgot → reset: mails a one-time link, old password stops working, link can't be reused", async () => {
+    await signup("lost@factorialstudio.com", "oldpass1");
+    // unknown email: same 200, no mail (no account enumeration)
+    expect((await app.inject({ method: "POST", url: "/api/password/forgot", payload: { email: "nobody@x.com" } })).statusCode).toBe(200);
+    expect(outbox.some((m) => m.to === "nobody@x.com")).toBe(false);
+
+    const f = await app.inject({ method: "POST", url: "/api/password/forgot", payload: { email: "lost@factorialstudio.com" } });
+    expect(f.statusCode).toBe(200);
+    const rt = tokenFromMail("reset", "lost@factorialstudio.com");
+
+    expect((await app.inject({ method: "POST", url: "/api/password/reset/check", payload: { token: rt } })).json().valid).toBe(true);
+    expect((await app.inject({ method: "POST", url: "/api/password/reset/check", payload: { token: "bogus" } })).json().valid).toBe(false);
+
+    // too-short password rejected
+    expect((await app.inject({ method: "POST", url: "/api/password/reset", payload: { token: rt, newPassword: "123" } })).statusCode).toBe(400);
+    const done = await app.inject({ method: "POST", url: "/api/password/reset", payload: { token: rt, newPassword: "newpass9" } });
+    expect(done.statusCode).toBe(200);
+
+    expect((await app.inject({ method: "POST", url: "/api/login", payload: { email: "lost@factorialstudio.com", password: "oldpass1" } })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: "/api/login", payload: { email: "lost@factorialstudio.com", password: "newpass9" } })).statusCode).toBe(200);
+
+    // single-use
+    expect((await app.inject({ method: "POST", url: "/api/password/reset/check", payload: { token: rt } })).json().valid).toBe(false);
+    expect((await app.inject({ method: "POST", url: "/api/password/reset", payload: { token: rt, newPassword: "another1" } })).statusCode).toBe(400);
+  });
+
+  it("forgot is rate-limited per ip+email", async () => {
+    await signup("spam@factorialstudio.com");
+    let last = 200;
+    for (let i = 0; i < 8; i++) {
+      last = (await app.inject({ method: "POST", url: "/api/password/forgot", payload: { email: "spam@factorialstudio.com" } })).statusCode;
+      if (last === 429) break;
+    }
+    expect(last).toBe(429);
   });
 });
 

@@ -89,6 +89,13 @@ export const login = (email: string, password: string, code?: string) =>
   postJson<{ token: string; user: AuthUser }>("/login", { email, password, code });
 export const me = () => getJson<MeResponse>("/me");
 
+// ── email verification + password recovery ──
+export const verifyEmail = (token: string) => postJson<{ verified: true; email: string }>("/signup/verify", { token });
+export const resendVerification = () => postJson<{ sent?: boolean; verified?: boolean }>("/signup/resend", {});
+export const forgotPassword = (email: string) => postJson<{ ok: true }>("/password/forgot", { email });
+export const checkResetToken = (token: string) => postJson<{ valid: boolean }>("/password/reset/check", { token });
+export const resetPassword = (token: string, newPassword: string) => postJson<{ ok: true }>("/password/reset", { token, newPassword });
+
 // ── account / security ──
 export const changePassword = (currentPassword: string, newPassword: string) =>
   postJson<{ ok: true }>("/users/password", { currentPassword, newPassword });

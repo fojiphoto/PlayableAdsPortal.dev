@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { config } from "./config.js";
 
@@ -75,3 +75,13 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Pro
 
 /** Route options spread that marks a route as authenticated. */
 export const authed = { preHandler: requireAuth };
+
+// ── opaque one-time tokens (password reset / email verification) ─────────────
+// The raw token goes in the email link; only its sha256 is stored, so a DB leak can't be replayed.
+export function hashOpaqueToken(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex");
+}
+export function createOpaqueToken(): { raw: string; hash: string } {
+  const raw = randomBytes(32).toString("hex");
+  return { raw, hash: hashOpaqueToken(raw) };
+}
