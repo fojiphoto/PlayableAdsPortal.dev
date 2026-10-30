@@ -153,6 +153,34 @@ export interface DomainStatus {
   verifyFile: string;
 }
 
+export interface SizeBreakdown {
+  loader: number;
+  framework: number;
+  wasm: number;
+  data: number;
+  streamingAssets: number;
+  other: number;
+  totalRaw: number;
+  embedded: number;
+}
+
+/** Result of a "compile" job (Unity WebGL build → single-file playable). */
+export interface CompileJobResult {
+  creativeId: string;
+  conceptId: string;
+  name: string;
+  sizeBytes: number;
+  breakdown: SizeBreakdown;
+  warnings: string[];
+  unityVersion: string | null;
+  compression: "none" | "gzip" | "brotli";
+  fitsNetworks: string[];
+  streamingAssetFiles: number;
+}
+
+/** Union of job results: export jobs carry `exported`, compile jobs carry `creativeId` + breakdown. */
+export type JobResult = Partial<{ id: string; exported: PackResultView[] }> & Partial<CompileJobResult>;
+
 /** Async job (GET /api/jobs/:id) — exports run in the background and are polled through this. */
 export interface Job {
   id: string;
@@ -161,7 +189,7 @@ export interface Job {
   progress: number; // 0–100
   label: string | null;
   payload: unknown;
-  result: { id: string; exported: PackResultView[] } | null;
+  result: JobResult | null;
   error: string | null;
   attempts: number;
   createdAt: string;

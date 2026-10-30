@@ -17,6 +17,7 @@ namespace FactorialAdLab.Editor
         const string EmailKey = "FactorialAdLab.email";
 
         const string CfgKey = "FactorialAdLab.capture";
+        const string CompileCfgKey = "FactorialAdLab.compile";
 
         string api = "https://app.factorialstudio.dev";
         string email = "";
@@ -24,6 +25,7 @@ namespace FactorialAdLab.Editor
         string token = "";
         string status = "";
         CaptureSettings cfg = new CaptureSettings();
+        CompileSettings compileCfg = new CompileSettings();
 
         [MenuItem("Factorial AdLab/Playable Builder")]
         public static void Open() => GetWindow<FactorialAdLabWindow>("Factorial AdLab");
@@ -35,11 +37,17 @@ namespace FactorialAdLab.Editor
             email = EditorPrefs.GetString(EmailKey, "");
             string json = EditorPrefs.GetString(CfgKey, "");
             if (!string.IsNullOrEmpty(json)) { try { cfg = JsonUtility.FromJson<CaptureSettings>(json) ?? cfg; } catch { } }
+            string cjson = EditorPrefs.GetString(CompileCfgKey, "");
+            if (!string.IsNullOrEmpty(cjson)) { try { compileCfg = JsonUtility.FromJson<CompileSettings>(cjson) ?? compileCfg; } catch { } }
             if (string.IsNullOrEmpty(cfg.productName) || cfg.productName == "My Game")
                 cfg.productName = Application.productName;
         }
 
-        void SaveCfg() => EditorPrefs.SetString(CfgKey, JsonUtility.ToJson(cfg));
+        void SaveCfg()
+        {
+            EditorPrefs.SetString(CfgKey, JsonUtility.ToJson(cfg));
+            EditorPrefs.SetString(CompileCfgKey, JsonUtility.ToJson(compileCfg));
+        }
 
         // keep the Capture button's enabled-state in sync with play mode + capture progress
         void OnInspectorUpdate() => Repaint();
@@ -72,6 +80,29 @@ namespace FactorialAdLab.Editor
 
                 GUILayout.Space(10);
                 GUILayout.Label("Active scene: " + SceneManager.GetActiveScene().name, EditorStyles.miniLabel);
+
+                // ── Compile the game itself (Unity WebGL → single-file playable) ──
+                GUILayout.Space(8);
+                GUILayout.Label("Compile the game (Unity WebGL → playable)", EditorStyles.boldLabel);
+                EditorGUILayout.HelpBox(
+                    "Builds a size-optimised WebGL player of your game, uploads it, and the cloud compiler folds it into ONE " +
+                    "self-contained HTML playable with a size breakdown. Network caps are 2–5 MB, so this suits light/hyper-casual " +
+                    "games; for heavy 3D games use the capture pipeline below.",
+                    MessageType.None);
+                EditorGUI.BeginChangeCheck();
+                compileCfg.activeSceneOnly = EditorGUILayout.Toggle("Active scene only", compileCfg.activeSceneOnly);
+                compileCfg.aggressiveStripping = EditorGUILayout.Toggle("Aggressive stripping", compileCfg.aggressiveStripping);
+                if (EditorGUI.EndChangeCheck()) SaveCfg();
+                using (new EditorGUI.DisabledScope(Application.isPlaying || WebGLCompileUploader.Running || CaptureUploader.Running))
+                {
+                    if (GUILayout.Button(WebGLCompileUploader.Running ? "Compiling…" : "Build, compile & upload playable", GUILayout.Height(30)))
+                    {
+                        SaveCfg();
+                        WebGLCompileUploader.Run(api, token, cfg, compileCfg, s => { status = s; Repaint(); }, Repaint);
+                    }
+                }
+                if (Application.isPlaying)
+                    EditorGUILayout.HelpBox("Exit Play mode to build.", MessageType.Info);
 
                 GUILayout.Space(8);
                 GUILayout.Label("Capture gameplay", EditorStyles.boldLabel);

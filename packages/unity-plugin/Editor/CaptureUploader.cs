@@ -149,7 +149,7 @@ namespace FactorialAdLab.Editor
 
         static void Upload()
         {
-            EnsureConcept(conceptId =>
+            EnsureConcept(apiBase, authToken, cfg.productName, conceptId =>
             {
                 if (string.IsNullOrEmpty(conceptId))
                 {
@@ -191,19 +191,20 @@ namespace FactorialAdLab.Editor
             });
         }
 
-        /// <summary>Reuse a stored concept, else create "<product> (AdLab)" app + a "capture" concept.</summary>
-        static void EnsureConcept(Action<string> cb)
+        /// <summary>Reuse a stored concept, else create "<product> (AdLab)" app + a "unity" concept. Shared with the WebGL compiler.</summary>
+        internal static void EnsureConcept(string api, string token, string productName, Action<string> cb)
         {
             string cached = EditorPrefs.GetString(ConceptKey, "");
             if (!string.IsNullOrEmpty(cached)) { cb(cached); return; }
 
-            string appBody = JsonUtility.ToJson(new AppReq { name = cfg.productName + " (AdLab)", platform = "android" });
-            PostJson($"{apiBase}/api/apps", appBody, appJson =>
+            string root = api.TrimEnd('/');
+            string appBody = JsonUtility.ToJson(new AppReq { name = productName + " (AdLab)", platform = "android" });
+            PostJson(token, $"{root}/api/apps", appBody, appJson =>
             {
                 string appId = ExtractId(appJson);
                 if (string.IsNullOrEmpty(appId)) { cb(null); return; }
-                string cBody = JsonUtility.ToJson(new NameReq { name = "capture" });
-                PostJson($"{apiBase}/api/apps/{appId}/concepts", cBody, cJson =>
+                string cBody = JsonUtility.ToJson(new NameReq { name = "unity" });
+                PostJson(token, $"{root}/api/apps/{appId}/concepts", cBody, cJson =>
                 {
                     string cid = ExtractId(cJson);
                     if (!string.IsNullOrEmpty(cid)) EditorPrefs.SetString(ConceptKey, cid);
@@ -212,7 +213,7 @@ namespace FactorialAdLab.Editor
             });
         }
 
-        static void PostJson(string url, string body, Action<string> cb)
+        internal static void PostJson(string token, string url, string body, Action<string> cb)
         {
             var req = new UnityWebRequest(url, "POST")
             {
@@ -220,7 +221,7 @@ namespace FactorialAdLab.Editor
                 downloadHandler = new DownloadHandlerBuffer(),
             };
             req.SetRequestHeader("Content-Type", "application/json");
-            req.SetRequestHeader("Authorization", "Bearer " + authToken);
+            req.SetRequestHeader("Authorization", "Bearer " + token);
             req.SendWebRequest().completed += _ =>
             {
                 string txt = req.result == UnityWebRequest.Result.Success ? req.downloadHandler.text : null;
@@ -229,13 +230,13 @@ namespace FactorialAdLab.Editor
             };
         }
 
-        static string ExtractId(string json)
+        internal static string ExtractId(string json)
         {
             if (string.IsNullOrEmpty(json)) return null;
             try { return JsonUtility.FromJson<IdRes>(json)?.id; } catch { return null; }
         }
 
-        static string Trunc(string s) => string.IsNullOrEmpty(s) ? "" : (s.Length > 200 ? s.Substring(0, 200) : s);
+        internal static string Trunc(string s) => string.IsNullOrEmpty(s) ? "" : (s.Length > 200 ? s.Substring(0, 200) : s);
 
         [Serializable] class AppReq { public string name; public string platform; }
         [Serializable] class NameReq { public string name; }

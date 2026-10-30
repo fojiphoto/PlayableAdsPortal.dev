@@ -42,8 +42,8 @@ export async function loadFromDir(dir: string, entry?: string): Promise<Playable
   return { entry: pickEntry(paths, entry), files };
 }
 
-/** Load an HTML5 playable from a .zip buffer. */
-export async function loadFromZip(data: Uint8Array, entry?: string): Promise<PlayableSource> {
+/** Unzip to a path → bytes map (no entry detection — used by the Unity compiler too). */
+export async function filesFromZip(data: Uint8Array): Promise<Record<string, Uint8Array>> {
   const zip = await JSZip.loadAsync(data);
   const files: Record<string, Uint8Array> = {};
   await Promise.all(
@@ -52,6 +52,12 @@ export async function loadFromZip(data: Uint8Array, entry?: string): Promise<Pla
       files[f.name] = await f.async("uint8array");
     }),
   );
+  return files;
+}
+
+/** Load an HTML5 playable from a .zip buffer. */
+export async function loadFromZip(data: Uint8Array, entry?: string): Promise<PlayableSource> {
+  const files = await filesFromZip(data);
   const paths = Object.keys(files);
   if (paths.length === 0) throw new Error("Zip contained no files");
   return { entry: pickEntry(paths, entry), files };

@@ -115,6 +115,14 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON jobs(user_id, created_at);
 
+CREATE TABLE IF NOT EXISTS uploads (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  filename   TEXT NOT NULL,
+  bytes      BLOB NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS events (
   id          TEXT PRIMARY KEY,
   creative_id TEXT NOT NULL REFERENCES creatives(id) ON DELETE CASCADE,

@@ -210,24 +210,36 @@ export const startExportJob = (id: string, networks: string[]) =>
 export const getJob = (jobId: string) => getJson<Job>(`/jobs/${jobId}`);
 export const listJobs = (limit = 20) => getJson<Job[]>(`/jobs?limit=${limit}`);
 
-/**
- * Queue an export and resolve with the packed results once the worker finishes. `onProgress`
- * receives each poll (progress 0–100 + label). Rejects with the job's error if it fails.
- */
-export async function exportCreativeAsync(
-  id: string,
-  networks: string[],
-  onProgress?: (job: Job) => void,
-  pollMs = 700,
-): Promise<PackResultView[]> {
-  const { jobId } = await startExportJob(id, networks);
+/** Poll a job until it finishes; `onProgress` sees every poll. Rejects with the job's error on failure. */
+export async function waitForJob(jobId: string, onProgress?: (job: Job) => void, pollMs = 700): Promise<Job> {
   for (;;) {
     const job = await getJob(jobId);
     onProgress?.(job);
-    if (job.status === "done") return job.result?.exported ?? [];
-    if (job.status === "failed") throw new Error(job.error || "Export failed");
+    if (job.status === "done") return job;
+    if (job.status === "failed") throw new Error(job.error || "Job failed");
     await new Promise((r) => setTimeout(r, pollMs));
   }
+}
+
+/** Queue an export and resolve with the packed results once the worker finishes. */
+export async function exportCreativeAsync(id: string, networks: string[], onProgress?: (job: Job) => void): Promise<PackResultView[]> {
+  const { jobId } = await startExportJob(id, networks);
+  const job = await waitForJob(jobId, onProgress);
+  return job.result?.exported ?? [];
+}
+
+// ── Unity WebGL build → playable (compile job) ──
+export async function compileUnityBuild(
+  conceptId: string,
+  file: File,
+  fields: { name?: string; iosUrl?: string; androidUrl?: string; ctaUrl?: string },
+): Promise<{ jobId: string }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  for (const [k, v] of Object.entries(fields)) if (v) fd.append(k, v);
+  const res = await fetch(`${base}/concepts/${conceptId}/compile`, { method: "POST", headers: authHeaders(), body: fd });
+  if (!res.ok) return toError(res);
+  return res.json();
 }
 
 // ── public delivery (UUID-guarded; usable as <a href>/<iframe src>) ──

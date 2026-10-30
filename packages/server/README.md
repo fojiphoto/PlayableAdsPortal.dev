@@ -22,6 +22,8 @@ npm run test -w @forge/server
 | POST | `/api/creatives/:id/export` | build packages (`{ networks?, ctaUrl?, iosUrl?, androidUrl?, async? }`); `async: true` (or `?async=1`) → 202 `{ jobId, statusUrl }` |
 | GET | `/api/jobs/:id` | poll an async job: `status` queued/running/done/failed, `progress` 0–100, `label`, `result`, `error` |
 | GET | `/api/jobs?limit=` | the caller's recent jobs |
+| POST | `/api/concepts/:conceptId/compile` | multipart `file` = zipped Unity WebGL build (+ `name`, `iosUrl`, `androidUrl`, `companyName`) → 202 compile job; result = creative id + size breakdown + warnings + `fitsNetworks` |
+| POST / GET | `/api/compile/jobs` (`conceptId` field) / `/api/compile/jobs/:id` | competitor-shaped aliases |
 | GET | `/api/analytics?days=30&preview=0` | in-playable funnel (impressions, engagement, CTA, CTR; by network / creative; custom events) + export usage |
 | GET | `/api/creatives/:id/analytics` | per-creative funnel |
 | PATCH | `/api/analytics/settings` | `{ enabled }` — embed beacons in future exports |

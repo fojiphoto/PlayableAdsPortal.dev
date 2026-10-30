@@ -610,3 +610,27 @@ export function customEvents(userId: string, sinceIso: string, includePreview = 
 export function pruneEvents(olderThanIso: string): number {
   return Number(getDb().prepare("DELETE FROM events WHERE created_at < ?").run(olderThanIso).changes);
 }
+
+// ── raw uploads awaiting a job (compile inputs; deleted once the job finishes) ──
+export interface UploadRow {
+  id: string;
+  user_id: string;
+  filename: string;
+  bytes: Uint8Array;
+  created_at: string;
+}
+export function createUpload(userId: string, filename: string, bytes: Uint8Array): string {
+  const id = randomUUID();
+  getDb().prepare("INSERT INTO uploads (id, user_id, filename, bytes, created_at) VALUES (?, ?, ?, ?, ?)").run(id, userId, filename, bytes, now());
+  return id;
+}
+export function getUpload(id: string): UploadRow | undefined {
+  return getDb().prepare("SELECT * FROM uploads WHERE id = ?").get(id) as UploadRow | undefined;
+}
+export function deleteUpload(id: string): void {
+  getDb().prepare("DELETE FROM uploads WHERE id = ?").run(id);
+}
+/** Orphaned inputs (job never ran) are dropped after a day. */
+export function pruneUploads(olderThanIso: string): number {
+  return Number(getDb().prepare("DELETE FROM uploads WHERE created_at < ?").run(olderThanIso).changes);
+}

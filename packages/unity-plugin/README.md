@@ -14,6 +14,22 @@ Build playable ads from your Unity game and upload them to **Factorial AdLab**
 Package Manager → **Add package from disk…** → select `packages/unity-plugin/package.json`.
 (Or copy this folder into your project's `Packages/`.)
 
+## Two ways to make a playable
+
+| | **Compile the game** (Phase 2.3) | **Capture gameplay** (Phase 2.1/2.2) |
+|---|---|---|
+| What ships | The real game — a size-optimised Unity WebGL build folded into one HTML file | A short recorded clip replayed as a canvas flipbook with a tap zone + end-card |
+| Button | **Build, compile & upload playable** (exit Play mode) | **Capture & upload playable** (in Play mode) |
+| Fits | Light / hyper-casual games (network caps are 2–5 MB; base64 embedding adds ~33 %) | Any game, incl. heavy 3D |
+| You get | Size breakdown (code / assets / framework / loader), which networks it fits, what to cut | A cap-sized playable every time |
+
+The compile path sets Player Settings for a playable (WebGL compression off, High managed stripping,
+no exceptions, strip engine code, IL2CPP size-optimised, minimal template, no data caching) for the
+build only and restores your settings afterwards. Requires the **WebGL Build Support** module.
+
+Your game talks to the ad through `FactorialAdLab.Playable.InstallFullGame()`, `LifeCycle.GameStarted()/GameEnded()`
+and `Analytics.LogEvent("name")` — a WebGL `.jslib` bridges them to the per-network runtime shim.
+
 ## Use
 
 - **Tools path:** `Factorial AdLab ▸ Playable Builder`.
@@ -34,4 +50,6 @@ toggling Play from the editor triggers a domain reload that would interrupt the 
 Runtime/Playable.cs              — dev-facing API façade ([AdLabField], Playable.*, LifeCycle.*)
 Editor/FactorialAdLabWindow.cs   — the editor window (sign-in + capture settings + button)
 Editor/CaptureUploader.cs        — grabs Game-view frames in Play mode, uploads to /api/.../capture
+Editor/WebGLCompileUploader.cs   — WebGL build → zip → /api/.../compile job → polls progress + size breakdown
+Runtime/Plugins/WebGL/*.jslib    — bridges Playable/LifeCycle/Analytics to the runtime shim (window.PF)
 ```

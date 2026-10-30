@@ -912,6 +912,93 @@ describe("in-playable analytics: collector + dashboard funnel", () => {
   });
 });
 
+describe("compile jobs: Unity WebGL build → single-file playable", () => {
+  const WASM = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0, 0, 0, ...new Array(64).fill(7)]);
+  async function unityBuildZip(opts: { withLoader?: boolean } = {}): Promise<Buffer> {
+    const zip = new JSZip();
+    zip.file("index.html", `<html><script>var config = { productName: "Hop Ball", companyName: "Factorial" };</script></html>`);
+    if (opts.withLoader !== false) zip.file("Build/game.loader.js", "function createUnityInstance(c, cfg, p){ return Promise.resolve({}); }");
+    zip.file("Build/game.framework.js", "var unityFramework = function(M){ return M; };");
+    zip.file("Build/game.wasm", WASM);
+    zip.file("Build/game.data", Buffer.concat([Buffer.from("UnityWebData1.0\0"), Buffer.alloc(300, 1)]));
+    zip.file("TemplateData/style.css", "body{}");
+    return zip.generateAsync({ type: "nodebuffer" });
+  }
+  async function setup(email: string) {
+    const token = await signup(email);
+    verifyDomain(email);
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Hop Ball", platform: "ios" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "unity" } })).json().id;
+    return { token, conceptId };
+  }
+  const multipart = (buf: Buffer, fields: Record<string, string> = {}) => {
+    const form = new FormData();
+    form.append("file", buf, { filename: "build.zip", contentType: "application/zip" });
+    for (const [k, v] of Object.entries(fields)) form.append(k, v);
+    return form;
+  };
+
+  it("upload → 202 job → worker compiles → creative with one self-contained index.html → exports", async () => {
+    const { token, conceptId } = await setup("compile@factorialstudio.com");
+    const form = multipart(await unityBuildZip(), { name: "hop-ball-playable", iosUrl: "https://apps.apple.com/app/id1" });
+    const res = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/compile`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
+    expect(res.statusCode).toBe(202);
+    const { jobId, status } = res.json();
+    expect(status).toBe("queued");
+    expect((await app.inject({ method: "GET", url: `/api/compile/jobs/${jobId}`, headers: bearer(token) })).json().kind).toBe("compile");
+
+    expect(await drainJobs()).toBe(1);
+    const j = (await app.inject({ method: "GET", url: `/api/jobs/${jobId}`, headers: bearer(token) })).json();
+    expect(j.status, j.error).toBe("done");
+    const r = j.result;
+    expect(r.creativeId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(r.name).toBe("hop-ball-playable");
+    expect(r.breakdown).toMatchObject({ wasm: WASM.length, streamingAssets: 0 });
+    expect(r.sizeBytes).toBe(r.breakdown.embedded);
+    expect(r.fitsNetworks).toContain("applovin"); // tiny fixture fits everything
+    expect(r.fitsNetworks).toContain("meta");
+
+    // the creative is a normal creative: detail works, export works, the game is inside the package
+    const detail = await app.inject({ method: "GET", url: `/api/creatives/${r.creativeId}`, headers: bearer(token) });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().name).toBe("hop-ball-playable");
+    const exp = await app.inject({ method: "POST", url: `/api/creatives/${r.creativeId}/export`, headers: bearer(token), payload: { networks: ["applovin", "unityads"] } });
+    expect(exp.statusCode).toBe(200);
+    for (const e of exp.json().exported) expect(e.ok, JSON.stringify(e.validation)).toBe(true);
+    const html = (await app.inject({ method: "GET", url: `/api/creatives/${r.creativeId}/preview/applovin` })).body;
+    expect(html).toContain("function createUnityInstance");
+    expect(html).toContain(`var WASM="${Buffer.from(WASM).toString("base64")}"`);
+    expect(html).toContain("window.PF"); // shim injected at export
+    expect(html).toContain('"iosUrl":"https://apps.apple.com/app/id1"');
+
+    // the raw upload is gone once the job finished; the concept lists the compiled creative
+    const concept = (await app.inject({ method: "GET", url: `/api/concepts/${conceptId}`, headers: bearer(token) })).json();
+    expect(concept.creatives.map((c: { id: string }) => c.id)).toContain(r.creativeId);
+  });
+
+  it("rejects non-zip uploads up front, and a non-Unity zip fails the job with the compiler's message", async () => {
+    const { token, conceptId } = await setup("compilebad@factorialstudio.com");
+    const notZip = multipart(Buffer.from("<html>hi</html>"));
+    const bad = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/compile`, headers: { ...bearer(token), ...notZip.getHeaders() }, payload: notZip.getBuffer() });
+    expect(bad.statusCode).toBe(400);
+
+    const form = multipart(await unityBuildZip({ withLoader: false }));
+    const res = await app.inject({ method: "POST", url: "/api/compile/jobs", headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
+    expect(res.statusCode).toBe(404); // alias needs conceptId as a field
+    const form2 = multipart(await unityBuildZip({ withLoader: false }), { conceptId });
+    const res2 = await app.inject({ method: "POST", url: "/api/compile/jobs", headers: { ...bearer(token), ...form2.getHeaders() }, payload: form2.getBuffer() });
+    expect(res2.statusCode).toBe(202);
+    await drainJobs();
+    const j = (await app.inject({ method: "GET", url: `/api/jobs/${res2.json().jobId}`, headers: bearer(token) })).json();
+    expect(j.status).toBe("failed");
+    expect(j.error).toContain("Not a Unity WebGL build");
+    // other users cannot see the job
+    const other = await signup("compileother@factorialstudio.com");
+    expect((await app.inject({ method: "GET", url: `/api/compile/jobs/${res2.json().jobId}`, headers: bearer(other) })).statusCode).toBe(404);
+  });
+});
+
 describe("team / shared access", () => {
   it("invited member accesses the owner's apps; removal revokes it", async () => {
     const owner = await signup("teamowner@factorialstudio.com");

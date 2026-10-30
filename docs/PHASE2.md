@@ -74,7 +74,16 @@ already have.** No new server compiler needed for the MVP — the packager does 
   looping the clip until completed), end-card editor (logo, title, subtitle, themed CTA), and size
   tuning (`frameBudgetBytes` drops frames evenly to hit tighter caps). Plumbed through the capture
   endpoint and the Unity plugin window.
-- **2.3+ (moat):** begin the real C#→web compiler track (approach C) for simple games.
+- **2.3 ✅ (approach A/B — the game itself):** `compileUnityWebGL` in the packager turns a Unity WebGL
+  build into ONE self-contained HTML playable (loader inlined, framework/wasm/data embedded as blob: URLs,
+  StreamingAssets served through a fetch/XHR shim, gzip/brotli decompressed) with a size breakdown and
+  cap guidance. It runs as a `compile` job (`POST /api/concepts/:id/compile`, alias `/api/compile/jobs`);
+  the plugin's **Build, compile & upload playable** runs a size-optimised WebGL build (compression off,
+  High stripping, no exceptions, IL2CPP size-optimised, Player Settings restored afterwards) and polls the
+  job; the dashboard's upload form has a **Unity WebGL build** mode with the same breakdown. Base64 adds
+  ~33 %, so a 5 MB network needs a ≈3.5 MB raw build — right for light / hyper-casual games; heavy 3D games
+  stay on the capture path.
+- **2.4+ (long-term moat):** C#→JS transpile + purpose-built renderer for sub-MB output (approach C).
 
 ## Integration note
 
