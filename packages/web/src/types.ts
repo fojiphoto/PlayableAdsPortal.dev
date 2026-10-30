@@ -108,11 +108,36 @@ export interface TeamMember {
   createdAt: string;
 }
 
+/** In-playable funnel counts (unique play sessions) + derived rates in percent. */
+export interface Funnel {
+  impressions: number;
+  engagements: number;
+  starts: number;
+  completes: number;
+  ctaClicks: number;
+  engageRate: number;
+  completionRate: number;
+  ctr: number;
+}
+
+export interface PlayableAnalytics extends Funnel {
+  daily: { date: string; impressions: number; engagements: number; ctaClicks: number }[];
+  byNetwork: (Funnel & { network: string; networkName: string })[];
+  customEvents: { name: string; hits: number; sessions: number }[];
+}
+
 export interface Analytics {
+  // export usage (billing side)
   total: number;
   last30: number;
   daily: { date: string; count: number }[];
   byNetwork: { network: string; networkName: string; count: number }[];
+  // in-playable performance
+  tracking: { enabled: boolean };
+  window: { days: number; includePreview: boolean };
+  playable: PlayableAnalytics & {
+    byCreative: (Funnel & { creativeId: string; creative: string; concept: string; app: string })[];
+  };
 }
 
 export interface PreloaderSettings {

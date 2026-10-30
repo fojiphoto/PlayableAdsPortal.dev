@@ -28,6 +28,7 @@ export interface UserRow {
   stripe_subscription_id: string | null;
   plan_status: string | null;
   email_verified: number;
+  analytics_enabled: number;
   email_verify_hash: string | null;
   email_verify_expires: string | null;
   plan_renews_at: string | null;
@@ -78,7 +79,7 @@ export function createUser(email: string, passwordHash: string): UserRow {
     totp_secret: null, totp_enabled: 0, totp_last_step: null, domain: null, domain_token: null, domain_verified: 0,
     stripe_customer_id: null, stripe_subscription_id: null, plan_status: null,
     email_verified: 0, email_verify_hash: null, email_verify_expires: null,
-    plan_renews_at: null, plan_cancel_at_period_end: 0, created_at: now(),
+    plan_renews_at: null, plan_cancel_at_period_end: 0, analytics_enabled: 1, created_at: now(),
   };
   getDb()
     .prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
@@ -522,4 +523,90 @@ export function recoverStaleJobs(maxAttempts = 2): number {
 /** Housekeeping: drop finished jobs older than `olderThanIso` (results are already persisted as exports). */
 export function pruneJobs(olderThanIso: string): number {
   return Number(getDb().prepare("DELETE FROM jobs WHERE status IN ('done','failed') AND finished_at < ?").run(olderThanIso).changes);
+}
+
+export function setAnalyticsEnabled(userId: string, enabled: boolean): void {
+  getDb().prepare("UPDATE users SET analytics_enabled = ? WHERE id = ?").run(enabled ? 1 : 0, userId);
+}
+
+// ── in-playable analytics events ─────────────────────────────────────────────
+export const EVENT_KINDS = ["impression", "engage", "start", "complete", "cta", "custom"] as const;
+export type EventKind = (typeof EVENT_KINDS)[number];
+export const isEventKind = (s: string): s is EventKind => (EVENT_KINDS as readonly string[]).includes(s);
+
+/** Existence check for the public collector (no ownership — the creative UUID is the capability). */
+export function creativeExists(id: string): boolean {
+  return !!getDb().prepare("SELECT 1 FROM creatives WHERE id = ?").get(id);
+}
+
+export function insertEvent(creativeId: string, network: string, event: EventKind, session: string, name: string | null, preview: boolean): void {
+  getDb()
+    .prepare("INSERT INTO events (id, creative_id, network, event, name, session, preview, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(randomUUID(), creativeId, network, event, name, session, preview ? 1 : 0, now());
+}
+
+/** Shared FROM/WHERE for owner-scoped event aggregates (apps the user owns or is a member of). */
+function eventScope(userId: string, sinceIso: string, includePreview: boolean, creativeId?: string) {
+  const owners = accessibleOwnerIds(userId);
+  const where = [`a.user_id IN (${owners.map(() => "?").join(",")})`, "ev.created_at >= ?"];
+  const params: unknown[] = [...owners, sinceIso];
+  if (!includePreview) where.push("ev.preview = 0");
+  if (creativeId) {
+    where.push("ev.creative_id = ?");
+    params.push(creativeId);
+  }
+  return {
+    sql: `FROM events ev JOIN creatives cr ON cr.id = ev.creative_id JOIN concepts c ON c.id = cr.concept_id JOIN apps a ON a.id = c.app_id WHERE ${where.join(" AND ")}`,
+    params,
+  };
+}
+const FUNNEL_COLS = `
+  COUNT(DISTINCT CASE WHEN ev.event = 'impression' THEN ev.session END) AS impressions,
+  COUNT(DISTINCT CASE WHEN ev.event = 'engage' THEN ev.session END) AS engages,
+  COUNT(DISTINCT CASE WHEN ev.event = 'start' THEN ev.session END) AS starts,
+  COUNT(DISTINCT CASE WHEN ev.event = 'complete' THEN ev.session END) AS completes,
+  COUNT(DISTINCT CASE WHEN ev.event = 'cta' THEN ev.session END) AS ctas`;
+
+export interface FunnelCounts {
+  impressions: number;
+  engages: number;
+  starts: number;
+  completes: number;
+  ctas: number;
+}
+export function eventFunnel(userId: string, sinceIso: string, includePreview = false, creativeId?: string): FunnelCounts {
+  const { sql, params } = eventScope(userId, sinceIso, includePreview, creativeId);
+  return getDb().prepare(`SELECT ${FUNNEL_COLS} ${sql}`).get(...(params as never[])) as unknown as FunnelCounts;
+}
+export function eventDaily(userId: string, sinceIso: string, includePreview = false, creativeId?: string): (FunnelCounts & { d: string })[] {
+  const { sql, params } = eventScope(userId, sinceIso, includePreview, creativeId);
+  return getDb()
+    .prepare(`SELECT substr(ev.created_at,1,10) AS d, ${FUNNEL_COLS} ${sql} GROUP BY d ORDER BY d`)
+    .all(...(params as never[])) as unknown as (FunnelCounts & { d: string })[];
+}
+export function eventByNetwork(userId: string, sinceIso: string, includePreview = false, creativeId?: string): (FunnelCounts & { network: string })[] {
+  const { sql, params } = eventScope(userId, sinceIso, includePreview, creativeId);
+  return getDb()
+    .prepare(`SELECT ev.network, ${FUNNEL_COLS} ${sql} GROUP BY ev.network ORDER BY impressions DESC`)
+    .all(...(params as never[])) as unknown as (FunnelCounts & { network: string })[];
+}
+export function eventByCreative(
+  userId: string,
+  sinceIso: string,
+  includePreview = false,
+): (FunnelCounts & { creative_id: string; creative: string; concept: string; app: string })[] {
+  const { sql, params } = eventScope(userId, sinceIso, includePreview);
+  return getDb()
+    .prepare(`SELECT ev.creative_id, cr.name AS creative, c.name AS concept, a.name AS app, ${FUNNEL_COLS} ${sql} GROUP BY ev.creative_id ORDER BY impressions DESC LIMIT 50`)
+    .all(...(params as never[])) as unknown as (FunnelCounts & { creative_id: string; creative: string; concept: string; app: string })[];
+}
+export function customEvents(userId: string, sinceIso: string, includePreview = false, creativeId?: string, limit = 25): { name: string; hits: number; sessions: number }[] {
+  const { sql, params } = eventScope(userId, sinceIso, includePreview, creativeId);
+  return getDb()
+    .prepare(`SELECT ev.name AS name, COUNT(*) AS hits, COUNT(DISTINCT ev.session) AS sessions ${sql} AND ev.event = 'custom' AND ev.name IS NOT NULL GROUP BY ev.name ORDER BY hits DESC LIMIT ?`)
+    .all(...(params as never[]), limit) as unknown as { name: string; hits: number; sessions: number }[];
+}
+/** Housekeeping: raw events older than `olderThanIso` are dropped (dashboards look back 90 days at most). */
+export function pruneEvents(olderThanIso: string): number {
+  return Number(getDb().prepare("DELETE FROM events WHERE created_at < ?").run(olderThanIso).changes);
 }

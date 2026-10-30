@@ -22,6 +22,7 @@ import { enqueue, registerJobHandler, JobError } from "../jobs.js";
 import { parseNetworkOrder } from "./apps.js";
 import { checkExport } from "../plan-status.js";
 import { preloaderForExport } from "../preloader-config.js";
+import { publicBase } from "../site.js";
 
 function networkName(id: string): string {
   try {
@@ -76,7 +77,11 @@ export type PreparedExport =
   | { ok: true; userId: string; cr: CreativeRow; ids: string[]; opts: PackOptions; already: Set<string> }
   | { ok: false; status: number; body: Record<string, unknown> };
 
-export function prepareExport(userId: string, creativeId: string, body: ExportBody): PreparedExport {
+/**
+ * @param analyticsBase public origin of this API (https://app.factorialstudio.dev); when given and the
+ *   app owner has in-playable analytics on, the package beacons to `${analyticsBase}/api/t/...`.
+ */
+export function prepareExport(userId: string, creativeId: string, body: ExportBody, analyticsBase?: string): PreparedExport {
   const cr = getCreativeOwned(creativeId, userId);
   if (!cr) return { ok: false, status: 404, body: { error: "not found" } };
 
@@ -114,6 +119,7 @@ export function prepareExport(userId: string, creativeId: string, body: ExportBo
     iosUrl: body.iosUrl ?? stored.iosUrl,
     androidUrl: body.androidUrl ?? stored.androidUrl,
     preloader: preloaderForExport(userId),
+    analytics: analyticsBase && owner.analytics_enabled ? { endpoint: `${analyticsBase}/api/t`, creativeId: cr.id } : undefined,
   };
   // only count a network toward quota the first time this creative exports it —
   // re-exporting an unchanged creative must not keep burning the 30-day allowance
@@ -142,12 +148,14 @@ export async function executeExport(
 
 export interface ExportJobPayload extends ExportBody {
   creativeId: string;
+  /** public API origin captured at enqueue time (jobs have no request to derive it from) */
+  analyticsBase?: string;
 }
 
 /** Worker handler for kind "export" — re-runs the gates, then packs with progress. */
 registerJobHandler("export", async (job, progress) => {
   const p = JSON.parse(job.payload_json) as ExportJobPayload;
-  const prep = prepareExport(job.user_id, p.creativeId, p);
+  const prep = prepareExport(job.user_id, p.creativeId, p, p.analyticsBase);
   if (!prep.ok) throw new JobError(String(prep.body.error ?? "Export rejected"), typeof prep.body.code === "string" ? prep.body.code : undefined);
   progress(0, "Loading source…");
   const exported = await executeExport(prep, (done, total, net) => {
@@ -391,7 +399,8 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     authed,
     async (req, reply) => {
       const body = req.body ?? {};
-      const prep = prepareExport(req.user!.id, req.params.id, body);
+      const analyticsBase = publicBase(req);
+      const prep = prepareExport(req.user!.id, req.params.id, body, analyticsBase);
       if (!prep.ok) return reply.code(prep.status).send(prep.body);
 
       const wantAsync = body.async === true || req.query?.async === "1" || req.query?.async === "true";
@@ -402,6 +411,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
           ctaUrl: body.ctaUrl,
           iosUrl: body.iosUrl,
           androidUrl: body.androidUrl,
+          analyticsBase,
         };
         const job = enqueue(req.user!.id, "export", payload);
         return reply.code(202).send({ jobId: job.id, status: job.status, statusUrl: `/api/jobs/${job.id}` });

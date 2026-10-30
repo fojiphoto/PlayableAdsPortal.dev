@@ -809,6 +809,109 @@ describe("async jobs: export runs on the worker", () => {
   });
 });
 
+describe("in-playable analytics: collector + dashboard funnel", () => {
+  const UUID_RE = /^[0-9a-f-]{36}$/;
+  async function creativeFor(email: string) {
+    const token = await signup(email);
+    verifyDomain(email);
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Tracked App", platform: "ios" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c1" } })).json().id;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "sample.zip", contentType: "application/zip" });
+    form.append("name", "lumber");
+    const up = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
+    return { token, creativeId: up.json().id as string };
+  }
+  const hit = (creativeId: string, network: string, e: string, s: string, extra = "") =>
+    app.inject({ method: "GET", url: `/api/t/${creativeId}/${network}?e=${e}&s=${s}${extra}` });
+
+  it("exported packages carry the collector URL derived from the request host; off when tracking is disabled", async () => {
+    const { token, creativeId } = await creativeFor("track@factorialstudio.com");
+    const exp = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: { ...bearer(token), host: "app.factorialstudio.dev", "x-forwarded-proto": "https" }, payload: { networks: ["applovin", "meta"] } });
+    expect(exp.statusCode).toBe(200);
+    const applovin = (await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/preview/applovin` })).body;
+    expect(applovin).toContain(`"analytics":{"endpoint":"https://app.factorialstudio.dev/api/t","creativeId":"${creativeId}","network":"applovin"}`);
+    // Meta forbids outbound requests → no beacons in that package
+    const meta = (await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/preview/meta` })).body;
+    expect(meta).toContain('"analytics":null');
+
+    // user turns tracking off → next export has no collector
+    const off = await app.inject({ method: "PATCH", url: "/api/analytics/settings", headers: bearer(token), payload: { enabled: false } });
+    expect(off.json()).toEqual({ enabled: false });
+    await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: { ...bearer(token), host: "app.factorialstudio.dev" }, payload: { networks: ["applovin"] } });
+    expect((await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/preview/applovin` })).body).toContain('"analytics":null');
+    expect((await app.inject({ method: "GET", url: "/api/analytics", headers: bearer(token) })).json().tracking.enabled).toBe(false);
+  });
+
+  it("collector accepts GET pixel + POST beacon, dedupes per session, ignores junk, excludes preview plays", async () => {
+    const { token, creativeId } = await creativeFor("funnel@factorialstudio.com");
+    expect(creativeId).toMatch(UUID_RE);
+
+    // play 1: full funnel on AppLovin (impression fired twice → counted once)
+    for (const e of ["impression", "impression", "engage", "start", "complete", "cta"]) {
+      const r = await hit(creativeId, "applovin", e, "sessA1");
+      expect(r.statusCode).toBe(200);
+      expect(r.headers["content-type"]).toContain("image/gif");
+      expect(r.headers["cache-control"]).toContain("no-store");
+    }
+    // play 2: bounced on AppLovin (impression only), via sendBeacon-style POST with a text/plain body
+    const post = await app.inject({ method: "POST", url: `/api/t/${creativeId}/applovin?e=impression&s=sessA2`, headers: { "content-type": "text/plain" }, payload: "" });
+    expect(post.statusCode).toBe(204);
+    // play 3: Unity Ads, engaged + custom events
+    await hit(creativeId, "unityads", "impression", "sessU1");
+    await hit(creativeId, "unityads", "engage", "sessU1");
+    await hit(creativeId, "unityads", "custom", "sessU1", "&n=level_1");
+    await hit(creativeId, "unityads", "custom", "sessU1", "&n=level_2");
+    await hit(creativeId, "unityads", "custom", "sessU1", "&n=level_2");
+    // our own device preview: flagged, excluded by default
+    await hit(creativeId, "applovin", "impression", "sessPrev", "&p=1");
+    await hit(creativeId, "applovin", "cta", "sessPrev", "&p=1");
+    // junk: unknown event / bad session / unknown creative / unknown network → swallowed (never an error inside an ad)
+    expect((await hit(creativeId, "applovin", "hack", "sessX")).statusCode).toBe(200);
+    expect((await hit(creativeId, "applovin", "impression", "<script>")).statusCode).toBe(200);
+    expect((await hit("00000000-0000-4000-8000-000000000000", "applovin", "impression", "sessX")).statusCode).toBe(200);
+    expect((await hit(creativeId, "nonsense-network", "impression", "sessN1")).statusCode).toBe(200);
+
+    const a = (await app.inject({ method: "GET", url: "/api/analytics?days=7", headers: bearer(token) })).json();
+    expect(a.window).toEqual({ days: 7, includePreview: false });
+    // sessions: A1, A2, U1, N1 (unknown network is kept, as "unknown") → 4 impressions; preview excluded
+    expect(a.playable.impressions).toBe(4);
+    expect(a.playable.engagements).toBe(2);
+    expect(a.playable.starts).toBe(1);
+    expect(a.playable.completes).toBe(1);
+    expect(a.playable.ctaClicks).toBe(1);
+    expect(a.playable.engageRate).toBe(50);
+    expect(a.playable.ctr).toBe(25);
+    const byNet = Object.fromEntries(a.playable.byNetwork.map((n: { network: string }) => [n.network, n]));
+    expect(byNet.applovin).toMatchObject({ networkName: "AppLovin", impressions: 2, ctaClicks: 1, ctr: 50 });
+    expect(byNet.unityads).toMatchObject({ impressions: 1, engagements: 1, ctaClicks: 0 });
+    expect(byNet.unknown).toMatchObject({ impressions: 1 });
+    expect(a.playable.byCreative).toHaveLength(1);
+    expect(a.playable.byCreative[0]).toMatchObject({ creativeId, creative: "lumber", app: "Tracked App", concept: "c1", impressions: 4 });
+    expect(a.playable.customEvents).toEqual([
+      { name: "level_2", hits: 2, sessions: 1 },
+      { name: "level_1", hits: 1, sessions: 1 },
+    ]);
+    // the daily series is padded to the window and today carries the plays
+    expect(a.playable.daily).toHaveLength(7);
+    expect(a.playable.daily.at(-1)).toMatchObject({ impressions: 4, ctaClicks: 1 });
+
+    // include preview plays → one more impression + CTA
+    const withPrev = (await app.inject({ method: "GET", url: "/api/analytics?preview=1", headers: bearer(token) })).json();
+    expect(withPrev.playable.impressions).toBe(5);
+    expect(withPrev.playable.ctaClicks).toBe(2);
+
+    // per-creative drill-down; other users see nothing
+    const per = await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/analytics`, headers: bearer(token) });
+    expect(per.statusCode).toBe(200);
+    expect(per.json()).toMatchObject({ creativeId, name: "lumber", impressions: 4, ctaClicks: 1 });
+    const stranger = await signup("stranger@factorialstudio.com");
+    expect((await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/analytics`, headers: bearer(stranger) })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/api/analytics", headers: bearer(stranger) })).json().playable.impressions).toBe(0);
+  });
+});
+
 describe("team / shared access", () => {
   it("invited member accesses the owner's apps; removal revokes it", async () => {
     const owner = await signup("teamowner@factorialstudio.com");

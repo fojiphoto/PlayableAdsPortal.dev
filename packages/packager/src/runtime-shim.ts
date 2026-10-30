@@ -19,6 +19,11 @@ import type { ClickMode, CtaHook } from "./types.js";
  *
  * Every hook falls back to mraid.open / window.open when the network SDK global is absent, so the
  * same file also works in our device preview and in a plain browser.
+ *
+ * Analytics (optional, `cfg.analytics`): one tiny beacon per funnel step — impression, engage
+ * (first touch), start, complete, cta — each at most once per session, plus `PF.analytics.logEvent`
+ * for custom events. Sent with navigator.sendBeacon (survives the CTA navigation) or a 1×1 pixel.
+ * Plays opened through our own device preview are flagged `p=1` and excluded from the dashboards.
  */
 export interface ShimConfig {
   clickMode: ClickMode;
@@ -27,6 +32,8 @@ export interface ShimConfig {
   ctaUrl: string;
   iosUrl: string;
   androidUrl: string;
+  /** in-playable analytics collector; null = no beacons in this package */
+  analytics: { endpoint: string; creativeId: string; network: string } | null;
 }
 
 export function buildRuntimeShim(cfg: ShimConfig): string {
@@ -41,6 +48,31 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
     if (/Android/i.test(ua) && CFG.androidUrl) return CFG.androidUrl;
     return CFG.ctaUrl || CFG.iosUrl || CFG.androidUrl || "";
   }
+  // ── in-playable analytics ──
+  var AN = CFG.analytics || null;
+  var SID = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+  var PREVIEW = /\/api\/creatives\/[^/]+\/preview\//.test(location.href) ? 1 : 0;
+  var sentOnce = {};
+  function track(ev, name){
+    if (!AN || !AN.endpoint) return;
+    if (ev !== "custom") { if (sentOnce[ev]) return; sentOnce[ev] = 1; }
+    var q = "e=" + encodeURIComponent(ev) + "&s=" + SID + "&t=" + Date.now()
+      + (name ? "&n=" + encodeURIComponent(String(name).slice(0, 64)) : "")
+      + (PREVIEW ? "&p=1" : "");
+    var url = AN.endpoint + "/" + encodeURIComponent(AN.creativeId) + "/" + encodeURIComponent(AN.network) + "?" + q;
+    try { if (navigator.sendBeacon && navigator.sendBeacon(url, "")) return; } catch (e) {}
+    try { var img = new Image(1, 1); img.src = url; } catch (e) {}
+  }
+  function trackEngageOnce(){
+    if (sentOnce.engage) return;
+    track("engage");
+    ["pointerdown", "touchstart", "mousedown", "keydown"].forEach(function(t){ try { document.removeEventListener(t, trackEngageOnce, true); } catch (e) {} });
+  }
+  if (AN) {
+    ["pointerdown", "touchstart", "mousedown", "keydown"].forEach(function(t){ try { document.addEventListener(t, trackEngageOnce, true); } catch (e) {} });
+    track("impression");
+  }
+
   var listeners = { pause: [], resume: [], ready: [] };
   function on(evt, cb){ if (listeners[evt]) listeners[evt].push(cb); }
   function emit(evt){ (listeners[evt] || []).forEach(function(cb){ try { cb(); } catch (e) {} }); }
@@ -68,6 +100,7 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
 
   // ── the per-network CTA ──
   function openStore(){
+    track("cta");
     var url = storeUrl();
     switch (HOOK) {
       case "google-exitapi":
@@ -97,6 +130,7 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
 
   // ── lifecycle → network signals ──
   function onGameEnded(){
+    track("complete");
     if (HOOK === "vungle") { try { parent.postMessage("complete", "*"); } catch (e) {} }
     if (HOOK === "pangle" && typeof window.gameEnd === "function") { try { window.gameEnd(); } catch (e) {} }
   }
@@ -105,7 +139,7 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
   }
 
   var PF = {
-    version: "0.2.0",
+    version: "0.3.0",
     network: HOOK,
     install: openStore,
     installFullGame: openStore,
@@ -116,13 +150,18 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
     on: on,
     lifecycle: {
       gameLoaded: function(){ onLoaded(); emit("ready"); },
-      gameStarted: function(){},
+      gameStarted: function(){ track("start"); },
       gamePaused: function(){ emit("pause"); },
       gameResumed: function(){ emit("resume"); },
       gameEnded: onGameEnded,
-      levelChanged: function(){}
+      levelChanged: function(level){ track("custom", "level_" + (level === undefined ? "changed" : level)); }
     },
-    analytics: { logEvent: function(){} }
+    analytics: {
+      enabled: !!AN,
+      sessionId: SID,
+      /** PF.analytics.logEvent("tutorial_done") — a custom event, counted per name on the Analytics page. */
+      logEvent: function(name){ if (name) track("custom", name); }
+    }
   };
   window.PF = window.PlayableForge = PF;
 

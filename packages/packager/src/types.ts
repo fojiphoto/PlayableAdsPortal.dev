@@ -53,6 +53,12 @@ export interface NetworkSpec {
   /** output file extension */
   ext: "html" | "zip";
   /**
+   * false when the network's spec forbids ANY outbound request from the creative (Meta, Google/DV360,
+   * Mintegral, Pangle). In-playable analytics beacons are then left out of the package entirely.
+   * Default (undefined) = allowed.
+   */
+  allowsNetworkRequests?: boolean;
+  /**
    * External hosts this network REQUIRES the playable to load (e.g. Google's exitapi.js).
    * These are exempt from the self-containment check; everything else external is an error.
    */
@@ -92,6 +98,19 @@ export interface PackOptions {
   androidUrl?: string;
   /** optional custom preloader / splash screen */
   preloader?: PreloaderConfig;
+  /**
+   * In-playable analytics: when set, the runtime shim beacons impression / engage / start /
+   * complete / cta (+ custom `PF.analytics.logEvent`) to `${endpoint}/${creativeId}/${network}`.
+   * Omitted on networks with `allowsNetworkRequests: false`.
+   */
+  analytics?: AnalyticsConfig;
+}
+
+export interface AnalyticsConfig {
+  /** collector base URL, e.g. https://app.factorialstudio.dev/api/t */
+  endpoint: string;
+  /** the creative the events belong to */
+  creativeId: string;
 }
 
 export type IssueLevel = "error" | "warning";

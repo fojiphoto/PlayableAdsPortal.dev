@@ -58,6 +58,11 @@ export function injectRuntime(html: string, spec: NetworkSpec, opts: PackOptions
     ctaUrl: opts.ctaUrl ?? "",
     iosUrl: opts.iosUrl ?? "",
     androidUrl: opts.androidUrl ?? "",
+    // beacons only where the network tolerates outbound requests (Meta/Google/Mintegral/Pangle don't)
+    analytics:
+      opts.analytics && spec.allowsNetworkRequests !== false
+        ? { endpoint: opts.analytics.endpoint.replace(/\/$/, ""), creativeId: opts.analytics.creativeId, network: spec.id }
+        : null,
   });
 
   if (/<\/body>/i.test(out)) return out.replace(/<\/body>/i, `${shim}\n</body>`);

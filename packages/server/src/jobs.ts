@@ -14,6 +14,7 @@ import {
   completeJob,
   createJob,
   failJob,
+  pruneEvents,
   pruneJobs,
   recoverStaleJobs,
   setJobProgress,
@@ -89,6 +90,7 @@ async function tick(): Promise<void> {
     if (nowMs - lastPrune > 6 * 60 * 60_000) {
       lastPrune = nowMs;
       pruneJobs(new Date(nowMs - 7 * 86_400_000).toISOString());
+      pruneEvents(new Date(nowMs - 90 * 86_400_000).toISOString());
     }
   } catch (e) {
     console.error("[jobs] worker tick failed:", e);

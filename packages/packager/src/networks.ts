@@ -25,11 +25,13 @@ export const NETWORKS: Record<string, NetworkSpec> = {
   },
   mintegral: {
     id: "mintegral", name: "Mintegral", format: "single-html", maxSizeBytes: 5 * MB,
+    allowsNetworkRequests: false,
     orientation: "both", clickMode: "window-open", ctaHook: "mintegral", usesMraid: false, ext: "html",
     notes: "Must call window.gameReady() once loaded and window.install() for the CTA (Mintegral injects both). Cap 5 MB per public spec.",
   },
   meta: {
     id: "meta", name: "Meta", format: "zip", maxSizeBytes: 2 * MB,
+    allowsNetworkRequests: false,
     orientation: "both", clickMode: "window-open", ctaHook: "meta-fb", usesMraid: false, ext: "zip",
     notes: "Audience Network: .zip with index.html; CTA via FbPlayableAd.onCTAClick(). Cap 2 MB per public spec.",
   },
@@ -40,6 +42,7 @@ export const NETWORKS: Record<string, NetworkSpec> = {
   },
   google: {
     id: "google", name: "Google Ads", format: "single-html", maxSizeBytes: 5 * MB,
+    allowsNetworkRequests: false,
     orientation: "both", clickMode: "window-open", ctaHook: "google-exitapi", usesMraid: false, ext: "html",
     allowedExternalHosts: GOOGLE_HOSTS,
     notes: "HTML5 playable: CTA via ExitApi.exit() from Google's exitapi.js (the one allowed external script). Cap 5 MB.",
@@ -48,6 +51,7 @@ export const NETWORKS: Record<string, NetworkSpec> = {
   // ── extended set ───────────────────────────────────────────────────────────
   tiktok: {
     id: "tiktok", name: "TikTok / Pangle", format: "single-html", maxSizeBytes: 2 * MB,
+    allowsNetworkRequests: false,
     orientation: "both", clickMode: "window-open", ctaHook: "pangle", usesMraid: false, ext: "html",
     notes: "Pangle playable: CTA via window.openAppStore(), window.gameEnd() on finish. Cap conservative (2 MB; docs cite 2.2–5 MB).",
   },
@@ -78,6 +82,7 @@ export const NETWORKS: Record<string, NetworkSpec> = {
   },
   dv360: {
     id: "dv360", name: "DV360", format: "single-html", maxSizeBytes: 5 * MB,
+    allowsNetworkRequests: false,
     orientation: "both", clickMode: "window-open", ctaHook: "google-exitapi", usesMraid: false, ext: "html",
     allowedExternalHosts: GOOGLE_HOSTS,
     notes: "Google Display & Video 360: CTA via ExitApi.exit() (exitapi.js). Cap 5 MB.",

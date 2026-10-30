@@ -116,7 +116,9 @@ export const inviteTeam = (email: string) => postJson<TeamMember[]>("/team/invit
 export const removeTeam = (memberId: string) => delJson<TeamMember[]>(`/team/${memberId}`);
 
 // ── analytics ──
-export const getAnalytics = () => getJson<Analytics>("/analytics");
+export const getAnalytics = (days = 30, includePreview = false) =>
+  getJson<Analytics>(`/analytics?days=${days}${includePreview ? "&preview=1" : ""}`);
+export const setAnalyticsTracking = (enabled: boolean) => patchJson<{ enabled: boolean }>("/analytics/settings", { enabled });
 
 // ── preloader ──
 export const getPreloader = () => getJson<PreloaderSettings>("/preloader");
