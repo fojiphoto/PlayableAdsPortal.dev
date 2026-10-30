@@ -17,6 +17,7 @@ export interface CompileJobPayload {
   conceptId: string;
   name?: string;
   companyName?: string;
+  unityVersion?: string;
   ctaUrl?: string;
   iosUrl?: string;
   androidUrl?: string;
@@ -33,7 +34,7 @@ registerJobHandler("compile", async (job, progress) => {
     progress(5, "Unpacking the build…");
     const files = await filesFromZip(up.bytes);
     progress(20, "Compiling Unity WebGL → single-file playable…");
-    const r = await compileUnityWebGL({ entry: "index.html", files }, { name: p.name, companyName: p.companyName });
+    const r = await compileUnityWebGL({ entry: "index.html", files }, { name: p.name, companyName: p.companyName, unityVersion: p.unityVersion });
 
     progress(85, "Saving creative…");
     const zip = new JSZip();
@@ -105,6 +106,7 @@ export async function compileRoutes(app: FastifyInstance): Promise<void> {
       conceptId: concept.id,
       name: fields.name || undefined,
       companyName: fields.companyName || undefined,
+      unityVersion: fields.unityVersion || undefined,
       ctaUrl: fields.ctaUrl || undefined,
       iosUrl: fields.iosUrl || undefined,
       androidUrl: fields.androidUrl || undefined,

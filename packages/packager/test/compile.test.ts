@@ -6,8 +6,8 @@ import type { PlayableSource } from "../src/index.js";
 const enc = (s: string) => new TextEncoder().encode(s);
 const WASM = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, ...new Array(200).fill(0x11)]);
 const DATA = new Uint8Array([...enc("UnityWebData1.0\0"), ...new Array(500).fill(0x22)]);
-const LOADER = `// Unity WebGL loader 6000.0.23f1\nfunction createUnityInstance(canvas, config, onProgress){ return Promise.resolve({ Module: {} }); }`;
-const FRAMEWORK = `var unityFramework = function(Module){ /* framework */ return Module; };`;
+const LOADER = `// Unity WebGL loader 6000.0.23f1\nfunction createUnityInstance(canvas, config, onProgress){ unityShowBanner('See <a href="https://bugzilla.mozilla.org/show_bug.cgi?id=1670675">bug</a>'); return Promise.resolve({ Module: {} }); }`;
+const FRAMEWORK = `var unityFramework = function(Module){ /* framework */ PF_Install: function(){ try { if (window.PF) window.PF.install(); } catch (e) {} }; return Module; };`;
 const INDEX = `<!DOCTYPE html><html><body><script>var config = { dataUrl: "Build/game.data", frameworkUrl: "Build/game.framework.js", codeUrl: "Build/game.wasm", companyName: "Factorial Studio", productName: "Hop Ball", productVersion: "0.9" };</script></body></html>`;
 
 function build(extra: Record<string, Uint8Array> = {}, variant: "plain" | "gz" | "br" = "plain"): PlayableSource {
@@ -46,8 +46,10 @@ describe("Unity WebGL → single-file compiler", () => {
     expect(r.breakdown.other).toBe(INDEX.length + "body{}".length);
     expect(r.breakdown.embedded).toBe(r.bytes.length);
     expect(r.breakdown.embedded).toBeGreaterThan(r.breakdown.totalRaw); // base64 overhead
-    // no network requests: nothing external referenced
-    expect(r.html).not.toMatch(/https?:\/\//);
+    // the loader's advisory link is neutralised (it is not a load), and the CTA bridge is surfaced for the validator
+    expect(r.html).toContain('href="#"');
+    expect(r.html).not.toContain('href="https://bugzilla');
+    expect(r.html).toContain("window.__adlabInstall=function(){try{window.PF.install();}catch(e){}}");
     expect(r.warnings).toEqual([]);
   });
 
@@ -90,12 +92,21 @@ describe("Unity WebGL → single-file compiler", () => {
     await expect(compileUnityWebGL(badWasm)).rejects.toMatchObject({ code: "corrupt-part" });
   });
 
+  it("warns when the game never calls the store, and takes the Unity version from the uploader", async () => {
+    const r = await compileUnityWebGL(build({ "Build/game.framework.js": enc("var unityFramework = function(M){ return M; };") }), { unityVersion: "6000.2.6f2" });
+    expect(r.unityVersion).toBe("6000.2.6f2");
+    expect(r.html).not.toContain("__adlabInstall");
+    expect(r.warnings.some((w) => w.includes("never calls Playable.InstallFullGame()"))).toBe(true);
+  });
+
   it("the compiled playable flows through the normal per-network packaging", async () => {
     const r = await compileUnityWebGL(build());
     const src: PlayableSource = { entry: "index.html", files: { "index.html": r.bytes } };
     const out = await pack(src, getNetwork("applovin"), { ctaUrl: "https://apps.apple.com/x" });
     const html = new TextDecoder().decode(out.bytes);
     expect(out.ok, JSON.stringify(out.validation)).toBe(true);
+    expect(out.validation.map((v) => v.code)).not.toContain("external-reference");
+    expect(out.validation.map((v) => v.code)).not.toContain("no-cta-call");
     expect(html).toContain("window.PF"); // shim injected
     expect(html).toContain("function createUnityInstance"); // game still there
     expect(html).toContain("mraid.getState"); // waits for MRAID ready before booting

@@ -29,6 +29,8 @@ export interface UnityCompileOptions {
   productVersion?: string;
   /** loading-screen / letterbox colour */
   background?: string;
+  /** Unity editor version, when the uploader knows it (the build files rarely carry it) */
+  unityVersion?: string;
 }
 
 export interface SizeBreakdown {
@@ -125,7 +127,9 @@ export async function compileUnityWebGL(source: PlayableSource, opts: UnityCompi
     if (r.fmt !== "none") compression = r.fmt;
     return r.bytes;
   };
-  const loaderJs = new TextDecoder().decode(loader.bytes);
+  // Unity's loader embeds advisory <a href="https://…"> links inside warning strings; neutralise them so the
+  // self-containment validator (which scans src/href attributes) does not mistake them for external loads.
+  const loaderJs = new TextDecoder().decode(loader.bytes).replace(/href=(["'])https?:\/\/[^"']*\1/gi, "href=$1#$1");
   const frameworkBytes = take(framework);
   const wasmBytes = take(wasm);
   const dataBytes = data ? take(data) : new Uint8Array(0);
@@ -156,7 +160,21 @@ export async function compileUnityWebGL(source: PlayableSource, opts: UnityCompi
   const company = opts.companyName || declared.companyName || "";
   const version = opts.productVersion || declared.productVersion || "1.0";
   const bg = opts.background || "#000000";
-  const unityVersion = loaderJs.match(/\b(\d{4}\.\d+\.\d+[abfp]\d+|6000\.\d+\.\d+[abfp]\d+)\b/)?.[1] ?? null;
+  const VERSION_RE = /\b(\d{4}\.\d+\.\d+[abfp]\d+|6000\.\d+\.\d+[abfp]\d+)\b/;
+  const latin1 = (b: Uint8Array) => Buffer.from(b.buffer, b.byteOffset, b.byteLength).toString("latin1");
+  const unityVersion =
+    opts.unityVersion ||
+    loaderJs.match(VERSION_RE)?.[1] ||
+    latin1(frameworkBytes).match(VERSION_RE)?.[1] ||
+    latin1(dataBytes.subarray(0, 4 * MB)).match(VERSION_RE)?.[1] ||
+    null;
+
+  // Does the game ever reach the store? The jslib bridge compiles `window.PF.install()` into framework.js.
+  const frameworkText = latin1(frameworkBytes);
+  const callsInstall = /window\.PF\.(install|installFullGame|openStore)\b|PF_Install\b/.test(frameworkText);
+  if (!callsInstall) {
+    warnings.push("The game never calls Playable.InstallFullGame() (no store call found in the build) — players cannot reach the store. Call it from your CTA button.");
+  }
 
   if (find(/\.symbols\.json(\.gz|\.br)?$/)) warnings.push("Debug symbols (*.symbols.json) were dropped — turn Debug Symbols off in Publishing Settings to skip generating them.");
   if (compression !== "none") {
@@ -220,7 +238,7 @@ var config={
   showBanner:function(msg,type){if(type==="error")fail(msg);else try{console.warn(msg);}catch(e){}},
   devicePixelRatio:Math.min(window.devicePixelRatio||1,2)
 };
-var started=false;
+${callsInstall ? "// the game calls Playable.InstallFullGame() → window.PF.install() through the WebGL bridge\nwindow.__adlabInstall=function(){try{window.PF.install();}catch(e){}};\n" : ""}var started=false;
 function start(){
   if(started)return;started=true;
   if(typeof createUnityInstance!=="function"){fail("Unity loader missing");return;}

@@ -79,28 +79,15 @@ namespace FactorialAdLab.Editor
             }
 
             BuildReport report;
-            var snapshot = PlayerSnapshot.Take();
             try
             {
-                snapshot.ApplyPlayableSettings(cs.aggressiveStripping);
                 Report("Building WebGL player… (the editor is blocked while Unity builds)");
-                report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
-                {
-                    scenes = scenes,
-                    locationPathName = outDir,
-                    target = BuildTarget.WebGL,
-                    targetGroup = BuildTargetGroup.WebGL,
-                    options = BuildOptions.None,
-                });
+                report = BuildPlayable(outDir, scenes, cs.aggressiveStripping);
             }
             catch (Exception e)
             {
                 Stop("Build failed: " + e.Message);
                 return;
-            }
-            finally
-            {
-                snapshot.Restore();
             }
 
             if (report == null || report.summary.result != BuildResult.Succeeded)
@@ -134,6 +121,7 @@ namespace FactorialAdLab.Editor
                     new MultipartFormFileSection("file", zip, "build.zip", "application/zip"),
                     new MultipartFormDataSection("name", cfg.productName),
                     new MultipartFormDataSection("companyName", Application.companyName ?? ""),
+                    new MultipartFormDataSection("unityVersion", Application.unityVersion ?? ""),
                 };
                 if (!string.IsNullOrEmpty(cfg.iosUrl)) form.Add(new MultipartFormDataSection("iosUrl", cfg.iosUrl));
                 if (!string.IsNullOrEmpty(cfg.androidUrl)) form.Add(new MultipartFormDataSection("androidUrl", cfg.androidUrl));
@@ -164,6 +152,72 @@ namespace FactorialAdLab.Editor
                     EditorApplication.update += Poll;
                 };
             });
+        }
+
+        /// <summary>
+        /// Run a playable-tuned WebGL build into <paramref name="outDir"/> (Player Settings are changed for
+        /// this build only and restored afterwards). Shared by the window button and the CLI entry.
+        /// </summary>
+        public static BuildReport BuildPlayable(string outDir, string[] scenes, bool aggressiveStripping = true)
+        {
+            var snapshot = PlayerSnapshot.Take();
+            try
+            {
+                snapshot.ApplyPlayableSettings(aggressiveStripping);
+                return BuildPipeline.BuildPlayer(new BuildPlayerOptions
+                {
+                    scenes = scenes,
+                    locationPathName = outDir,
+                    target = BuildTarget.WebGL,
+                    targetGroup = BuildTargetGroup.WebGL,
+                    options = BuildOptions.None,
+                });
+            }
+            finally
+            {
+                snapshot.Restore();
+            }
+        }
+
+        /// <summary>
+        /// Headless entry (CI / the competitor's "Build (headless settings)"):
+        /// <c>Unity -batchmode -nographics -quit -projectPath … -buildTarget WebGL
+        ///   -executeMethod FactorialAdLab.Editor.WebGLCompileUploader.BuildFromCommandLine -adlabOut &lt;dir&gt; [-adlabStripping off]</c>
+        /// Builds the enabled scenes (else every scene in Assets, else a fresh default scene) and exits 0/1.
+        /// </summary>
+        public static void BuildFromCommandLine()
+        {
+            string outDir = Arg("-adlabOut") ?? Path.Combine(Path.GetTempPath(), "FactorialAdLab", "webgl-build");
+            bool aggressive = Arg("-adlabStripping") != "off";
+
+            string[] scenes = EditorBuildSettings.scenes.Where(sc => sc.enabled).Select(sc => sc.path).ToArray();
+            if (scenes.Length == 0)
+                scenes = AssetDatabase.FindAssets("t:Scene", new[] { "Assets" }).Select(AssetDatabase.GUIDToAssetPath).OrderBy(x => x).ToArray();
+            if (scenes.Length == 0)
+            {
+                var scene = UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                    UnityEditor.SceneManagement.NewSceneSetup.DefaultGameObjects, UnityEditor.SceneManagement.NewSceneMode.Single);
+                Directory.CreateDirectory("Assets/Scenes");
+                UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, "Assets/Scenes/Playable.unity");
+                scenes = new[] { "Assets/Scenes/Playable.unity" };
+            }
+
+            Debug.Log($"[FactorialAdLab] headless WebGL build → {outDir} (scenes: {string.Join(", ", scenes)}, stripping {(aggressive ? "aggressive" : "default")})");
+            if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
+            Directory.CreateDirectory(outDir);
+
+            var report = BuildPlayable(outDir, scenes, aggressive);
+            bool ok = report != null && report.summary.result == BuildResult.Succeeded;
+            Debug.Log($"[FactorialAdLab] build {(ok ? "succeeded" : "FAILED")} — {(report != null ? Fmt((long)report.summary.totalSize) : "?")}, {(report != null ? report.summary.totalErrors : -1)} errors");
+            if (Application.isBatchMode) EditorApplication.Exit(ok ? 0 : 1);
+        }
+
+        static string Arg(string name)
+        {
+            string[] args = Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length - 1; i++)
+                if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase)) return args[i + 1];
+            return null;
         }
 
         // ── job polling ──────────────────────────────────────────────────────────────────────
@@ -238,7 +292,7 @@ namespace FactorialAdLab.Editor
                         string rel = file.Substring(dir.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Replace('\\', '/');
                         if (rel.StartsWith("TemplateData/")) continue;
                         if (!(rel == "index.html" || rel.StartsWith("Build/") || rel.StartsWith("StreamingAssets/"))) continue;
-                        var entry = zip.CreateEntry(rel, CompressionLevel.Fastest);
+                        var entry = zip.CreateEntry(rel, System.IO.Compression.CompressionLevel.Fastest);
                         using (var es = entry.Open())
                         using (var fs = File.OpenRead(file))
                             fs.CopyTo(es);
@@ -254,7 +308,7 @@ namespace FactorialAdLab.Editor
         class PlayerSnapshot
         {
             WebGLCompressionFormat compression;
-            bool decompressionFallback, dataCaching, nameFilesAsHashes, threads, stripEngine;
+            bool decompressionFallback, dataCaching, nameFilesAsHashes, threads, stripEngine, runInBackground;
             WebGLExceptionSupport exceptions;
             string template;
             ManagedStrippingLevel stripping;
@@ -275,6 +329,7 @@ namespace FactorialAdLab.Editor
                     exceptions = PlayerSettings.WebGL.exceptionSupport,
                     template = PlayerSettings.WebGL.template,
                     stripEngine = PlayerSettings.stripEngineCode,
+                    runInBackground = PlayerSettings.runInBackground,
                     stripping = PlayerSettings.GetManagedStrippingLevel(NamedBuildTarget.WebGL),
                 };
 #if UNITY_2022_2_OR_NEWER
@@ -293,6 +348,7 @@ namespace FactorialAdLab.Editor
                 PlayerSettings.WebGL.nameFilesAsHashes = false;
                 PlayerSettings.WebGL.threadsSupport = false;
                 PlayerSettings.WebGL.template = "APPLICATION:Minimal";
+                PlayerSettings.runInBackground = true; // an ad must keep running when the webview reports focus loss
 #if UNITY_2022_2_OR_NEWER
                 PlayerSettings.WebGL.debugSymbolMode = WebGLDebugSymbolMode.Off;
 #endif
@@ -317,6 +373,7 @@ namespace FactorialAdLab.Editor
                 PlayerSettings.WebGL.exceptionSupport = exceptions;
                 PlayerSettings.WebGL.template = template;
                 PlayerSettings.stripEngineCode = stripEngine;
+                PlayerSettings.runInBackground = runInBackground;
                 PlayerSettings.SetManagedStrippingLevel(NamedBuildTarget.WebGL, stripping);
 #if UNITY_2022_2_OR_NEWER
                 PlayerSettings.WebGL.debugSymbolMode = debugSymbols;

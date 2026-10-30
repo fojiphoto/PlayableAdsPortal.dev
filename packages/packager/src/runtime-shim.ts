@@ -51,7 +51,7 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
   // ── in-playable analytics ──
   var AN = CFG.analytics || null;
   var SID = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
-  var PREVIEW = /\/api\/creatives\/[^/]+\/preview\//.test(location.href) ? 1 : 0;
+  var PREVIEW = new RegExp("/api/creatives/[^/]+/preview/").test(location.href) ? 1 : 0;
   var sentOnce = {};
   function track(ev, name){
     if (!AN || !AN.endpoint) return;
