@@ -19,7 +19,9 @@ npm run test -w @forge/server
 | POST | `/api/creatives` | upload a playable (`multipart`: `file`=.zip or .html; fields: `name`, `appName`, `ctaUrl`, `iosUrl`, `androidUrl`, `entry`) |
 | GET  | `/api/creatives` | list |
 | GET  | `/api/creatives/:id` | details + current build results |
-| POST | `/api/creatives/:id/export` | build packages (`{ networks?, ctaUrl?, iosUrl?, androidUrl? }`) |
+| POST | `/api/creatives/:id/export` | build packages (`{ networks?, ctaUrl?, iosUrl?, androidUrl?, async? }`); `async: true` (or `?async=1`) → 202 `{ jobId, statusUrl }` |
+| GET | `/api/jobs/:id` | poll an async job: `status` queued/running/done/failed, `progress` 0–100, `label`, `result`, `error` |
+| GET | `/api/jobs?limit=` | the caller's recent jobs |
 | GET  | `/api/creatives/:id/download/:network` | download one package |
 | GET  | `/api/creatives/:id/preview/:network` | inline HTML for an `<iframe>` |
 | GET  | `/api/creatives/:id/download-all` | all packages as one zip |

@@ -127,3 +127,19 @@ export interface DomainStatus {
   verified: boolean;
   verifyFile: string;
 }
+
+/** Async job (GET /api/jobs/:id) — exports run in the background and are polled through this. */
+export interface Job {
+  id: string;
+  kind: string;
+  status: "queued" | "running" | "done" | "failed";
+  progress: number; // 0–100
+  label: string | null;
+  payload: unknown;
+  result: { id: string; exported: PackResultView[] } | null;
+  error: string | null;
+  attempts: number;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}

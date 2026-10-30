@@ -96,6 +96,24 @@ CREATE TABLE IF NOT EXISTS creatives (
   created_at   TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS jobs (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind           TEXT NOT NULL,
+  status         TEXT NOT NULL,            -- queued | running | done | failed
+  payload_json   TEXT NOT NULL,
+  result_json    TEXT,
+  error          TEXT,
+  progress       INTEGER NOT NULL DEFAULT 0,
+  progress_label TEXT,
+  attempts       INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL,
+  started_at     TEXT,
+  finished_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_user_created ON jobs(user_id, created_at);
+
 CREATE TABLE IF NOT EXISTS exports (
   id              TEXT PRIMARY KEY,
   creative_id     TEXT NOT NULL REFERENCES creatives(id) ON DELETE CASCADE,

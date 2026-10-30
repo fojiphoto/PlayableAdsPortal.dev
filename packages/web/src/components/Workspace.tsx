@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getConcept, getCreative, exportCreative, downloadAllUrl, previewUrl } from "../api";
-import type { CreativeRef, Network, PackResultView } from "../types";
+import { getConcept, getCreative, exportCreativeAsync, downloadAllUrl, previewUrl } from "../api";
+import type { CreativeRef, Job, Network, PackResultView } from "../types";
 import { UploadForm } from "./UploadForm";
 import { ResultCard } from "./ResultCard";
 import { DevicePreview } from "./DevicePreview";
@@ -22,6 +22,7 @@ export function Workspace({
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<Job | null>(null); // live progress of the running export job
   const [err, setErr] = useState<string | null>(null);
 
   // default-select the first 6 (priority) networks once loaded
@@ -84,8 +85,10 @@ export function Workspace({
     if (!activeId || selected.size === 0) return;
     setBusy(true);
     setErr(null);
+    setJob(null);
     try {
-      const rs = await exportCreative(activeId, [...selected]);
+      // exports run as a background job on the server; we poll it and show per-network progress
+      const rs = await exportCreativeAsync(activeId, [...selected], setJob);
       setResults(rs);
       setPreview((rs.find((r) => r.ok) ?? rs[0])?.network ?? null);
       onExported?.();
@@ -93,6 +96,7 @@ export function Workspace({
       setErr((e as Error).message);
     } finally {
       setBusy(false);
+      setJob(null);
     }
   }
 
@@ -166,8 +170,23 @@ export function Workspace({
               disabled={busy || selected.size === 0}
               className="mt-4 w-full rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40"
             >
-              {busy ? "Exporting…" : `Export ${selected.size} network${selected.size === 1 ? "" : "s"}`}
+              {busy ? (job?.status === "queued" ? "Queued…" : "Exporting…") : `Export ${selected.size} network${selected.size === 1 ? "" : "s"}`}
             </button>
+
+            {busy && (
+              <div className="mt-3" aria-live="polite">
+                <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
+                  <span className="truncate">{job?.label ?? (job?.status === "queued" ? "Waiting for a worker…" : "Starting…")}</span>
+                  <span className="ml-3 tabular-nums">{job?.progress ?? 0}%</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-[#0a3a28]">
+                  <div
+                    className="h-full rounded-full bg-amber-500 transition-[width] duration-300"
+                    style={{ width: `${Math.max(3, job?.progress ?? 0)}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             {results.length > 0 && (
               <div className="mt-6">

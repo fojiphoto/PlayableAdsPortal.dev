@@ -14,6 +14,7 @@ import type {
   Analytics,
   PreloaderSettings,
   DomainStatus,
+  Job,
 } from "./types";
 
 // Same-origin by default ("/api"). For a split deploy (SPA and API on different hosts),
@@ -199,6 +200,32 @@ export const getCreative = (id: string) => getJson<CreativeDetail>(`/creatives/$
 export async function exportCreative(id: string, networks: string[]): Promise<PackResultView[]> {
   const r = await postJson<{ exported: PackResultView[] }>(`/creatives/${id}/export`, { networks });
   return r.exported;
+}
+
+// ── async export: queue a job, then poll it ──
+export const startExportJob = (id: string, networks: string[]) =>
+  postJson<{ jobId: string; status: Job["status"]; statusUrl: string }>(`/creatives/${id}/export`, { networks, async: true });
+export const getJob = (jobId: string) => getJson<Job>(`/jobs/${jobId}`);
+export const listJobs = (limit = 20) => getJson<Job[]>(`/jobs?limit=${limit}`);
+
+/**
+ * Queue an export and resolve with the packed results once the worker finishes. `onProgress`
+ * receives each poll (progress 0–100 + label). Rejects with the job's error if it fails.
+ */
+export async function exportCreativeAsync(
+  id: string,
+  networks: string[],
+  onProgress?: (job: Job) => void,
+  pollMs = 700,
+): Promise<PackResultView[]> {
+  const { jobId } = await startExportJob(id, networks);
+  for (;;) {
+    const job = await getJob(jobId);
+    onProgress?.(job);
+    if (job.status === "done") return job.result?.exported ?? [];
+    if (job.status === "failed") throw new Error(job.error || "Export failed");
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
 }
 
 // ── public delivery (UUID-guarded; usable as <a href>/<iframe src>) ──

@@ -445,3 +445,81 @@ export function setPreloader(
     )
     .run(userId, logo ? Buffer.from(logo) : null, logoMime, args.bg, args.enabled, now());
 }
+
+// ── jobs (async work queue: export today, capture/compiler later) ─────────────
+export type JobStatus = "queued" | "running" | "done" | "failed";
+export interface JobRow {
+  id: string;
+  user_id: string;
+  kind: string;
+  status: JobStatus;
+  payload_json: string;
+  result_json: string | null;
+  error: string | null;
+  progress: number;
+  progress_label: string | null;
+  attempts: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export function createJob(userId: string, kind: string, payload: unknown): JobRow {
+  const id = randomUUID();
+  getDb()
+    .prepare("INSERT INTO jobs (id, user_id, kind, status, payload_json, created_at) VALUES (?, ?, ?, 'queued', ?, ?)")
+    .run(id, userId, kind, JSON.stringify(payload ?? {}), now());
+  return getJob(id)!;
+}
+export function getJob(id: string): JobRow | undefined {
+  return getDb().prepare("SELECT * FROM jobs WHERE id = ?").get(id) as JobRow | undefined;
+}
+export function getJobOwned(id: string, userId: string): JobRow | undefined {
+  return getDb().prepare("SELECT * FROM jobs WHERE id = ? AND user_id = ?").get(id, userId) as JobRow | undefined;
+}
+export function listJobs(userId: string, limit = 20): JobRow[] {
+  return getDb()
+    .prepare("SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?")
+    .all(userId, Math.max(1, Math.min(100, limit))) as unknown as JobRow[];
+}
+/** Atomically move the oldest queued job to `running` and return it (undefined when the queue is empty). */
+export function claimNextJob(): JobRow | undefined {
+  const db = getDb();
+  const next = db.prepare("SELECT id FROM jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1").get() as { id: string } | undefined;
+  if (!next) return undefined;
+  const r = db
+    .prepare("UPDATE jobs SET status = 'running', started_at = ?, attempts = attempts + 1, progress = 0, progress_label = NULL WHERE id = ? AND status = 'queued'")
+    .run(now(), next.id);
+  return r.changes === 1 ? getJob(next.id) : undefined;
+}
+export function setJobProgress(id: string, progress: number, label?: string | null): void {
+  getDb()
+    .prepare("UPDATE jobs SET progress = ?, progress_label = ? WHERE id = ? AND status = 'running'")
+    .run(Math.max(0, Math.min(100, Math.round(progress))), label ?? null, id);
+}
+export function completeJob(id: string, result: unknown): void {
+  getDb()
+    .prepare("UPDATE jobs SET status = 'done', progress = 100, progress_label = NULL, result_json = ?, finished_at = ? WHERE id = ?")
+    .run(JSON.stringify(result ?? null), now(), id);
+}
+export function failJob(id: string, error: string): void {
+  getDb()
+    .prepare("UPDATE jobs SET status = 'failed', progress_label = NULL, error = ?, finished_at = ? WHERE id = ?")
+    .run(error.slice(0, 500), now(), id);
+}
+/**
+ * Boot-time recovery: jobs left `running` by a crashed/restarted process go back to the queue,
+ * or fail permanently once they have been attempted `maxAttempts` times. Returns how many moved.
+ */
+export function recoverStaleJobs(maxAttempts = 2): number {
+  const db = getDb();
+  const failed = db
+    .prepare("UPDATE jobs SET status = 'failed', error = 'Interrupted by a server restart', finished_at = ? WHERE status = 'running' AND attempts >= ?")
+    .run(now(), maxAttempts).changes;
+  const requeued = db.prepare("UPDATE jobs SET status = 'queued', started_at = NULL WHERE status = 'running'").run().changes;
+  return Number(failed) + Number(requeued);
+}
+/** Housekeeping: drop finished jobs older than `olderThanIso` (results are already persisted as exports). */
+export function pruneJobs(olderThanIso: string): number {
+  return Number(getDb().prepare("DELETE FROM jobs WHERE status IN ('done','failed') AND finished_at < ?").run(olderThanIso).changes);
+}

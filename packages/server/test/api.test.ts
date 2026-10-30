@@ -7,7 +7,8 @@ import FormData from "form-data";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { resetDb } from "../src/db.js";
-import { getUserByEmail, setDomainVerified, setUserDomain, setStripeCustomer, setUserBilling } from "../src/repo.js";
+import { getUserByEmail, setDomainVerified, setUserDomain, setStripeCustomer, setUserBilling, createJob, claimNextJob, recoverStaleJobs, getJob } from "../src/repo.js";
+import { drainJobs } from "../src/jobs.js";
 import { outbox, clearOutbox } from "../src/mail.js";
 import { loadFromDir } from "@forge/packager";
 
@@ -697,6 +698,114 @@ describe("billing state: period end, cancel/resume, sync", () => {
       delete process.env.STRIPE_SECRET_KEY;
       delete process.env.STRIPE_PRICE_STUDIO;
     }
+  });
+});
+
+describe("async jobs: export runs on the worker", () => {
+  /** signup → verified domain → Starter plan → app → concept → uploaded creative */
+  async function creativeFor(email: string, plan: string | null = "starter") {
+    const token = await signup(email);
+    verifyDomain(email);
+    if (plan) await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan } });
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Jobs App", platform: "ios" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c1" } })).json().id;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "sample.zip", contentType: "application/zip" });
+    form.append("name", "lumber");
+    const up = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
+    expect(up.statusCode).toBe(201);
+    return { token, creativeId: up.json().id as string };
+  }
+  const jobOf = async (token: string, id: string) => (await app.inject({ method: "GET", url: `/api/jobs/${id}`, headers: bearer(token) })).json();
+
+  it("async:true → 202 job; worker packs it; result, persistence and quota match the sync path", async () => {
+    const { token, creativeId } = await creativeFor("jobs@factorialstudio.com");
+    const res = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["applovin", "meta"], async: true } });
+    expect(res.statusCode).toBe(202);
+    const { jobId, status, statusUrl } = res.json();
+    expect(status).toBe("queued");
+    expect(statusUrl).toBe(`/api/jobs/${jobId}`);
+
+    // nothing has run yet (tests never start the loop)
+    let j = await jobOf(token, jobId);
+    expect(j).toMatchObject({ status: "queued", progress: 0, kind: "export" });
+    expect(j.payload).toMatchObject({ creativeId, networks: ["applovin", "meta"] });
+    expect((await app.inject({ method: "GET", url: `/api/creatives/${creativeId}`, headers: bearer(token) })).json().exports).toHaveLength(0);
+
+    expect(await drainJobs()).toBe(1);
+
+    j = await jobOf(token, jobId);
+    expect(j.status).toBe("done");
+    expect(j.progress).toBe(100);
+    expect(j.finishedAt).toBeTruthy();
+    expect(j.result.exported).toHaveLength(2);
+    for (const r of j.result.exported) expect(r.ok, JSON.stringify(r.validation)).toBe(true);
+
+    // persisted exactly like a sync export; download works
+    expect((await app.inject({ method: "GET", url: `/api/creatives/${creativeId}`, headers: bearer(token) })).json().exports).toHaveLength(2);
+    expect((await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/download/meta` })).statusCode).toBe(200);
+    // listed for the user
+    const list = (await app.inject({ method: "GET", url: "/api/jobs", headers: bearer(token) })).json();
+    expect(list.map((x: { id: string }) => x.id)).toContain(jobId);
+
+    // quota: 2 networks charged once; re-exporting the same networks via a job charges nothing more
+    expect((await app.inject({ method: "GET", url: "/api/billing/status", headers: bearer(token) })).json().used).toBe(2);
+    await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export?async=1`, headers: bearer(token), payload: { networks: ["applovin", "meta"] } });
+    await drainJobs();
+    expect((await app.inject({ method: "GET", url: "/api/billing/status", headers: bearer(token) })).json().used).toBe(2);
+  });
+
+  it("gates still answer immediately on the async path — nothing is queued", async () => {
+    // free plan = Unity Ads only → 402 before any job exists
+    const { token, creativeId } = await creativeFor("jobsfree@factorialstudio.com", null);
+    const blocked = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["applovin"], async: true } });
+    expect(blocked.statusCode).toBe(402);
+    expect(blocked.json().code).toBe("network-not-in-plan");
+    // unknown network → 400
+    const bad = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["nope"], async: true } });
+    expect(bad.statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/api/jobs", headers: bearer(token) })).json()).toEqual([]);
+
+    // domain not verified → 403, still no job
+    const t2 = await signup("jobsnodomain@factorialstudio.com");
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(t2), payload: { name: "x", platform: "ios" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(t2), payload: { name: "c" } })).json().id;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "sample.zip", contentType: "application/zip" });
+    const cid = (await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(t2), ...form.getHeaders() }, payload: form.getBuffer() })).json().id;
+    const noDomain = await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(t2), payload: { networks: ["unityads"], async: true } });
+    expect(noDomain.statusCode).toBe(403);
+    expect(noDomain.json().code).toBe("domain-unverified");
+    expect((await app.inject({ method: "GET", url: "/api/jobs", headers: bearer(t2) })).json()).toEqual([]);
+  });
+
+  it("jobs are private to their owner; a job whose creative vanished fails with an error, not a crash", async () => {
+    const { token, creativeId } = await creativeFor("jobsowner@factorialstudio.com");
+    const other = await signup("jobsother@factorialstudio.com");
+    const { jobId } = (await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["applovin"], async: true } })).json();
+    expect((await app.inject({ method: "GET", url: `/api/jobs/${jobId}`, headers: bearer(other) })).statusCode).toBe(404);
+
+    // the creative is deleted while the job waits in the queue
+    expect((await app.inject({ method: "DELETE", url: `/api/creatives/${creativeId}`, headers: bearer(token) })).statusCode).toBeLessThan(300);
+    expect(await drainJobs()).toBe(1);
+    const j = await jobOf(token, jobId);
+    expect(j.status).toBe("failed");
+    expect(j.error).toBeTruthy();
+    expect(j.result).toBeNull();
+  });
+
+  it("restart recovery: interrupted running jobs are re-queued once, then failed", async () => {
+    await signup("jobsrecover@factorialstudio.com");
+    const u = getUserByEmail("jobsrecover@factorialstudio.com")!;
+    const job = createJob(u.id, "export", { creativeId: "none" });
+    expect(claimNextJob()?.id).toBe(job.id); // worker took it (attempt 1)…
+    expect(getJob(job.id)!.status).toBe("running");
+    expect(recoverStaleJobs()).toBe(1); // …process died → back to the queue
+    expect(getJob(job.id)).toMatchObject({ status: "queued", attempts: 1 });
+    expect(claimNextJob()?.id).toBe(job.id); // attempt 2 dies too
+    expect(recoverStaleJobs()).toBe(1);
+    expect(getJob(job.id)).toMatchObject({ status: "failed", error: "Interrupted by a server restart" });
+    expect(claimNextJob()).toBeUndefined();
   });
 });
 

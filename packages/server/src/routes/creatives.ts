@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import JSZip from "jszip";
-import { loadFromZip, packAll, getNetwork, PRIORITY_NETWORK_IDS, formatBytes, buildCapturePlayable } from "@forge/packager";
+import { loadFromZip, pack, getNetwork, PRIORITY_NETWORK_IDS, formatBytes, buildCapturePlayable } from "@forge/packager";
 import type { PackOptions, PackResult, CaptureBuildOptions, TapZone } from "@forge/packager";
 import { authed } from "../auth.js";
 import {
@@ -15,8 +15,10 @@ import {
   listExports,
   updateCreative,
   upsertExport,
+  type CreativeRow,
   type ExportRow,
 } from "../repo.js";
+import { enqueue, registerJobHandler, JobError } from "../jobs.js";
 import { parseNetworkOrder } from "./apps.js";
 import { checkExport } from "../plan-status.js";
 import { preloaderForExport } from "../preloader-config.js";
@@ -56,6 +58,104 @@ function exportView(e: ExportRow) {
     validation: JSON.parse(e.validation_json),
   };
 }
+
+// ── export pipeline ──────────────────────────────────────────────────────────
+// Split in two so the sync route and the async job share one code path:
+//   prepareExport — cheap checks that must answer immediately (404/403/400/402), computed again
+//                   by the worker right before packing (ownership/plan can change while queued);
+//   executeExport — the heavy part (unzip + pack per network), with per-network progress.
+
+export interface ExportBody {
+  networks?: string[];
+  ctaUrl?: string;
+  iosUrl?: string;
+  androidUrl?: string;
+}
+
+export type PreparedExport =
+  | { ok: true; userId: string; cr: CreativeRow; ids: string[]; opts: PackOptions; already: Set<string> }
+  | { ok: false; status: number; body: Record<string, unknown> };
+
+export function prepareExport(userId: string, creativeId: string, body: ExportBody): PreparedExport {
+  const cr = getCreativeOwned(creativeId, userId);
+  if (!cr) return { ok: false, status: 404, body: { error: "not found" } };
+
+  // publisher gate: the app owner's company domain must be verified (app-ads.txt / verify file)
+  // before anything ships to a network — the same gate the competitor applies.
+  const owner = getUserById(creativeOwnerId(cr.id) ?? userId);
+  if (!owner?.domain_verified) {
+    return {
+      ok: false,
+      status: 403,
+      body: {
+        error: "Verify your company domain before exporting: open the Domain page, add the token to app-ads.txt (or the verify file), then Check now.",
+        code: "domain-unverified",
+      },
+    };
+  }
+
+  const concept = getConceptOwned(cr.concept_id, userId);
+  const customOrder = parseNetworkOrder(concept?.network_order);
+  const ids = body.networks && body.networks.length ? body.networks : (customOrder ?? [...PRIORITY_NETWORK_IDS]);
+  try {
+    ids.forEach(getNetwork);
+  } catch (e) {
+    return { ok: false, status: 400, body: { error: (e as Error).message } };
+  }
+
+  // plan gate: allowed networks + rolling-30-day quota
+  const gate = checkExport(userId, ids);
+  if (!gate.ok) return { ok: false, status: 402, body: gate as unknown as Record<string, unknown> };
+
+  const stored = JSON.parse(cr.options_json) as PackOptions;
+  const opts: PackOptions = {
+    name: stored.name,
+    ctaUrl: body.ctaUrl ?? stored.ctaUrl,
+    iosUrl: body.iosUrl ?? stored.iosUrl,
+    androidUrl: body.androidUrl ?? stored.androidUrl,
+    preloader: preloaderForExport(userId),
+  };
+  // only count a network toward quota the first time this creative exports it —
+  // re-exporting an unchanged creative must not keep burning the 30-day allowance
+  const already = new Set(listExports(cr.id).map((e) => e.network));
+  return { ok: true, userId, cr, ids, opts, already };
+}
+
+/** Pack every requested network (sequentially, so progress is meaningful), persist, charge quota. */
+export async function executeExport(
+  prep: Extract<PreparedExport, { ok: true }>,
+  onProgress?: (done: number, total: number, network: string | null) => void,
+) {
+  const source = await loadFromZip(prep.cr.source_zip, prep.cr.entry);
+  const results: PackResult[] = [];
+  for (let i = 0; i < prep.ids.length; i++) {
+    const id = prep.ids[i]!;
+    onProgress?.(i, prep.ids.length, id);
+    const r = await pack(source, getNetwork(id), prep.opts);
+    upsertExport(prep.cr.id, r);
+    results.push(r);
+  }
+  for (const id of prep.ids) if (!prep.already.has(id)) addExportUsage(prep.userId, id);
+  onProgress?.(prep.ids.length, prep.ids.length, null);
+  return results.map(packView);
+}
+
+export interface ExportJobPayload extends ExportBody {
+  creativeId: string;
+}
+
+/** Worker handler for kind "export" — re-runs the gates, then packs with progress. */
+registerJobHandler("export", async (job, progress) => {
+  const p = JSON.parse(job.payload_json) as ExportJobPayload;
+  const prep = prepareExport(job.user_id, p.creativeId, p);
+  if (!prep.ok) throw new JobError(String(prep.body.error ?? "Export rejected"), typeof prep.body.code === "string" ? prep.body.code : undefined);
+  progress(0, "Loading source…");
+  const exported = await executeExport(prep, (done, total, net) => {
+    const pct = total ? Math.round((done / total) * 100) : 100;
+    progress(pct, net ? `Packing ${networkName(net)} (${done + 1}/${total})` : "Finishing…");
+  });
+  return { id: prep.cr.id, exported };
+});
 
 function sanitize(s: string): string {
   return s.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "playable";
@@ -283,54 +383,32 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // export: build packages and persist them
-  app.post<{ Params: { id: string }; Body: { networks?: string[]; ctaUrl?: string; iosUrl?: string; androidUrl?: string } }>(
+  // export: build packages and persist them. Sync by default; `async: true` (or ?async=1) enqueues a
+  // background job and answers 202 { jobId } — poll GET /api/jobs/:id for progress and the result.
+  // The gates (404/403/400/402) are checked up-front either way so callers get an immediate answer.
+  app.post<{ Params: { id: string }; Querystring: { async?: string }; Body: ExportBody & { async?: boolean } }>(
     "/api/creatives/:id/export",
     authed,
     async (req, reply) => {
-      const cr = getCreativeOwned(req.params.id, req.user!.id);
-      if (!cr) return reply.code(404).send({ error: "not found" });
-
-      // publisher gate: the app owner's company domain must be verified (app-ads.txt / verify file)
-      // before anything ships to a network — the same gate the competitor applies.
-      const owner = getUserById(creativeOwnerId(cr.id) ?? req.user!.id);
-      if (!owner?.domain_verified) {
-        return reply.code(403).send({
-          error: "Verify your company domain before exporting: open the Domain page, add the token to app-ads.txt (or the verify file), then Check now.",
-          code: "domain-unverified",
-        });
-      }
-
       const body = req.body ?? {};
-      const concept = getConceptOwned(cr.concept_id, req.user!.id);
-      const customOrder = parseNetworkOrder(concept?.network_order);
-      const ids = body.networks && body.networks.length ? body.networks : (customOrder ?? [...PRIORITY_NETWORK_IDS]);
-      try {
-        ids.forEach(getNetwork);
-      } catch (e) {
-        return reply.code(400).send({ error: (e as Error).message });
+      const prep = prepareExport(req.user!.id, req.params.id, body);
+      if (!prep.ok) return reply.code(prep.status).send(prep.body);
+
+      const wantAsync = body.async === true || req.query?.async === "1" || req.query?.async === "true";
+      if (wantAsync) {
+        const payload: ExportJobPayload = {
+          creativeId: prep.cr.id,
+          networks: prep.ids,
+          ctaUrl: body.ctaUrl,
+          iosUrl: body.iosUrl,
+          androidUrl: body.androidUrl,
+        };
+        const job = enqueue(req.user!.id, "export", payload);
+        return reply.code(202).send({ jobId: job.id, status: job.status, statusUrl: `/api/jobs/${job.id}` });
       }
 
-      // plan gate: allowed networks + rolling-30-day quota
-      const gate = checkExport(req.user!.id, ids);
-      if (!gate.ok) return reply.code(402).send(gate);
-
-      const source = await loadFromZip(cr.source_zip, cr.entry);
-      const stored = JSON.parse(cr.options_json) as PackOptions;
-      const opts: PackOptions = {
-        name: stored.name,
-        ctaUrl: body.ctaUrl ?? stored.ctaUrl,
-        iosUrl: body.iosUrl ?? stored.iosUrl,
-        androidUrl: body.androidUrl ?? stored.androidUrl,
-        preloader: preloaderForExport(req.user!.id),
-      };
-      // only count a network toward quota the first time this creative exports it —
-      // re-exporting an unchanged creative must not keep burning the 30-day allowance
-      const already = new Set(listExports(cr.id).map((e) => e.network));
-      const results = await packAll(source, opts, ids);
-      for (const r of results) upsertExport(cr.id, r);
-      for (const id of ids) if (!already.has(id)) addExportUsage(req.user!.id, id);
-      return { id: cr.id, exported: results.map(packView) };
+      const exported = await executeExport(prep);
+      return { id: prep.cr.id, exported };
     },
   );
 
