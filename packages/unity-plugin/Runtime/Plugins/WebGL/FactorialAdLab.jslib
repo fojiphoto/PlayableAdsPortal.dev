@@ -34,22 +34,22 @@ mergeInto(LibraryManager.library, {
   PF_GetPlatform: function () {
     var p = "web";
     try { if (window.PF) p = window.PF.getPlatform(); } catch (e) {}
-    return _pf_str(p);
+    return pf_str(p);
   },
   PF_GetPreferredLanguage: function () {
     var l = "en-US";
     try { l = (window.PF && window.PF.getPreferredLanguage()) || navigator.language || l; } catch (e) {}
-    return _pf_str(l);
+    return pf_str(l);
   },
   PF_GetPreferredLanguagesJson: function () {
     var arr = ["en-US"];
     try { arr = window.PF ? window.PF.getPreferredLanguages() : (navigator.languages ? [].slice.call(navigator.languages) : [navigator.language || "en-US"]); } catch (e) {}
-    return _pf_str(JSON.stringify(arr));
+    return pf_str(JSON.stringify(arr));
   },
   PF_GetVarsJson: function () {
     var json = "{}";
     try { if (window.PF && window.PF.vars) json = JSON.stringify(window.PF.vars); } catch (e) {}
-    return _pf_str(json);
+    return pf_str(json);
   },
   // The shim's pause/resume (MRAID viewableChange, DAPI, …) → LifeCycle.OnPause/OnResume in C#.
   PF_RegisterLifecycle: function (namePtr) {
@@ -68,16 +68,16 @@ mergeInto(LibraryManager.library, {
     } catch (e) {}
   },
 
-  // helper: copy a JS string into the wasm heap for a `string` return (Unity frees it)
-  _pf_str: function (s) {
+  // helper: copy a JS string into the wasm heap for a `string` return (Unity frees it).
+  // `$` prefix = JS-only library symbol (not exported to wasm); referenced as pf_str() and via __deps.
+  $pf_str: function (s) {
     var size = lengthBytesUTF8(s) + 1;
     var buf = _malloc(size);
     stringToUTF8(s, buf, size);
     return buf;
   },
-  _pf_str__deps: [],
-  PF_GetPlatform__deps: ["_pf_str"],
-  PF_GetPreferredLanguage__deps: ["_pf_str"],
-  PF_GetPreferredLanguagesJson__deps: ["_pf_str"],
-  PF_GetVarsJson__deps: ["_pf_str"],
+  PF_GetPlatform__deps: ["$pf_str"],
+  PF_GetPreferredLanguage__deps: ["$pf_str"],
+  PF_GetPreferredLanguagesJson__deps: ["$pf_str"],
+  PF_GetVarsJson__deps: ["$pf_str"],
 });

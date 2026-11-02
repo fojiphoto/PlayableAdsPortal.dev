@@ -109,6 +109,14 @@ IL2CPP size-optimised, minimal template) → `compileUnityWebGL` → export → 
   engine-code stripping — reference them in a scene or add a `link.xml`; the Personal-licence splash
   cannot be disabled; `runInBackground` is forced on for playable builds so ad webviews never pause it;
   the plugin now has a headless CLI entry (`-executeMethod FactorialAdLab.Editor.WebGLCompileUploader.BuildFromCommandLine -adlabOut <dir>`).
+- **Runtime API + custom variables validated on a real build (2026-11-02):** the rewritten plugin
+  (`Playable`/`LifeCycle`/`Analytics`/`Variables`, jslib, `VariablesScanner`) compiles on 6000.2 with 0
+  errors; the scanner's manifest seeded the creative's schema (defaults read from the scene instance), a
+  dashboard edit (`tapsToWin 1`, `cubeColor blue`, `spinSpeed 999→360 clamped`, `hardMode true`) rode into
+  the export as `PF.vars` and the game applied it at scene load (blue cube, "1 taps, hard", one tap wins);
+  `GetPreferredLanguage` → `en-GB`, CTA → store URL, pause/resume/haptic bridge calls clean. It also caught
+  a jslib bug: a string-return helper registered as `_pf_str` is exposed by Emscripten as `__pf_str`, so
+  every string-returning bridge call threw at startup — fixed with the canonical `$pf_str` JS-only symbol.
 - The validation also caught a shipped regression: the runtime shim had a SyntaxError (an escaped regex
   lost its backslashes), so `window.PF` was undefined in every export since the analytics commit. Fixed in
   `ef4528d`; `shim-runtime.test.ts` now executes the generated shim in a sandbox.
