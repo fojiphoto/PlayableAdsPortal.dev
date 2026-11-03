@@ -1,16 +1,6 @@
-import type { NetworkSpec, PackOptions, PreloaderConfig } from "./types.js";
+import type { NetworkSpec, PackOptions } from "./types.js";
 import { buildRuntimeShim } from "./runtime-shim.js";
-
-/** A custom loading screen overlay (logo + spinner) that fades out when the playable loads. */
-function buildPreloader(p: PreloaderConfig): string {
-  const bg = p.bg || "#0b1220";
-  const logo = p.logoDataUri
-    ? `<img src="${p.logoDataUri}" alt="" style="max-width:42%;max-height:34%;object-fit:contain">`
-    : "";
-  // The shim is injected at the END of <body>, so it is not there yet when this runs: expose the hide
-  // function globally and let PF.hidePreloader / PF.setLoadingProgress(1) pick it up.
-  return `<div id="__pf_pl" style="position:fixed;inset:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;background:${bg};transition:opacity .45s ease">${logo}<div style="width:34px;height:34px;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:__pfspin .8s linear infinite"></div><div style="width:46%;max-width:220px;height:4px;border-radius:999px;background:rgba(255,255,255,.18);overflow:hidden"><i id="__pf_plbar" style="display:block;height:100%;width:0;background:#fff;border-radius:999px;transition:width .2s"></i></div><style>@keyframes __pfspin{to{transform:rotate(360deg)}}</style></div><script>(function(){var p=document.getElementById("__pf_pl");if(!p)return;var done=false;function hide(){if(done)return;done=true;p.style.opacity="0";setTimeout(function(){if(p&&p.parentNode)p.parentNode.removeChild(p);},600);}window.__pfHidePreloader=hide;window.addEventListener("load",function(){setTimeout(hide,700);});setTimeout(hide,3500);}());</script>`;
-}
+import { buildPreloader, hasPreloaderContent } from "./preloader.js";
 
 /** Insert raw HTML into <head> (after the opening tag), creating a head if none exists. */
 function ensureInHead(html: string, snippet: string): string {
@@ -47,7 +37,7 @@ export function injectRuntime(html: string, spec: NetworkSpec, opts: PackOptions
   }
 
   // custom preloader / splash — injected at the top of <body> so it covers the playable
-  if (opts.preloader && (opts.preloader.logoDataUri || opts.preloader.bg)) {
+  if (hasPreloaderContent(opts.preloader)) {
     const pl = buildPreloader(opts.preloader);
     if (/<body[^>]*>/i.test(out)) out = out.replace(/<body[^>]*>/i, (m) => `${m}\n${pl}`);
     else out = pl + out;

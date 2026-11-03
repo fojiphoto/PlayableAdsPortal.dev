@@ -116,10 +116,12 @@ Legend: **DONE** / **PARTIAL** / **MISSING**. Evidence is `file:line` or route.
 ### 1.9 Preloader / loading screen (Asset Kit)
 | Competitor feature | Status | Evidence / what's lacking |
 |---|---|---|
-| Custom preloader (logo + bg) in exports | DONE | `routes/preloader.ts`, `wrap.ts` |
-| `/kit/templates` | MISSING | One fixed layout |
-| `/kit/preview` (server-rendered) | PARTIAL | Client-side mock only |
-| Per-concept/app kit | PARTIAL | One global kit per user |
+| Custom preloader (logo + bg) in exports | DONE | Kits carry template, background, accent, tagline, % readout and a logo/splash image (PNG/JPEG/GIF/WebP/SVG ≤ 512 KB), inlined into every export (`packager/src/preloader.ts`, `wrap.ts`) |
+| `/kit/templates` | DONE | Six templates: Classic, Minimal, Pulse, Ring, Dots, Splash (`GET /api/kit/templates`). All pure inline HTML/CSS + one script, safe on no-network networks; colours/text/images validated and escaped |
+| `/kit/create` + kit library | DONE | Up to 25 kits per workspace: `GET/POST /api/kits` (alias `POST /api/kit/create`), `PATCH/DELETE /api/kits/:id`, `POST /api/kits/:id/duplicate`, `PUT /api/kits/default`; admins edit, members assign. Legacy `/api/preloader` maps onto the default kit; old preloaders migrate to a "Brand kit" at startup (`db.ts migratePreloaders`) |
+| `/kit/preview` (server-rendered) | DONE | `POST /api/kit/preview` (unsaved draft) and `GET /api/kits/:id/preview` render with the same packager code as exports, CSP-locked; the dashboard shows them in sandboxed frames (live preview + template gallery) |
+| Per-concept/app kit | DONE | `PATCH /api/apps/:id` / `/api/concepts/:id` `kitId` (kit id, `"none"`, or null to inherit); exports resolve concept → app → workspace default; concept detail reports the effective kit and its source |
+| Progress-aware loading | DONE (beyond competitor) | Kits expose `__pfPreloaderProgress`; once a game reports progress (`Playable.SetLoadingProgress` / Unity loader) the timed auto-hide is suspended until 100 % (20 s cap), so slow WebGL loads stay covered; a load error uncovers the game's message |
 
 ### 1.10 Domain verification (app-ads.txt gate)
 | Competitor feature | Status | Evidence / what's lacking |
@@ -202,7 +204,7 @@ landing; two extra networks; a capture-based Unity path that ships *something* w
 | 9 | ~~Rename/update endpoints; network-order~~ **DONE 2026-10-29** — `PATCH /api/apps/:id` (name/platform), `PATCH /api/concepts/:id` (name + Enterprise-gated `networkOrder`, validated, used as the default `/export` set), `PATCH /api/creatives/:id` (name + CTA/store URLs); sidebar rename UI | The advertised Enterprise feature now exists | done |
 | 10 | ~~Billing: subscription state, cancel/resume, sync~~ **DONE 2026-10-30** — `/billing/status` now carries `status`, `renewsAt`, `cancelAtPeriodEnd`, `hasSubscription` (stored from the webhook, items-level `current_period_end` for 2025+ API versions); `POST /billing/cancel` (cancel at period end, access continues), `/billing/resume`, `/billing/sync` (re-read from Stripe; handles missed webhooks); Plans page shows renews-on / cancels-on with Cancel/Resume/Sync + portal | Users can now see and control their subscription in-app | done |
 | 11 | ~~Runtime API completeness~~ **DONE 2026-10-30** — full `Playable` / `LifeCycle` / `Analytics` / `[AdLabField]`+`[AdLabFieldStep]` contract mirrored from the decompiled runtime, every call wired through the jslib to the shim (`PF` 0.4.0: vars/getVar, setLoadingProgress → preloader bar, languages, haptics, valued events, AppLovin challenge events, pause/resume → C# events); custom variables end to end (plugin scan → compile upload → creative schema/values → dashboard panel → `PF.vars` in exports → applied to fields at scene load); HTML5 playables use `PF.getVar` | Half-declared contract | done |
-| 12 | Preloader kit templates, per-concept kit, server preview | Template library | M |
+| 12 | ~~Preloader kit templates, per-concept kit, server preview~~ **DONE 2026-11-03** — six templates, a kit library per workspace, server-rendered preview, app/concept overrides with inheritance (see 1.9) | Template library | done |
 | 13 | Plugin distribution (download/version/self-update, licensing) | No way to ship/revoke the plugin | M |
 | 14 | ~~Support/feedback/contact/reminders~~ **DONE 2026-11-03** — support threads, bug reports, contact form, reminders and a platform admin role + console (see 1.15) | Ops tooling (17 endpoints) | done |
 | 15 | MRAID stub in preview; URL routing; Turnstile | UX/robustness | S each |

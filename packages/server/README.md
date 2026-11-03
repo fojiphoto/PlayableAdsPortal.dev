@@ -36,6 +36,12 @@ npm run test -w @forge/server
 | POST | `/api/contact` | public contact form (honeypot `website`, 5/h per IP; admins: `GET /api/admin/contact`, `POST /api/contact/:id/handled`) |
 | GET / PATCH / DELETE | `/api/admin/overview`, `/api/admin/users[/:id]`, `/api/admin/support/threads`, `/api/admin/jobs` | platform admin console (`users.is_admin`; `ADMIN_EMAILS` bootstrap) |
 | GET / POST | `/api/admin/reminders`, `…/logins`, `…/run` (`dryRun`), `…/send` | reminder emails |
+| GET | `/api/kit/templates` | preloader template library (public) |
+| GET / POST | `/api/kits` (alias `POST /api/kit/create`) | the workspace's preloader kits + default + app/concept assignments / create a kit (admin; JSON `name, template, bg, accent, text, showPercent, logoDataUri`) |
+| PATCH / DELETE / POST | `/api/kits/:id`, `/api/kits/:id/duplicate` | edit (`logoDataUri: null` removes the image) / delete / copy a kit (admin) |
+| PUT | `/api/kits/default` | `{ kitId \| null }` workspace default kit (admin) |
+| POST / GET | `/api/kit/preview`, `/api/kits/:id/preview?progress=` | server-rendered preview HTML of a draft (optional `kitId` for its saved image, `progress` 0–1) / of a saved kit |
+| PATCH | `/api/apps/:id`, `/api/concepts/:id` `{ kitId }` | pick a kit (`"none"` = no preloader, null = inherit; member) |
 | GET | `/api/analytics?days=30&preview=0` | in-playable funnel (impressions, engagement, CTA, CTR; by network / creative; custom events) + export usage |
 | GET | `/api/creatives/:id/analytics` | per-creative funnel |
 | PATCH | `/api/analytics/settings` | `{ enabled }` — embed beacons in future exports |

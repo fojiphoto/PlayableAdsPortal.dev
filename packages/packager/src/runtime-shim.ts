@@ -80,9 +80,10 @@ export function buildRuntimeShim(cfg: ShimConfig): string {
   var VARS = CFG.vars || {};
   function getVar(name, def){ return Object.prototype.hasOwnProperty.call(VARS, name) ? VARS[name] : def; }
 
-  // ── loading progress → the branded preloader's bar; 1 hides it ──
+  // ── loading progress → the branded preloader (kit templates expose __pfPreloaderProgress); 1 hides it ──
   function setLoadingProgress(p){
     var n = Math.max(0, Math.min(1, Number(p) || 0));
+    if (typeof window.__pfPreloaderProgress === "function") { try { window.__pfPreloaderProgress(n); } catch (e) {} return; }
     var bar = document.getElementById("__pf_plbar");
     if (bar) bar.style.width = (n * 100) + "%";
     if (n >= 1) hidePreloader();

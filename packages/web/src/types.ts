@@ -39,6 +39,8 @@ export interface App {
   id: string;
   name: string;
   platform?: string | null;
+  /** preloader kit override: kit id, "none", or null = workspace default */
+  kitId?: string | null;
   createdAt: string;
   conceptCount?: number;
 }
@@ -47,7 +49,17 @@ export interface Concept {
   id: string;
   name: string;
   appId: string;
+  /** preloader kit override: kit id, "none", or null = inherit from the app */
+  kitId?: string | null;
+  /** the kit this concept's exports actually get, and which level chose it */
+  preloader?: EffectiveKit;
   createdAt: string;
+}
+
+export interface EffectiveKit {
+  kitId: string | null;
+  kitName: string | null;
+  source: "concept" | "app" | "workspace" | null;
 }
 
 export interface CreativeRef {
@@ -199,10 +211,46 @@ export interface Analytics {
   };
 }
 
-export interface PreloaderSettings {
-  enabled: boolean;
+export type PreloaderTemplateId = "classic" | "minimal" | "pulse" | "ring" | "dots" | "splash";
+export interface PreloaderTemplate {
+  id: PreloaderTemplateId;
+  name: string;
+  description: string;
+  imageRole: "logo" | "background";
+}
+/** Editable fields of a preloader kit (logoDataUri: a data: URI to set, null to remove, absent to keep). */
+export interface KitDraft {
+  name: string;
+  template: PreloaderTemplateId;
   bg: string | null;
+  accent: string | null;
+  text: string;
+  showPercent: boolean;
+  logoDataUri?: string | null;
+}
+export interface Kit {
+  id: string;
+  name: string;
+  template: PreloaderTemplateId;
+  bg: string | null;
+  accent: string | null;
+  text: string | null;
+  showPercent: boolean;
   logoDataUri: string | null;
+  usedBy?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface KitsState {
+  kits: Kit[];
+  defaultKitId: string | null;
+  canEdit: boolean;
+  canAssign: boolean;
+  limit: number;
+  assignments: {
+    apps: { id: string; name: string; kitId: string | null }[];
+    concepts: { id: string; name: string; appId: string; kitId: string | null }[];
+  };
 }
 
 export interface DomainStatus {

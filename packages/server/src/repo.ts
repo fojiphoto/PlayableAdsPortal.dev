@@ -37,6 +37,8 @@ export interface AppRow {
   org_id: string | null;
   name: string;
   platform: string | null;
+  /** preloader kit override: a kit id, 'none' (no preloader), or null = the workspace default */
+  kit_id: string | null;
   created_at: string;
 }
 export interface ConceptRow {
@@ -44,6 +46,8 @@ export interface ConceptRow {
   app_id: string;
   name: string;
   network_order: string | null; // JSON array of network ids, or null = default order
+  /** preloader kit override: a kit id, 'none', or null = inherit from the app */
+  kit_id: string | null;
   created_at: string;
 }
 export interface CreativeRow {
@@ -212,7 +216,7 @@ export function exportByNetwork(userId: string): { network: string; n: number }[
 // ── apps ─────────────────────────────────────────────────────────────────────
 /** Create an app in a workspace (`userId` = creator, kept for attribution). */
 export function createApp(userId: string, orgId: string, name: string, platform?: string): AppRow {
-  const row: AppRow = { id: randomUUID(), user_id: userId, org_id: orgId, name, platform: platform ?? null, created_at: now() };
+  const row: AppRow = { id: randomUUID(), user_id: userId, org_id: orgId, name, platform: platform ?? null, kit_id: null, created_at: now() };
   getDb()
     .prepare("INSERT INTO apps (id, user_id, org_id, name, platform, created_at) VALUES (?, ?, ?, ?, ?, ?)")
     .run(row.id, row.user_id, row.org_id, row.name, row.platform, row.created_at);
@@ -243,7 +247,7 @@ export function deleteApp(id: string, userId: string): boolean {
 
 // ── concepts ─────────────────────────────────────────────────────────────────
 export function createConcept(appId: string, name: string): ConceptRow {
-  const row: ConceptRow = { id: randomUUID(), app_id: appId, name, network_order: null, created_at: now() };
+  const row: ConceptRow = { id: randomUUID(), app_id: appId, name, network_order: null, kit_id: null, created_at: now() };
   getDb()
     .prepare("INSERT INTO concepts (id, app_id, name, created_at) VALUES (?, ?, ?, ?)")
     .run(row.id, row.app_id, row.name, row.created_at);
@@ -389,6 +393,7 @@ export interface OrgRow {
   id: string;
   name: string;
   owner_user_id: string;
+  default_kit_id: string | null;
   created_at: string;
 }
 export interface OrgMemberView {
@@ -413,7 +418,7 @@ export const defaultOrgName = (email: string): string => `${email.split("@")[0] 
 
 /** Create a workspace owned by `ownerId` (also becomes their current workspace if they have none). */
 export function createOrg(ownerId: string, name: string): OrgRow {
-  const row: OrgRow = { id: randomUUID(), name, owner_user_id: ownerId, created_at: now() };
+  const row: OrgRow = { id: randomUUID(), name, owner_user_id: ownerId, default_kit_id: null, created_at: now() };
   const db = getDb();
   db.prepare("INSERT INTO orgs (id, name, owner_user_id, created_at) VALUES (?, ?, ?, ?)").run(row.id, row.name, row.owner_user_id, row.created_at);
   db.prepare("INSERT INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)").run(row.id, ownerId, now());
@@ -455,7 +460,7 @@ export function currentOrgFor(userId: string): { org: OrgRow; role: OrgRole } {
   const first = listUserOrgs(userId)[0];
   if (first) {
     getDb().prepare("UPDATE users SET current_org_id = ? WHERE id = ?").run(first.id, userId);
-    return { org: { id: first.id, name: first.name, owner_user_id: first.owner_user_id, created_at: first.created_at }, role: first.role };
+    return { org: getOrg(first.id)!, role: first.role };
   }
   const org = createOrg(userId, defaultOrgName(u.email));
   getDb().prepare("UPDATE users SET current_org_id = ? WHERE id = ?").run(org.id, userId);
@@ -522,33 +527,128 @@ export function markInviteAccepted(id: string): void {
   getDb().prepare("UPDATE org_invites SET accepted_at = ? WHERE id = ?").run(now(), id);
 }
 
-// ── preloader ──
-export interface PreloaderRow {
-  user_id: string;
+// ── preloader kits ───────────────────────────────────────────────────────────
+/** Sentinel for apps.kit_id / concepts.kit_id: explicitly no preloader. */
+export const NO_KIT = "none";
+export interface KitRow {
+  id: string;
+  org_id: string;
+  name: string;
+  template: string;
+  bg: string | null;
+  accent: string | null;
+  text: string | null;
+  show_percent: number;
   logo: Uint8Array | null;
   logo_mime: string | null;
-  bg: string | null;
-  enabled: number;
+  created_at: string;
   updated_at: string;
 }
-
-export function getPreloader(userId: string): PreloaderRow | undefined {
-  return getDb().prepare("SELECT * FROM preloaders WHERE user_id = ?").get(userId) as PreloaderRow | undefined;
+export interface KitFields {
+  name: string;
+  template: string;
+  bg: string | null;
+  accent: string | null;
+  text: string | null;
+  showPercent: boolean;
+  /** undefined = keep, null = remove */
+  logo?: Uint8Array | null;
+  logoMime?: string | null;
 }
 
-export function setPreloader(
-  userId: string,
-  args: { logo?: Uint8Array | null; logoMime?: string | null; bg: string | null; enabled: number },
-): void {
-  const existing = getPreloader(userId);
-  const logo = args.logo === undefined ? (existing?.logo ?? null) : args.logo;
-  const logoMime = args.logo === undefined ? (existing?.logo_mime ?? null) : (args.logoMime ?? null);
+export function listKits(orgId: string): KitRow[] {
+  return getDb().prepare("SELECT * FROM preloader_kits WHERE org_id = ? ORDER BY created_at").all(orgId) as unknown as KitRow[];
+}
+export function getKit(id: string, orgId: string): KitRow | undefined {
+  return getDb().prepare("SELECT * FROM preloader_kits WHERE id = ? AND org_id = ?").get(id, orgId) as KitRow | undefined;
+}
+export function createKit(orgId: string, f: KitFields): KitRow {
+  const id = randomUUID();
+  const t = now();
   getDb()
     .prepare(
-      `INSERT INTO preloaders (user_id, logo, logo_mime, bg, enabled, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET logo=excluded.logo, logo_mime=excluded.logo_mime, bg=excluded.bg, enabled=excluded.enabled, updated_at=excluded.updated_at`,
+      "INSERT INTO preloader_kits (id, org_id, name, template, bg, accent, text, show_percent, logo, logo_mime, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .run(userId, logo ? Buffer.from(logo) : null, logoMime, args.bg, args.enabled, now());
+    .run(id, orgId, f.name, f.template, f.bg, f.accent, f.text, f.showPercent ? 1 : 0, f.logo ? Buffer.from(f.logo) : null, f.logo ? (f.logoMime ?? null) : null, t, t);
+  return getKit(id, orgId)!;
+}
+export function updateKit(id: string, orgId: string, f: Partial<KitFields>): KitRow | undefined {
+  const k = getKit(id, orgId);
+  if (!k) return undefined;
+  const logo = f.logo === undefined ? k.logo : f.logo;
+  const mime = f.logo === undefined ? k.logo_mime : f.logo ? (f.logoMime ?? null) : null;
+  getDb()
+    .prepare(
+      "UPDATE preloader_kits SET name = ?, template = ?, bg = ?, accent = ?, text = ?, show_percent = ?, logo = ?, logo_mime = ?, updated_at = ? WHERE id = ?",
+    )
+    .run(
+      f.name ?? k.name,
+      f.template ?? k.template,
+      f.bg === undefined ? k.bg : f.bg,
+      f.accent === undefined ? k.accent : f.accent,
+      f.text === undefined ? k.text : f.text,
+      f.showPercent === undefined ? k.show_percent : f.showPercent ? 1 : 0,
+      logo ? Buffer.from(logo) : null,
+      mime,
+      now(),
+      id,
+    );
+  return getKit(id, orgId);
+}
+/** Delete a kit; anything that pointed at it falls back to inheriting (and the default is cleared). */
+export function deleteKit(id: string, orgId: string): boolean {
+  const db = getDb();
+  if (!getKit(id, orgId)) return false;
+  db.prepare("UPDATE orgs SET default_kit_id = NULL WHERE id = ? AND default_kit_id = ?").run(orgId, id);
+  db.prepare("UPDATE apps SET kit_id = NULL WHERE org_id = ? AND kit_id = ?").run(orgId, id);
+  db.prepare("UPDATE concepts SET kit_id = NULL WHERE kit_id = ? AND app_id IN (SELECT id FROM apps WHERE org_id = ?)").run(id, orgId);
+  return db.prepare("DELETE FROM preloader_kits WHERE id = ? AND org_id = ?").run(id, orgId).changes > 0;
+}
+export function setDefaultKit(orgId: string, kitId: string | null): void {
+  getDb().prepare("UPDATE orgs SET default_kit_id = ? WHERE id = ?").run(kitId, orgId);
+}
+export function setAppKit(appId: string, kitId: string | null): void {
+  getDb().prepare("UPDATE apps SET kit_id = ? WHERE id = ?").run(kitId, appId);
+}
+export function setConceptKit(conceptId: string, kitId: string | null): void {
+  getDb().prepare("UPDATE concepts SET kit_id = ? WHERE id = ?").run(kitId, conceptId);
+}
+/** Every app and concept of a workspace with its kit override, for the kit assignment table. */
+export function kitAssignments(orgId: string): {
+  apps: { id: string; name: string; kit_id: string | null }[];
+  concepts: { id: string; name: string; app_id: string; kit_id: string | null }[];
+} {
+  const db = getDb();
+  return {
+    apps: db.prepare("SELECT id, name, kit_id FROM apps WHERE org_id = ? ORDER BY created_at").all(orgId) as never,
+    concepts: db
+      .prepare("SELECT c.id, c.name, c.app_id, c.kit_id FROM concepts c JOIN apps a ON a.id = c.app_id WHERE a.org_id = ? ORDER BY c.created_at")
+      .all(orgId) as never,
+  };
+}
+
+export type KitSource = "concept" | "app" | "workspace";
+/**
+ * The kit an export of this concept uses: concept override, then app override, then workspace default.
+ * `kit: null` with a source means that level explicitly chose no preloader.
+ */
+export function resolveKit(conceptId: string): { kit: KitRow | null; source: KitSource | null } {
+  const db = getDb();
+  const row = db
+    .prepare(
+      "SELECT c.kit_id AS ck, a.kit_id AS ak, o.default_kit_id AS dk, a.org_id AS org FROM concepts c JOIN apps a ON a.id = c.app_id JOIN orgs o ON o.id = a.org_id WHERE c.id = ?",
+    )
+    .get(conceptId) as { ck: string | null; ak: string | null; dk: string | null; org: string } | undefined;
+  if (!row) return { kit: null, source: null };
+  const [id, source]: [string | null, KitSource | null] = row.ck
+    ? [row.ck, "concept"]
+    : row.ak
+      ? [row.ak, "app"]
+      : row.dk
+        ? [row.dk, "workspace"]
+        : [null, null];
+  if (!id || id === NO_KIT) return { kit: null, source };
+  return { kit: getKit(id, row.org) ?? null, source };
 }
 
 // ── jobs (async work queue: export today, capture/compiler later) ─────────────

@@ -24,7 +24,10 @@ import type {
   AdminContact,
   AdminJob,
   Analytics,
-  PreloaderSettings,
+  PreloaderTemplate,
+  Kit,
+  KitDraft,
+  KitsState,
   DomainStatus,
   Job,
 } from "./types";
@@ -143,23 +146,38 @@ export const getAnalytics = (days = 30, includePreview = false) =>
   getJson<Analytics>(`/analytics?days=${days}${includePreview ? "&preview=1" : ""}`);
 export const setAnalyticsTracking = (enabled: boolean) => patchJson<{ enabled: boolean }>("/analytics/settings", { enabled });
 
-// ── preloader ──
-export const getPreloader = () => getJson<PreloaderSettings>("/preloader");
-export async function savePreloader(fields: {
-  enabled: boolean;
-  bg?: string;
-  logo?: File | null;
-  removeLogo?: boolean;
-}): Promise<PreloaderSettings> {
-  const fd = new FormData();
-  fd.append("enabled", fields.enabled ? "1" : "0");
-  if (fields.bg) fd.append("bg", fields.bg);
-  if (fields.logo) fd.append("logo", fields.logo);
-  if (fields.removeLogo) fd.append("removeLogo", "1");
-  const res = await fetch(`${base}/preloader`, { method: "POST", headers: authHeaders(), body: fd });
+// ── preloader kits ──
+export const listKitTemplates = () => getJson<PreloaderTemplate[]>("/kit/templates");
+export const getKits = () => getJson<KitsState>("/kits");
+export const createKit = (d: KitDraft) => postJson<Kit>("/kits", d);
+export const updateKit = (id: string, d: Partial<KitDraft>) => patchJson<Kit>(`/kits/${id}`, d);
+export const duplicateKit = (id: string) => postJson<Kit>(`/kits/${id}/duplicate`, {});
+export const deleteKit = (id: string) => delJson<{ deleted: true }>(`/kits/${id}`);
+export async function setDefaultKit(kitId: string | null): Promise<{ defaultKitId: string | null }> {
+  const res = await fetch(`${base}/kits/default`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ kitId }),
+  });
   if (!res.ok) return toError(res);
   return res.json();
 }
+/**
+ * Server-rendered preview HTML (the same code exports use) for an unsaved draft. `kitId` reuses that
+ * kit's saved image when the draft doesn't carry one; `progress` freezes the bar (thumbnails).
+ */
+export async function previewKitHtml(d: Partial<KitDraft>, opts: { kitId?: string | null; progress?: number } = {}): Promise<string> {
+  const res = await fetch(`${base}/kit/preview`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ...d, kitId: opts.kitId ?? undefined, progress: opts.progress }),
+  });
+  if (!res.ok) return toError(res);
+  return res.text();
+}
+/** Pick the preloader kit for an app / concept: a kit id, "none", or null to inherit. */
+export const setAppKit = (appId: string, kitId: string | null) => patchJson<App>(`/apps/${appId}`, { kitId });
+export const setConceptKit = (conceptId: string, kitId: string | null) => patchJson<Concept>(`/concepts/${conceptId}`, { kitId });
 
 // ── domain verification ──
 export const getDomain = () => getJson<DomainStatus>("/domain");

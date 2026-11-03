@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { getConcept, getCreative, exportCreativeAsync, downloadAllUrl, previewUrl } from "../api";
-import type { CreativeRef, Job, Network, PackResultView, VariableDef, VariableValues } from "../types";
+import { getConcept, getCreative, exportCreativeAsync, downloadAllUrl, previewUrl, getKits, setConceptKit } from "../api";
+import type { CreativeRef, EffectiveKit, Job, Kit, Network, PackResultView, VariableDef, VariableValues } from "../types";
 import { VariablesPanel } from "./VariablesPanel";
 import { UploadForm } from "./UploadForm";
 import { ResultCard } from "./ResultCard";
@@ -30,6 +30,10 @@ export function Workspace({
   const [variables, setVariables] = useState<VariableValues>({});
   const [variableSchema, setVariableSchema] = useState<VariableDef[]>([]);
   const [err, setErr] = useState<string | null>(null);
+  // preloader kit for this concept: its own override + what exports actually get
+  const [kitId, setKitId] = useState<string | null>(null);
+  const [effective, setEffective] = useState<EffectiveKit | null>(null);
+  const [kits, setKits] = useState<Kit[]>([]);
 
   // default-select the first 6 (priority) networks once loaded
   useEffect(() => {
@@ -46,11 +50,28 @@ export function Workspace({
     getConcept(conceptId)
       .then((c) => {
         setCreatives(c.creatives);
+        setKitId(c.kitId ?? null);
+        setEffective(c.preloader ?? null);
         if (c.creatives[0]) void selectCreative(c.creatives[0]);
       })
       .catch((e) => setErr((e as Error).message));
+    getKits()
+      .then((s) => setKits(s.kits))
+      .catch(() => setKits([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conceptId]);
+
+  async function changeKit(v: string | null) {
+    setErr(null);
+    try {
+      const c = await setConceptKit(conceptId, v);
+      setKitId(c.kitId ?? null);
+      setEffective(c.preloader ?? null);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
+  const sourceLabel = { concept: "this concept", app: "the app", workspace: "workspace default" } as const;
 
   async function selectCreative(ref: CreativeRef) {
     setActiveId(ref.id);
@@ -182,11 +203,30 @@ export function Workspace({
               ))}
             </div>
 
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+              <span>Preloader</span>
+              <select
+                value={kitId ?? ""}
+                disabled={readOnly}
+                onChange={(e) => void changeKit(e.target.value === "" ? null : e.target.value)}
+                className="rounded-md border border-[#1f6b4a] bg-[#06281c] px-2 py-1 text-xs text-slate-100 outline-none focus:border-amber-500 disabled:opacity-60"
+              >
+                <option value="">{kitId === null ? `Inherit: ${effective?.kitName ?? "no preloader"}` : "Inherit from app / workspace"}</option>
+                {kits.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.name}
+                  </option>
+                ))}
+                <option value="none">No preloader</option>
+              </select>
+              {effective?.source && effective.kitName && kitId === null && <span>from {sourceLabel[effective.source]}</span>}
+            </div>
+
             <button
               onClick={() => void doExport()}
               disabled={busy || selected.size === 0 || readOnly}
               title={readOnly ? "Viewers cannot export" : undefined}
-              className="mt-4 w-full rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40"
+              className="mt-3 w-full rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40"
             >
               {busy ? (job?.status === "queued" ? "Queued…" : "Exporting…") : `Export ${selected.size} network${selected.size === 1 ? "" : "s"}`}
             </button>

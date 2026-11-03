@@ -78,12 +78,22 @@ export interface PlayableSource {
   files: Record<string, Uint8Array>;
 }
 
-/** A custom loading screen shown over the playable while it loads. */
+export type PreloaderTemplateId = "classic" | "minimal" | "pulse" | "ring" | "dots" | "splash";
+
+/** A custom loading screen (a "preloader kit") shown over the playable while it loads. */
 export interface PreloaderConfig {
+  /** layout from the template library (see PRELOADER_TEMPLATES); default "classic" */
+  template?: PreloaderTemplateId;
   /** logo/splash image as a data: URI (inlined) */
   logoDataUri?: string;
-  /** background color, e.g. "#0b1220" */
+  /** background colour as hex, e.g. "#0b1220" */
   bg?: string;
+  /** bar / spinner / ring colour as hex; defaults to a contrast colour for bg */
+  accent?: string;
+  /** short tagline under the progress, e.g. "Loading your adventure…" (max 60 chars) */
+  text?: string;
+  /** show a 0–100 % readout */
+  showPercent?: boolean;
 }
 
 /** Click-through configuration for the CTA / store-open. */

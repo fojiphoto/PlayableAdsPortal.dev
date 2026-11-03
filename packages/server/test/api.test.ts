@@ -1439,3 +1439,193 @@ describe("organizations / workspaces / roles", () => {
     expect((await ws(owner)).length).toBe(1);
   });
 });
+
+describe("preloader kits (templates, per-app/concept kits, server preview)", () => {
+  const PNG = "data:image/png;base64," + Buffer.from("fake-png-bytes").toString("base64");
+  const kits = async (token: string) => (await app.inject({ method: "GET", url: "/api/kits", headers: bearer(token) })).json();
+  const mkKit = (token: string, body: Record<string, unknown>) => app.inject({ method: "POST", url: "/api/kits", headers: bearer(token), payload: body });
+  async function setup(email: string) {
+    const token = await signup(email);
+    verifyDomain(email);
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Kit App" } })).json().id as string;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "Kit Concept" } })).json().id as string;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "sample.zip", contentType: "application/zip" });
+    const up = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
+    return { token, appId, conceptId, creativeId: up.json().id as string };
+  }
+  /** Export to AppLovin and return the shipped HTML. */
+  async function exportedHtml(token: string, creativeId: string): Promise<string> {
+    const r = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["applovin"] } });
+    expect(r.statusCode).toBe(200);
+    return (await app.inject({ method: "GET", url: `/api/creatives/${creativeId}/preview/applovin` })).body;
+  }
+
+  it("lists the template library publicly", async () => {
+    const t = (await app.inject({ method: "GET", url: "/api/kit/templates" })).json();
+    expect(t.map((x: { id: string }) => x.id)).toEqual(["classic", "minimal", "pulse", "ring", "dots", "splash"]);
+    expect(t.find((x: { id: string }) => x.id === "splash").imageRole).toBe("background");
+  });
+
+  it("creates, validates, edits, duplicates and deletes kits; the first kit becomes the default", async () => {
+    const { token } = await setup("kits-crud@factorialstudio.com");
+    expect(await kits(token)).toMatchObject({ kits: [], defaultKitId: null, canEdit: true, canAssign: true });
+
+    const bad: [Record<string, unknown>, RegExp][] = [
+      [{ name: "x", template: "bogus" }, /unknown template/],
+      [{ name: "x", bg: "red; background:url(x)" }, /hex colour/],
+      [{ name: "x", text: "y".repeat(61) }, /at most 60/],
+      [{ name: "x", logoDataUri: "data:text/html;base64,PGI+" }, /PNG, JPEG/],
+      [{ name: "x", logoDataUri: "data:image/png;base64," + Buffer.alloc(600 * 1024).toString("base64") }, /512 KB/],
+      [{ name: "  " }, /name is required/],
+    ];
+    for (const [body, msg] of bad) {
+      const r = await mkKit(token, body);
+      expect(r.statusCode).toBe(400);
+      expect(r.json().error).toMatch(msg);
+    }
+
+    const a = await mkKit(token, { name: "Brand", template: "ring", bg: "#FF8800", accent: "#112233", text: "Get ready!", showPercent: true, logoDataUri: PNG });
+    expect(a.statusCode).toBe(201);
+    expect(a.json()).toMatchObject({ name: "Brand", template: "ring", bg: "#ff8800", accent: "#112233", text: "Get ready!", showPercent: true, logoDataUri: PNG });
+    const b = (await mkKit(token, { name: "Holiday", template: "splash" })).json();
+    let s = await kits(token);
+    expect(s.defaultKitId).toBe(a.json().id); // first kit only
+    expect(s.kits.map((k: { name: string }) => k.name)).toEqual(["Brand", "Holiday"]);
+
+    // partial edit keeps the image; logoDataUri null removes it
+    const e1 = (await app.inject({ method: "PATCH", url: `/api/kits/${a.json().id}`, headers: bearer(token), payload: { text: "Almost there" } })).json();
+    expect(e1).toMatchObject({ text: "Almost there", template: "ring", logoDataUri: PNG });
+    const e2 = (await app.inject({ method: "PATCH", url: `/api/kits/${a.json().id}`, headers: bearer(token), payload: { logoDataUri: null, accent: null } })).json();
+    expect(e2).toMatchObject({ logoDataUri: null, accent: null, bg: "#ff8800" });
+
+    const dup = await app.inject({ method: "POST", url: `/api/kits/${b.id}/duplicate`, headers: bearer(token) });
+    expect(dup.json()).toMatchObject({ name: "Holiday copy", template: "splash" });
+    // competitor-compatible alias
+    expect((await app.inject({ method: "POST", url: "/api/kit/create", headers: bearer(token), payload: { name: "Alias" } })).statusCode).toBe(201);
+
+    // deleting the default clears it
+    expect((await app.inject({ method: "DELETE", url: `/api/kits/${a.json().id}`, headers: bearer(token) })).json()).toEqual({ deleted: true });
+    s = await kits(token);
+    expect(s.defaultKitId).toBeNull();
+    expect(s.kits).toHaveLength(3);
+    // a kit id from somebody else's workspace is invisible
+    const other = await signup("kits-other@factorialstudio.com");
+    expect((await app.inject({ method: "PATCH", url: `/api/kits/${b.id}`, headers: bearer(other), payload: { name: "mine" } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PUT", url: "/api/kits/default", headers: bearer(other), payload: { kitId: b.id } })).statusCode).toBe(400);
+  });
+
+  it("server preview renders the same markup exports ship, locked down, with the saved image reused by kitId", async () => {
+    const { token } = await setup("kits-preview@factorialstudio.com");
+    const k = (await mkKit(token, { name: "P", template: "pulse", bg: "#123456", logoDataUri: PNG })).json();
+    const draft = await app.inject({
+      method: "POST",
+      url: "/api/kit/preview",
+      headers: bearer(token),
+      payload: { template: "ring", bg: "#abcdef", text: "<script>alert(1)</script>", kitId: k.id, progress: 0.5 },
+    });
+    expect(draft.statusCode).toBe(200);
+    expect(draft.headers["content-type"]).toMatch(/text\/html/);
+    expect(draft.headers["content-security-policy"]).toContain("default-src 'none'");
+    expect(draft.body).toContain('data-template="ring"');
+    expect(draft.body).toContain("#abcdef");
+    expect(draft.body).toContain(PNG); // saved image of kitId
+    expect(draft.body).toContain("__pfPreloaderStay=true");
+    expect(draft.body).not.toContain("<script>alert(1)");
+    expect(draft.body).toContain("&lt;script&gt;alert(1)");
+    // explicit null drops the saved image from the draft
+    const noImg = await app.inject({ method: "POST", url: "/api/kit/preview", headers: bearer(token), payload: { kitId: k.id, logoDataUri: null } });
+    expect(noImg.body).not.toContain(PNG);
+    const saved = await app.inject({ method: "GET", url: `/api/kits/${k.id}/preview`, headers: bearer(token) });
+    expect(saved.body).toContain('data-template="pulse"');
+    expect((await app.inject({ method: "POST", url: "/api/kit/preview", payload: {} })).statusCode).toBe(401);
+  });
+
+  it("exports resolve concept, then app, then workspace default; 'none' opts out; deleting a kit falls back", async () => {
+    const { token, appId, conceptId, creativeId } = await setup("kits-resolve@factorialstudio.com");
+    expect(await exportedHtml(token, creativeId)).not.toContain('id="__pf_pl"'); // no kits yet
+
+    const brand = (await mkKit(token, { name: "Brand", template: "classic", bg: "#101010" })).json();
+    const promo = (await mkKit(token, { name: "Promo", template: "dots", bg: "#202020", text: "Promo time" })).json();
+    let html = await exportedHtml(token, creativeId);
+    expect(html).toContain('data-template="classic"');
+    expect(html).toContain("#101010");
+    let c = (await app.inject({ method: "GET", url: `/api/concepts/${conceptId}`, headers: bearer(token) })).json();
+    expect(c.preloader).toEqual({ kitId: brand.id, kitName: "Brand", source: "workspace" });
+
+    // the app picks Promo
+    const pa = await app.inject({ method: "PATCH", url: `/api/apps/${appId}`, headers: bearer(token), payload: { kitId: promo.id } });
+    expect(pa.json().kitId).toBe(promo.id);
+    html = await exportedHtml(token, creativeId);
+    expect(html).toContain('data-template="dots"');
+    expect(html).toContain("Promo time");
+
+    // the concept opts out entirely
+    const pc = (await app.inject({ method: "PATCH", url: `/api/concepts/${conceptId}`, headers: bearer(token), payload: { kitId: "none" } })).json();
+    expect(pc).toMatchObject({ kitId: "none", preloader: { kitId: null, source: "concept" } });
+    expect(await exportedHtml(token, creativeId)).not.toContain('id="__pf_pl"');
+
+    // back to inheriting; then deleting the app's kit falls back to the workspace default
+    await app.inject({ method: "PATCH", url: `/api/concepts/${conceptId}`, headers: bearer(token), payload: { kitId: null } });
+    await app.inject({ method: "DELETE", url: `/api/kits/${promo.id}`, headers: bearer(token) });
+    c = (await app.inject({ method: "GET", url: `/api/concepts/${conceptId}`, headers: bearer(token) })).json();
+    expect(c.preloader).toMatchObject({ kitName: "Brand", source: "workspace" });
+    expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(token) })).json().kitId).toBeNull();
+
+    // bad references are rejected
+    expect((await app.inject({ method: "PATCH", url: `/api/concepts/${conceptId}`, headers: bearer(token), payload: { kitId: "nope" } })).statusCode).toBe(400);
+    const s = await kits(token);
+    expect(s.assignments.concepts).toEqual([{ id: conceptId, name: "Kit Concept", appId, kitId: null }]);
+  });
+
+  it("roles: admins edit kits, members assign them, viewers only look", async () => {
+    const { token: owner, conceptId } = await setup("kits-owner@factorialstudio.com");
+    const k = (await mkKit(owner, { name: "Brand" })).json();
+    const join = async (email: string, role: string) => {
+      await app.inject({ method: "POST", url: "/api/orgs/current/invites", headers: bearer(owner), payload: { email, role } });
+      const m = [...outbox].reverse().find((x) => x.to === email && x.html.includes("?invite="))!;
+      const t = await signup(email);
+      await app.inject({ method: "POST", url: "/api/invites/accept", headers: bearer(t), payload: { token: m.html.match(/[?&]invite=([a-f0-9]+)/)![1] } });
+      return t;
+    };
+    const member = await join("kits-member@factorialstudio.com", "member");
+    const viewer = await join("kits-viewer@factorialstudio.com", "viewer");
+
+    expect(await kits(member)).toMatchObject({ canEdit: false, canAssign: true, defaultKitId: k.id });
+    expect((await mkKit(member, { name: "Nope" })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PATCH", url: `/api/kits/${k.id}`, headers: bearer(member), payload: { name: "x" } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PUT", url: "/api/kits/default", headers: bearer(member), payload: { kitId: null } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "PATCH", url: `/api/concepts/${conceptId}`, headers: bearer(member), payload: { kitId: "none" } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "PATCH", url: `/api/concepts/${conceptId}`, headers: bearer(viewer), payload: { kitId: null } })).statusCode).toBe(403);
+    expect(await kits(viewer)).toMatchObject({ canEdit: false, canAssign: false });
+  });
+
+  it("legacy /api/preloader maps onto the default kit, and old preloader rows migrate into kits", async () => {
+    const token = await signup("kits-legacy@factorialstudio.com");
+    const form = new FormData();
+    form.append("logo", Buffer.from("tiny"), { filename: "l.png", contentType: "image/png" });
+    form.append("bg", "#334455");
+    form.append("enabled", "1");
+    const r = await app.inject({ method: "POST", url: "/api/preloader", headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
+    expect(r.json()).toMatchObject({ enabled: true, bg: "#334455" });
+    let s = await kits(token);
+    expect(s.kits).toHaveLength(1);
+    expect(s.defaultKitId).toBe(s.kits[0].id);
+
+    // a database from before kits: one enabled legacy row becomes a "Brand kit" that is the workspace default
+    const u = getUserByEmail("kits-legacy@factorialstudio.com")!;
+    const { getDb, migratePreloaders } = await import("../src/db.js");
+    const db = getDb();
+    db.exec("DELETE FROM preloader_kits; UPDATE orgs SET default_kit_id = NULL");
+    db.prepare("INSERT INTO preloaders (user_id, logo, logo_mime, bg, enabled, updated_at) VALUES (?, ?, 'image/png', '#0a0b0c', 1, '2026-01-01T00:00:00.000Z')").run(u.id, Buffer.from("old-logo"));
+    migratePreloaders(db);
+    s = await kits(token);
+    expect(s.kits).toEqual([
+      expect.objectContaining({ name: "Brand kit", template: "classic", bg: "#0a0b0c", logoDataUri: "data:image/png;base64," + Buffer.from("old-logo").toString("base64") }),
+    ]);
+    expect(s.defaultKitId).toBe(s.kits[0].id);
+    migratePreloaders(db); // idempotent: the legacy row is gone
+    expect((await kits(token)).kits).toHaveLength(1);
+  });
+});

@@ -12,6 +12,8 @@ import {
   listApps,
   listConcepts,
   listCreatives,
+  setAppKit,
+  setConceptKit,
   updateApp,
   updateConcept,
   type AppRow,
@@ -20,6 +22,8 @@ import {
 } from "../repo.js";
 import { getPlan } from "../plans.js";
 import { billingOwnerId, needs, requireRole } from "../orgs.js";
+import { effectiveKitView } from "../preloader-config.js";
+import { checkKitRef } from "./preloader.js";
 
 /** Parse a stored network order; tolerate bad JSON. */
 export function parseNetworkOrder(raw: string | null | undefined): string[] | null {
@@ -36,6 +40,7 @@ const appView = (a: AppRow) => ({
   id: a.id,
   name: a.name,
   platform: a.platform,
+  kitId: a.kit_id,
   createdAt: a.created_at,
 });
 const conceptView = (c: ConceptRow) => ({
@@ -43,6 +48,7 @@ const conceptView = (c: ConceptRow) => ({
   name: c.name,
   appId: c.app_id,
   networkOrder: parseNetworkOrder(c.network_order),
+  kitId: c.kit_id,
   createdAt: c.created_at,
 });
 const creativeRef = (c: CreativeRow) => ({ id: c.id, name: c.name, entry: c.entry, createdAt: c.created_at });
@@ -69,14 +75,22 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // rename / re-platform
-  app.patch<{ Params: { id: string }; Body: { name?: string; platform?: string | null } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; platform?: string | null; kitId?: string | null } }>(
     "/api/apps/:id",
     needs("member"),
     async (req, reply) => {
       const name = req.body?.name?.trim();
       if (req.body?.name !== undefined && !name) return reply.code(400).send({ error: "name cannot be empty" });
+      // preloader kit for the whole app (null = workspace default, "none" = no preloader)
+      let kit: string | null | undefined;
+      if (req.body?.kitId !== undefined) {
+        const r = checkKitRef(req.body.kitId, req.workspace!.org.id);
+        if (!r.ok) return reply.code(400).send({ error: r.error });
+        kit = r.value;
+      }
       if (!updateApp(req.params.id, req.user!.id, { name, platform: req.body?.platform }))
         return reply.code(404).send({ error: "not found" });
+      if (kit !== undefined) setAppKit(req.params.id, kit);
       return appView(getAppOwned(req.params.id, req.user!.id)!);
     },
   );
@@ -109,11 +123,11 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string } }>("/api/concepts/:id", authed, async (req, reply) => {
     const c = getConceptOwned(req.params.id, req.user!.id);
     if (!c) return reply.code(404).send({ error: "not found" });
-    return { ...conceptView(c), creatives: listCreatives(c.id).map(creativeRef) };
+    return { ...conceptView(c), preloader: effectiveKitView(c.id), creatives: listCreatives(c.id).map(creativeRef) };
   });
 
   // rename, and (Enterprise) set a custom export network order used when none is passed to /export
-  app.patch<{ Params: { id: string }; Body: { name?: string; networkOrder?: string[] | null } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; networkOrder?: string[] | null; kitId?: string | null } }>(
     "/api/concepts/:id",
     needs("member"),
     async (req, reply) => {
@@ -144,8 +158,14 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
           networkOrder = [...new Set(req.body.networkOrder)];
         }
       }
+      // preloader kit for this concept (null = inherit from the app / workspace, "none" = no preloader)
+      if (req.body?.kitId !== undefined) {
+        const r = checkKitRef(req.body.kitId, req.workspace!.org.id);
+        if (!r.ok) return reply.code(400).send({ error: r.error });
+        setConceptKit(c.id, r.value);
+      }
       updateConcept(c.id, req.user!.id, { name, networkOrder });
-      return conceptView(getConceptOwned(c.id, req.user!.id)!);
+      return { ...conceptView(getConceptOwned(c.id, req.user!.id)!), preloader: effectiveKitView(c.id) };
     },
   );
 

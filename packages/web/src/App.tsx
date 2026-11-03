@@ -90,10 +90,13 @@ export default function App() {
     }
   }, []);
 
+  // Keyed on the user's id, not the object: refreshWorkspace itself calls setUser with a fresh object,
+  // so depending on `user` re-ran this forever (an endless /api/me + /api/apps loop that also kept
+  // clearing the selected app).
   useEffect(() => {
     if (user) void refreshWorkspace();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user?.id]);
 
   // invite link: signed out → tell the auth screen who to sign in as; signed in → accept
   useEffect(() => {

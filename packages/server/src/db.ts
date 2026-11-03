@@ -151,6 +151,24 @@ CREATE TABLE IF NOT EXISTS preloaders (
   updated_at TEXT NOT NULL
 );
 
+-- preloader kits (gap #12): a template library per workspace; the workspace default applies to every
+-- export unless an app or concept picks another kit (apps.kit_id / concepts.kit_id; 'none' = no preloader)
+CREATE TABLE IF NOT EXISTS preloader_kits (
+  id           TEXT PRIMARY KEY,
+  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  template     TEXT NOT NULL DEFAULT 'classic',
+  bg           TEXT,
+  accent       TEXT,
+  text         TEXT,
+  show_percent INTEGER NOT NULL DEFAULT 0,
+  logo         BLOB,
+  logo_mime    TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_kits_org ON preloader_kits(org_id);
+
 CREATE TABLE IF NOT EXISTS apps (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -269,6 +287,9 @@ export function initDb(path: string = config.dbPath): DB {
     "ALTER TABLE events ADD COLUMN value REAL",
     "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN last_login_at TEXT",
+    "ALTER TABLE orgs ADD COLUMN default_kit_id TEXT",
+    "ALTER TABLE apps ADD COLUMN kit_id TEXT",
+    "ALTER TABLE concepts ADD COLUMN kit_id TEXT",
   ]) {
     try {
       db.exec(stmt);
@@ -277,6 +298,7 @@ export function initDb(path: string = config.dbPath): DB {
     }
   }
   migrateOrgs(db);
+  migratePreloaders(db);
   return db;
 }
 
@@ -308,6 +330,46 @@ export function migrateOrgs(db: DB): void {
      SELECT o.id, m.member_user_id, CASE WHEN m.role = 'admin' THEN 'admin' ELSE 'member' END, m.created_at
      FROM memberships m JOIN orgs o ON o.owner_user_id = m.owner_user_id`,
   );
+}
+
+/**
+ * Preloader migration (idempotent): the legacy single preloader per billing owner (`preloaders`) becomes
+ * a "Brand kit" in every workspace that user owns — the workspace default when it was enabled — and the
+ * legacy row is removed once copied, so it never re-runs.
+ */
+export function migratePreloaders(db: DB): void {
+  const rows = db.prepare("SELECT * FROM preloaders").all() as unknown as {
+    user_id: string;
+    logo: Uint8Array | null;
+    logo_mime: string | null;
+    bg: string | null;
+    enabled: number;
+  }[];
+  if (!rows.length) return;
+  const nowIso = new Date().toISOString();
+  const orgsOf = db.prepare("SELECT id FROM orgs WHERE owner_user_id = ?");
+  const ins = db.prepare(
+    "INSERT INTO preloader_kits (id, org_id, name, template, bg, logo, logo_mime, created_at, updated_at) VALUES (?, ?, 'Brand kit', 'classic', ?, ?, ?, ?, ?)",
+  );
+  const setDefault = db.prepare("UPDATE orgs SET default_kit_id = ? WHERE id = ? AND default_kit_id IS NULL");
+  const del = db.prepare("DELETE FROM preloaders WHERE user_id = ?");
+  db.exec("BEGIN");
+  try {
+    for (const r of rows) {
+      if (r.logo || r.bg) {
+        for (const o of orgsOf.all(r.user_id) as unknown as { id: string }[]) {
+          const id = randomUUID();
+          ins.run(id, o.id, r.bg, r.logo ? Buffer.from(r.logo) : null, r.logo_mime, nowIso, nowIso);
+          if (r.enabled) setDefault.run(id, o.id);
+        }
+      }
+      del.run(r.user_id);
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
 }
 
 export function getDb(): DB {

@@ -226,7 +226,7 @@ if(saCount){
   if(window.fetch){var of=window.fetch;window.fetch=function(u,o){return of.call(window,typeof u==="string"?mapUrl(u):u,o);};}
 }
 var canvas=document.getElementById("unity-canvas"),ov=document.getElementById("__ul"),bar=document.getElementById("__ulb"),err=document.getElementById("__err");
-function fail(msg){err.textContent=String(msg);err.style.display="block";}
+function fail(msg){err.textContent=String(msg);err.style.display="block";try{if(window.__pfHidePreloader)window.__pfHidePreloader();}catch(e){}}
 function fit(){canvas.style.width=window.innerWidth+"px";canvas.style.height=window.innerHeight+"px";}
 window.addEventListener("resize",fit);fit();
 var config={

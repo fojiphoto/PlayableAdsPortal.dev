@@ -21,7 +21,7 @@ import {
 import { enqueue, registerJobHandler, JobError } from "../jobs.js";
 import { parseNetworkOrder } from "./apps.js";
 import { checkExport } from "../plan-status.js";
-import { preloaderForExport } from "../preloader-config.js";
+import { preloaderForConcept } from "../preloader-config.js";
 import { publicBase } from "../site.js";
 import { needs } from "../orgs.js";
 import { mergeValues, normalizeSchema, type VariableDef } from "../variables.js";
@@ -124,7 +124,8 @@ export function prepareExport(userId: string, creativeId: string, body: ExportBo
     iosUrl: body.iosUrl ?? stored.iosUrl,
     androidUrl: body.androidUrl ?? stored.androidUrl,
     variables: stored.variables,
-    preloader: preloaderForExport(owner.id),
+    // the kit picked for this concept / its app / the workspace default
+    preloader: preloaderForConcept(cr.concept_id),
     analytics: analyticsBase && owner.analytics_enabled ? { endpoint: `${analyticsBase}/api/t`, creativeId: cr.id } : undefined,
   };
   // only count a network toward quota the first time this creative exports it —
