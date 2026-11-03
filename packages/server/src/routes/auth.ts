@@ -11,6 +11,8 @@ import {
   updatePassword,
   verifyEmailByHash,
   currentOrgFor,
+  setAdmin,
+  setLastLogin,
 } from "../repo.js";
 import { siteUrl } from "../site.js";
 import { billingOwnerId, workspaceView } from "../orgs.js";
@@ -32,8 +34,17 @@ const RESET_TTL_MS = 60 * 60 * 1000; // 1 h
 const VERIFY_TTL_MS = 48 * 60 * 60 * 1000; // 48 h
 
 
-function userView(u: { id: string; email: string; email_verified?: number }) {
-  return { id: u.id, email: u.email, emailVerified: !!u.email_verified };
+function userView(u: { id: string; email: string; email_verified?: number; is_admin?: number }) {
+  return { id: u.id, email: u.email, emailVerified: !!u.email_verified, isAdmin: !!u.is_admin };
+}
+
+/** ADMIN_EMAILS bootstrap: an address on the list becomes an admin the next time it signs in. */
+function bootstrapAdmin(u: { id: string; email: string; is_admin?: number }): boolean {
+  if (!u.is_admin && config.adminEmails.includes(u.email.toLowerCase())) {
+    setAdmin(u.id, true);
+    return true;
+  }
+  return !!u.is_admin;
 }
 
 /** Issue a fresh verification token and email the link. Never throws (signup must not fail on mail). */
@@ -99,14 +110,17 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       setTotpLastStep(u.id, step);
     }
     clearRateLimit(`login:${req.ip}:${email}`); // success resets the pair bucket
-    return { token: signToken(u), user: userView(u) };
+    setLastLogin(u.id);
+    const isAdmin = bootstrapAdmin(u);
+    return { token: signToken(u), user: userView({ ...u, is_admin: isAdmin ? 1 : 0 }) };
   });
 
   // plan/quota shown are the current workspace owner's (a member sees the org's plan, not their own)
   app.get("/api/me", authed, async (req) => {
     const u = getUserById(req.user!.id);
+    if (u) bootstrapAdmin(u);
     const ws = currentOrgFor(req.user!.id);
-    return { user: u ? userView(u) : req.user, workspace: workspaceView(ws, getUserById(ws.org.owner_user_id)?.email), ...planStatus(billingOwnerId(req.user!.id)) };
+    return { user: u ? userView(getUserById(u.id)!) : req.user, workspace: workspaceView(ws, getUserById(ws.org.owner_user_id)?.email), ...planStatus(billingOwnerId(req.user!.id)) };
   });
 
   // ── email verification ──

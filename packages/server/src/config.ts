@@ -23,6 +23,17 @@ export const config = {
   // stays in dev mode (plans switch instantly).
   /** absolute base URL for Checkout return links when the request Origin is missing */
   publicUrl: process.env.PUBLIC_URL ?? "",
+
+  // ── support / ops ──
+  /** where ticket, bug and contact-form notifications go */
+  supportEmail: process.env.SUPPORT_EMAIL ?? "contact@factorialstudio.com",
+  /** comma-separated emails that are platform admins (bootstrapped at login; admins can promote others) */
+  adminEmails: (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+  /** send reminder emails automatically once a day (admins can always run them by hand) */
+  remindersAuto: process.env.REMINDERS_AUTO === "1",
 };
 
 export const isDevSecret = config.jwtSecret === "dev-insecure-secret-change-me";

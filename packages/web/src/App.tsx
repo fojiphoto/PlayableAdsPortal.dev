@@ -1,7 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getToken, setToken, me, getNetworks, listApps, createApp, getApp, createConcept, getBillingStatus } from "./api";
 import { renameApp, renameConcept, verifyEmail, resendVerification } from "./api";
-import { listWorkspaces, switchWorkspace, createWorkspace, getInvite, acceptInvite } from "./api";
+import { listWorkspaces, switchWorkspace, createWorkspace, getInvite, acceptInvite, supportUnread } from "./api";
+import { Support } from "./components/Support";
+import { Admin } from "./components/Admin";
 import type { App as AppT, AuthUser, Concept, Network, PlanStatus, WorkspaceRef, WorkspaceListItem } from "./types";
 import { AuthScreen } from "./components/AuthScreen";
 import { Workspace } from "./components/Workspace";
@@ -25,7 +27,10 @@ export default function App() {
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<"landing" | "auth">("landing");
   const [status, setStatus] = useState<PlanStatus | null>(null);
-  const [page, setPage] = useState<"app" | "plans" | "settings" | "analytics" | "preloader" | "domain">("app");
+  const [page, setPage] = useState<"app" | "plans" | "settings" | "analytics" | "preloader" | "domain" | "support" | "admin">("app");
+  const [unread, setUnread] = useState(0);
+  const [deepThread, setDeepThread] = useState<string | null>(null);
+  const [adminTab, setAdminTab] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceRef | null>(null);
@@ -40,7 +45,19 @@ export default function App() {
     const verify = q.get("verify");
     const billing = q.get("billing");
     const invite = q.get("invite");
-    if (reset || verify || billing || invite) {
+    const support = q.get("support");
+    const adminQ = q.get("admin");
+    const threadQ = q.get("thread");
+    if (support) {
+      setDeepThread(support);
+      setPage("support");
+    }
+    if (adminQ) {
+      setAdminTab(adminQ);
+      setDeepThread(threadQ);
+      setPage("admin");
+    }
+    if (reset || verify || billing || invite || support || adminQ) {
       window.history.replaceState({}, "", window.location.pathname);
     }
     if (invite) setInviteToken(invite);
@@ -114,8 +131,15 @@ export default function App() {
       /* keep going with what we have */
     }
     listWorkspaces().then(setWorkspaces).catch(() => {});
+    refreshUnread();
     listApps().then(setApps).catch((e) => setErr((e as Error).message));
     getBillingStatus().then(setStatus).catch(() => {});
+  }
+
+  function refreshUnread() {
+    supportUnread()
+      .then((r) => setUnread(r.count))
+      .catch(() => {});
   }
 
   async function pickWorkspace(value: string) {
@@ -226,13 +250,13 @@ export default function App() {
   return (
     <div className="min-h-full">
       <header className="border-b border-[#1b5540]">
-        <div className="flex items-center justify-between px-6 py-3">
-          <button onClick={() => setPage("app")} className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 py-3">
+          <button onClick={() => setPage("app")} className="flex shrink-0 items-center gap-2">
             <img src="/logo.png" alt="Factorial" className="h-7 w-7 rounded-lg object-contain" />
-            <span className="font-semibold text-slate-100">Factorial AdLab</span>
+            <span className="whitespace-nowrap font-semibold text-slate-100">Factorial AdLab</span>
             <span className="rounded bg-[#123f2d] px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">Packager</span>
           </button>
-          <div className="flex items-center gap-2 text-sm text-slate-400">
+          <div className="flex flex-wrap items-center justify-end gap-2 text-sm text-slate-400">
             {status && (
               <button
                 onClick={() => setPage("plans")}
@@ -261,6 +285,21 @@ export default function App() {
               Domain
             </button>
             <button
+              onClick={() => setPage("support")}
+              className={`relative rounded-lg border px-3 py-1.5 ${page === "support" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
+            >
+              Support
+              {unread > 0 && <span className="absolute -right-1.5 -top-1.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-black">{unread}</span>}
+            </button>
+            {user.isAdmin && (
+              <button
+                onClick={() => setPage("admin")}
+                className={`rounded-lg border px-3 py-1.5 ${page === "admin" ? "border-amber-500 text-amber-200" : "border-amber-700/50 text-amber-300 hover:border-amber-500"}`}
+              >
+                Admin
+              </button>
+            )}
+            <button
               onClick={() => setPage("settings")}
               className={`rounded-lg border px-3 py-1.5 ${page === "settings" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
             >
@@ -281,7 +320,7 @@ export default function App() {
                 <option value="__new">＋ New workspace…</option>
               </select>
             )}
-            <span className="hidden sm:inline">{user.email}</span>
+            <span className="hidden max-w-[200px] truncate xl:inline" title={user.email}>{user.email}</span>
             <button onClick={logout} className="rounded-lg border border-[#1f6b4a] px-3 py-1.5 text-slate-300 hover:border-[#7cb342]">
               Sign out
             </button>
@@ -291,7 +330,7 @@ export default function App() {
 
       {page === "plans" ? (
         <main className="min-w-0 flex-1 p-6">
-          <Plans status={status} onChanged={setStatus} />
+          <Plans status={status} onChanged={setStatus} email={user.email} />
         </main>
       ) : page === "settings" ? (
         <main className="min-w-0 flex-1 p-6">
@@ -304,6 +343,14 @@ export default function App() {
       ) : page === "preloader" ? (
         <main className="min-w-0 flex-1 p-6">
           <Preloader />
+        </main>
+      ) : page === "support" ? (
+        <main className="min-w-0 flex-1 p-6">
+          <Support initialThreadId={deepThread} onUnreadChange={refreshUnread} />
+        </main>
+      ) : page === "admin" && user.isAdmin ? (
+        <main className="min-w-0 flex-1 p-6">
+          <Admin initialTab={adminTab} initialThreadId={deepThread} me={user.email} />
         </main>
       ) : page === "domain" ? (
         <main className="min-w-0 flex-1 p-6">

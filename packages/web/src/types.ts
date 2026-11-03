@@ -31,6 +31,8 @@ export interface AuthUser {
   id: string;
   email: string;
   emailVerified?: boolean;
+  /** platform admin (Admin console) */
+  isAdmin?: boolean;
 }
 
 export interface App {
@@ -251,5 +253,91 @@ export interface Job {
   attempts: number;
   createdAt: string;
   startedAt: string | null;
+  finishedAt: string | null;
+}
+
+// ── support / admin ──
+export interface SupportThread {
+  id: string;
+  subject: string;
+  status: "open" | "closed";
+  createdAt: string;
+  updatedAt: string;
+  unread: number;
+}
+export interface SupportMessage {
+  id: string;
+  authorId: string;
+  authorEmail: string | null;
+  fromSupport: boolean;
+  body: string;
+  createdAt: string;
+}
+export interface SupportThreadDetail extends SupportThread {
+  user?: { id: string; email: string | null };
+  orgId?: string;
+  messages: SupportMessage[];
+}
+export interface AdminOverview {
+  users: number;
+  usersThisWeek: number;
+  paidUsers: number;
+  workspaces: number;
+  apps: number;
+  creatives: number;
+  exports30d: number;
+  playsToday: number;
+  jobsFailed7d: number;
+  jobsQueued: number;
+  openThreads: number;
+  unreadThreads: number;
+  openBugs: number;
+  openContacts: number;
+}
+export interface AdminUser {
+  id: string;
+  email: string;
+  plan: string;
+  planName: string;
+  isAdmin: boolean;
+  emailVerified: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+  workspace: string | null;
+  exports30d: number;
+  creatives: number;
+}
+export interface AdminThread extends SupportThread {
+  userEmail: string | null;
+  workspace: string | null;
+  plan: string | null;
+}
+export interface AdminBug {
+  id: string;
+  title: string;
+  body: string;
+  page: string | null;
+  userEmail: string | null;
+  workspace: string | null;
+  handledAt: string | null;
+  createdAt: string;
+}
+export interface AdminContact {
+  id: string;
+  name: string;
+  email: string;
+  company: string | null;
+  message: string;
+  handledAt: string | null;
+  createdAt: string;
+}
+export interface AdminJob {
+  id: string;
+  kind: string;
+  status: string;
+  error: string | null;
+  attempts: number;
+  userEmail: string | null;
+  createdAt: string;
   finishedAt: string | null;
 }

@@ -23,6 +23,8 @@ export interface UserRow {
   email_verified: number;
   analytics_enabled: number;
   current_org_id: string | null;
+  is_admin: number;
+  last_login_at: string | null;
   email_verify_hash: string | null;
   email_verify_expires: string | null;
   plan_renews_at: string | null;
@@ -74,7 +76,7 @@ export function createUser(email: string, passwordHash: string): UserRow {
     totp_secret: null, totp_enabled: 0, totp_last_step: null, domain: null, domain_token: null, domain_verified: 0,
     stripe_customer_id: null, stripe_subscription_id: null, plan_status: null,
     email_verified: 0, email_verify_hash: null, email_verify_expires: null,
-    plan_renews_at: null, plan_cancel_at_period_end: 0, analytics_enabled: 1, current_org_id: null, created_at: now(),
+    plan_renews_at: null, plan_cancel_at_period_end: 0, analytics_enabled: 1, current_org_id: null, is_admin: 0, last_login_at: null, created_at: now(),
   };
   getDb()
     .prepare("INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)")
@@ -734,4 +736,211 @@ export function deleteUpload(id: string): void {
 /** Orphaned inputs (job never ran) are dropped after a day. */
 export function pruneUploads(olderThanIso: string): number {
   return Number(getDb().prepare("DELETE FROM uploads WHERE created_at < ?").run(olderThanIso).changes);
+}
+
+// ── admin / ops ───────────────────────────────────────────────────────────────
+export function setAdmin(id: string, admin: boolean): void {
+  getDb().prepare("UPDATE users SET is_admin = ? WHERE id = ?").run(admin ? 1 : 0, id);
+}
+export function setLastLogin(id: string): void {
+  getDb().prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(now(), id);
+}
+export function deleteUserAdmin(id: string): boolean {
+  const db = getDb();
+  // workspaces they own go with them (cascades to apps/creatives/exports/events)
+  db.prepare("DELETE FROM orgs WHERE owner_user_id = ?").run(id);
+  return db.prepare("DELETE FROM users WHERE id = ?").run(id).changes > 0;
+}
+export function adminStats() {
+  const db = getDb();
+  const one = (sql: string, ...p: unknown[]) => Number((db.prepare(sql).get(...(p as never[])) as { n: number }).n);
+  const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const monthAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  return {
+    users: one("SELECT COUNT(*) n FROM users"),
+    usersThisWeek: one("SELECT COUNT(*) n FROM users WHERE created_at >= ?", weekAgo),
+    paidUsers: one("SELECT COUNT(*) n FROM users WHERE plan NOT IN ('free')"),
+    workspaces: one("SELECT COUNT(*) n FROM orgs"),
+    apps: one("SELECT COUNT(*) n FROM apps"),
+    creatives: one("SELECT COUNT(*) n FROM creatives"),
+    exports30d: one("SELECT COUNT(*) n FROM export_usage WHERE created_at >= ?", monthAgo),
+    playsToday: one("SELECT COUNT(DISTINCT session) n FROM events WHERE event = 'impression' AND preview = 0 AND created_at >= ?", dayAgo),
+    jobsFailed7d: one("SELECT COUNT(*) n FROM jobs WHERE status = 'failed' AND created_at >= ?", weekAgo),
+    jobsQueued: one("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued','running')"),
+    openThreads: one("SELECT COUNT(*) n FROM support_threads WHERE status = 'open'"),
+    unreadThreads: one("SELECT COUNT(*) n FROM support_threads WHERE admin_unread > 0"),
+    openBugs: one("SELECT COUNT(*) n FROM feedback_bugs WHERE handled_at IS NULL"),
+    openContacts: one("SELECT COUNT(*) n FROM contact_messages WHERE handled_at IS NULL"),
+  };
+}
+export interface AdminUserRow extends UserRow {
+  org_name: string | null;
+  exports_30d: number;
+  creatives: number;
+}
+export function listUsersAdmin(q: string, limit = 50): AdminUserRow[] {
+  const monthAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  return getDb()
+    .prepare(
+      `SELECT u.*, o.name AS org_name,
+              (SELECT COUNT(*) FROM export_usage x WHERE x.user_id = u.id AND x.created_at >= ?) AS exports_30d,
+              (SELECT COUNT(*) FROM creatives cr JOIN concepts c ON c.id = cr.concept_id JOIN apps a ON a.id = c.app_id JOIN orgs oo ON oo.id = a.org_id WHERE oo.owner_user_id = u.id) AS creatives
+       FROM users u LEFT JOIN orgs o ON o.id = u.current_org_id
+       WHERE (? = '' OR u.email LIKE ?)
+       ORDER BY u.created_at DESC LIMIT ?`,
+    )
+    .all(monthAgo, q, `%${q}%`, limit) as unknown as AdminUserRow[];
+}
+export function recentLogins(limit = 50): UserRow[] {
+  return getDb().prepare("SELECT * FROM users WHERE last_login_at IS NOT NULL ORDER BY last_login_at DESC LIMIT ?").all(limit) as unknown as UserRow[];
+}
+export function listJobsAdmin(status: string | undefined, limit = 50): (JobRow & { user_email: string | null })[] {
+  return getDb()
+    .prepare(
+      `SELECT j.*, u.email AS user_email FROM jobs j LEFT JOIN users u ON u.id = j.user_id
+       WHERE (? IS NULL OR j.status = ?) ORDER BY j.created_at DESC LIMIT ?`,
+    )
+    .all(status ?? null, status ?? null, limit) as unknown as (JobRow & { user_email: string | null })[];
+}
+
+// ── support threads ──
+export interface ThreadRow {
+  id: string;
+  org_id: string;
+  user_id: string;
+  subject: string;
+  status: "open" | "closed";
+  user_unread: number;
+  admin_unread: number;
+  created_at: string;
+  updated_at: string;
+}
+export interface MessageRow {
+  id: string;
+  thread_id: string;
+  author_user_id: string;
+  is_admin: number;
+  body: string;
+  created_at: string;
+}
+export function createThread(orgId: string, userId: string, subject: string): ThreadRow {
+  const t = now();
+  const row: ThreadRow = { id: randomUUID(), org_id: orgId, user_id: userId, subject, status: "open", user_unread: 0, admin_unread: 0, created_at: t, updated_at: t };
+  getDb()
+    .prepare("INSERT INTO support_threads (id, org_id, user_id, subject, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'open', ?, ?)")
+    .run(row.id, orgId, userId, subject, t, t);
+  return row;
+}
+export function getThread(id: string): ThreadRow | undefined {
+  return getDb().prepare("SELECT * FROM support_threads WHERE id = ?").get(id) as ThreadRow | undefined;
+}
+export function addMessage(threadId: string, authorId: string, isAdmin: boolean, body: string): MessageRow {
+  const row: MessageRow = { id: randomUUID(), thread_id: threadId, author_user_id: authorId, is_admin: isAdmin ? 1 : 0, body, created_at: now() };
+  const db = getDb();
+  db.prepare("INSERT INTO support_messages (id, thread_id, author_user_id, is_admin, body, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(row.id, threadId, authorId, row.is_admin, body, row.created_at);
+  db.prepare(`UPDATE support_threads SET updated_at = ?, ${isAdmin ? "user_unread = user_unread + 1" : "admin_unread = admin_unread + 1"} WHERE id = ?`).run(row.created_at, threadId);
+  return row;
+}
+export function listMessages(threadId: string): MessageRow[] {
+  return getDb().prepare("SELECT * FROM support_messages WHERE thread_id = ? ORDER BY created_at").all(threadId) as unknown as MessageRow[];
+}
+export function listThreadsForOrg(orgId: string): ThreadRow[] {
+  return getDb().prepare("SELECT * FROM support_threads WHERE org_id = ? ORDER BY updated_at DESC").all(orgId) as unknown as ThreadRow[];
+}
+export function unreadForOrg(orgId: string): number {
+  return Number((getDb().prepare("SELECT COALESCE(SUM(user_unread),0) n FROM support_threads WHERE org_id = ?").get(orgId) as { n: number }).n);
+}
+export function markThreadRead(id: string, byAdmin: boolean): void {
+  getDb().prepare(`UPDATE support_threads SET ${byAdmin ? "admin_unread" : "user_unread"} = 0 WHERE id = ?`).run(id);
+}
+export function setThreadStatus(id: string, status: "open" | "closed"): void {
+  getDb().prepare("UPDATE support_threads SET status = ?, updated_at = ? WHERE id = ?").run(status, now(), id);
+}
+export function listThreadsAdmin(status?: "open" | "closed"): (ThreadRow & { user_email: string | null; org_name: string | null; plan: string | null })[] {
+  return getDb()
+    .prepare(
+      `SELECT t.*, u.email AS user_email, o.name AS org_name, ou.plan AS plan
+       FROM support_threads t LEFT JOIN users u ON u.id = t.user_id LEFT JOIN orgs o ON o.id = t.org_id LEFT JOIN users ou ON ou.id = o.owner_user_id
+       WHERE (? IS NULL OR t.status = ?) ORDER BY t.admin_unread DESC, t.updated_at DESC LIMIT 200`,
+    )
+    .all(status ?? null, status ?? null) as unknown as (ThreadRow & { user_email: string | null; org_name: string | null; plan: string | null })[];
+}
+
+// ── bug reports + contact form ──
+export interface BugRow {
+  id: string;
+  org_id: string;
+  user_id: string;
+  title: string;
+  body: string;
+  page: string | null;
+  handled_at: string | null;
+  created_at: string;
+}
+export function createBug(orgId: string, userId: string, title: string, body: string, page: string | null): BugRow {
+  const row: BugRow = { id: randomUUID(), org_id: orgId, user_id: userId, title, body, page, handled_at: null, created_at: now() };
+  getDb().prepare("INSERT INTO feedback_bugs (id, org_id, user_id, title, body, page, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(row.id, orgId, userId, title, body, page, row.created_at);
+  return row;
+}
+export function listBugs(handled: boolean): (BugRow & { user_email: string | null; org_name: string | null })[] {
+  return getDb()
+    .prepare(
+      `SELECT b.*, u.email AS user_email, o.name AS org_name FROM feedback_bugs b LEFT JOIN users u ON u.id = b.user_id LEFT JOIN orgs o ON o.id = b.org_id
+       WHERE b.handled_at IS ${handled ? "NOT NULL" : "NULL"} ORDER BY b.created_at DESC LIMIT 200`,
+    )
+    .all() as unknown as (BugRow & { user_email: string | null; org_name: string | null })[];
+}
+export function markBugHandled(id: string): boolean {
+  return getDb().prepare("UPDATE feedback_bugs SET handled_at = ? WHERE id = ? AND handled_at IS NULL").run(now(), id).changes > 0;
+}
+export interface ContactRow {
+  id: string;
+  name: string;
+  email: string;
+  company: string | null;
+  message: string;
+  handled_at: string | null;
+  created_at: string;
+}
+export function createContact(name: string, email: string, company: string | null, message: string): ContactRow {
+  const row: ContactRow = { id: randomUUID(), name, email, company, message, handled_at: null, created_at: now() };
+  getDb().prepare("INSERT INTO contact_messages (id, name, email, company, message, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(row.id, name, email, company, message, row.created_at);
+  return row;
+}
+export function listContacts(handled: boolean): ContactRow[] {
+  return getDb().prepare(`SELECT * FROM contact_messages WHERE handled_at IS ${handled ? "NOT NULL" : "NULL"} ORDER BY created_at DESC LIMIT 200`).all() as unknown as ContactRow[];
+}
+export function markContactHandled(id: string): boolean {
+  return getDb().prepare("UPDATE contact_messages SET handled_at = ? WHERE id = ? AND handled_at IS NULL").run(now(), id).changes > 0;
+}
+
+// ── reminders ──
+export function logReminder(userId: string, kind: string): void {
+  getDb().prepare("INSERT INTO reminder_log (id, user_id, kind, sent_at) VALUES (?, ?, ?, ?)").run(randomUUID(), userId, kind, now());
+}
+/** Signed up at least `days` ago, never exported, never nudged for this. */
+export function reminderCandidatesNoExport(days: number): UserRow[] {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  return getDb()
+    .prepare(
+      `SELECT u.* FROM users u WHERE u.created_at <= ?
+         AND NOT EXISTS (SELECT 1 FROM export_usage x WHERE x.user_id = u.id)
+         AND NOT EXISTS (SELECT 1 FROM reminder_log r WHERE r.user_id = u.id AND r.kind = 'no-export')
+       ORDER BY u.created_at LIMIT 500`,
+    )
+    .all(cutoff) as unknown as UserRow[];
+}
+/** Has exported before, no login for `idleDays`, not nudged as dormant in the last `cooldownDays`. */
+export function reminderCandidatesDormant(idleDays: number, cooldownDays: number): UserRow[] {
+  const idle = new Date(Date.now() - idleDays * 86_400_000).toISOString();
+  const cooldown = new Date(Date.now() - cooldownDays * 86_400_000).toISOString();
+  return getDb()
+    .prepare(
+      `SELECT u.* FROM users u WHERE u.last_login_at IS NOT NULL AND u.last_login_at <= ?
+         AND EXISTS (SELECT 1 FROM export_usage x WHERE x.user_id = u.id)
+         AND NOT EXISTS (SELECT 1 FROM reminder_log r WHERE r.user_id = u.id AND r.kind = 'dormant' AND r.sent_at >= ?)
+       ORDER BY u.last_login_at LIMIT 500`,
+    )
+    .all(idle, cooldown) as unknown as UserRow[];
 }

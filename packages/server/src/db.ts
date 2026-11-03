@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS users (
   plan_renews_at         TEXT,
   plan_cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
   analytics_enabled      INTEGER NOT NULL DEFAULT 1,
+  current_org_id         TEXT,
+  is_admin               INTEGER NOT NULL DEFAULT 0,
+  last_login_at          TEXT,
   created_at    TEXT NOT NULL
 );
 
@@ -80,6 +83,54 @@ CREATE TABLE IF NOT EXISTS org_invites (
   created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_org_invites_hash ON org_invites(token_hash);
+
+CREATE TABLE IF NOT EXISTS support_threads (
+  id           TEXT PRIMARY KEY,
+  org_id       TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  subject      TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'open',   -- open | closed
+  user_unread  INTEGER NOT NULL DEFAULT 0,     -- support replies the user hasn't seen
+  admin_unread INTEGER NOT NULL DEFAULT 0,     -- user messages support hasn't seen
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_threads_org ON support_threads(org_id, updated_at);
+CREATE TABLE IF NOT EXISTS support_messages (
+  id             TEXT PRIMARY KEY,
+  thread_id      TEXT NOT NULL REFERENCES support_threads(id) ON DELETE CASCADE,
+  author_user_id TEXT NOT NULL,
+  is_admin       INTEGER NOT NULL DEFAULT 0,
+  body           TEXT NOT NULL,
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_thread ON support_messages(thread_id, created_at);
+CREATE TABLE IF NOT EXISTS feedback_bugs (
+  id         TEXT PRIMARY KEY,
+  org_id     TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  title      TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  page       TEXT,
+  handled_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS contact_messages (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  email      TEXT NOT NULL,
+  company    TEXT,
+  message    TEXT NOT NULL,
+  handled_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reminder_log (
+  id      TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind    TEXT NOT NULL,
+  sent_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminder_log(user_id, kind, sent_at);
 
 -- legacy flat sharing (pre-orgs); migrated into org_members at startup, no longer written
 CREATE TABLE IF NOT EXISTS memberships (
@@ -216,6 +267,8 @@ export function initDb(path: string = config.dbPath): DB {
     "ALTER TABLE users ADD COLUMN current_org_id TEXT",
     "ALTER TABLE apps ADD COLUMN org_id TEXT",
     "ALTER TABLE events ADD COLUMN value REAL",
+    "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN last_login_at TEXT",
   ]) {
     try {
       db.exec(stmt);

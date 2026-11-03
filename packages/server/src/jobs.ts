@@ -21,6 +21,7 @@ import {
   setJobProgress,
   type JobRow,
 } from "./repo.js";
+import { autoRemindersTick } from "./reminders.js";
 
 /** Report progress from a handler: 0–100 plus an optional human label ("Packing Meta (2/6)"). */
 export type Progress = (percent: number, label?: string) => void;
@@ -93,6 +94,11 @@ async function tick(): Promise<void> {
       pruneJobs(new Date(nowMs - 7 * 86_400_000).toISOString());
       pruneEvents(new Date(nowMs - 90 * 86_400_000).toISOString());
       pruneUploads(new Date(nowMs - 86_400_000).toISOString());
+    }
+    try {
+      await autoRemindersTick(nowMs);
+    } catch (e) {
+      console.error("[reminders] failed:", e);
     }
   } catch (e) {
     console.error("[jobs] worker tick failed:", e);

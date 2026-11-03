@@ -15,6 +15,14 @@ import type {
   OrgDetail,
   OrgRole,
   InviteInfo,
+  SupportThread,
+  SupportThreadDetail,
+  AdminOverview,
+  AdminUser,
+  AdminThread,
+  AdminBug,
+  AdminContact,
+  AdminJob,
   Analytics,
   PreloaderSettings,
   DomainStatus,
@@ -261,3 +269,32 @@ export async function compileUnityBuild(
 export const downloadUrl = (id: string, network: string) => `${base}/creatives/${id}/download/${network}`;
 export const downloadAllUrl = (id: string) => `${base}/creatives/${id}/download-all`;
 export const previewUrl = (id: string, network: string) => `${base}/creatives/${id}/preview/${network}`;
+
+// ── support (workspace tickets) + feedback + public contact ──
+export const listThreads = () => getJson<SupportThread[]>("/support/threads");
+export const supportUnread = () => getJson<{ count: number }>("/support/unread");
+export const openThread = (subject: string, message: string) => postJson<SupportThreadDetail>("/support/thread", { subject, message });
+/** `asSupport`: the admin console acting as Factorial support (marks the support side read, flags replies). */
+const asQ = (asSupport?: boolean) => (asSupport ? "?as=support" : "");
+export const getThreadDetail = (id: string, asSupport?: boolean) => getJson<SupportThreadDetail>(`/support/threads/${id}${asQ(asSupport)}`);
+export const replyThread = (id: string, message: string, asSupport?: boolean) =>
+  postJson<SupportThreadDetail>(`/support/threads/${id}/reply${asQ(asSupport)}`, { message });
+export const closeThread = (id: string, status: "open" | "closed", asSupport?: boolean) =>
+  postJson<SupportThread>(`/support/threads/${id}/close${asQ(asSupport)}`, { status });
+export const reportBug = (title: string, body: string, page?: string) => postJson<{ id: string }>("/feedback/bug", { title, body, page });
+export const sendContact = (c: { name: string; email: string; company?: string; message: string; website?: string }) => postJson<{ ok: true }>("/contact", c);
+
+// ── platform admin ──
+export const adminOverview = () => getJson<AdminOverview>("/admin/overview");
+export const adminUsers = (q = "") => getJson<AdminUser[]>(`/admin/users?q=${encodeURIComponent(q)}`);
+export const adminSetUser = (id: string, patch: { admin?: boolean; plan?: string }) => patchJson<{ id: string }>(`/admin/users/${id}`, patch);
+export const adminDeleteUser = (id: string) => delJson<{ deleted: boolean }>(`/admin/users/${id}`);
+export const adminThreads = (status: "open" | "closed" | "all" = "open") => getJson<AdminThread[]>(`/admin/support/threads?status=${status}`);
+export const adminBugs = (handled = false) => getJson<AdminBug[]>(`/feedback/bugs?handled=${handled ? 1 : 0}`);
+export const adminBugHandled = (id: string) => postJson<{ handled: boolean }>(`/feedback/bugs/${id}/handled`, {});
+export const adminContacts = (handled = false) => getJson<AdminContact[]>(`/admin/contact?handled=${handled ? 1 : 0}`);
+export const adminContactHandled = (id: string) => postJson<{ handled: boolean }>(`/contact/${id}/handled`, {});
+export const adminJobs = (status?: string) => getJson<AdminJob[]>(`/admin/jobs${status ? `?status=${status}` : ""}`);
+export const adminReminders = () => getJson<{ kinds: string[]; candidates: Record<string, { id: string; email: string }[]> }>("/admin/reminders");
+export const adminRunReminders = (dryRun: boolean) =>
+  postJson<{ dryRun: boolean; sent: Record<string, number>; candidates: Record<string, string[]> }>("/admin/reminders/run", { dryRun });

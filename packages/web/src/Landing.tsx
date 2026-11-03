@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ContactDialog } from "./components/ContactDialog";
 const NETWORKS = [
   "AppLovin", "Unity Ads", "Google Ads", "Meta", "Mintegral", "ironSource", "TikTok / Pangle",
   "Vungle", "Liftoff", "Snapchat", "Moloco", "Chartboost", "DV360", "AdColony", "InMobi",
@@ -13,6 +15,7 @@ function Check() {
 }
 
 export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; onSignIn: () => void }) {
+  const [contact, setContact] = useState(false);
   return (
     <div className="fx" style={{ background: "var(--ink)", minHeight: "100%" }}>
       {/* nav */}
@@ -127,7 +130,7 @@ export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
             <div className="fx-plan">
               <h3>Enterprise</h3><div className="price">Custom</div><div className="per">volume &amp; SLA</div>
               <ul><li>Unlimited exports</li><li>Custom network ordering</li><li>Dedicated support</li></ul>
-              <a className="btn btn-ghost" href="mailto:contact@factorialstudio.com">Contact sales</a>
+              <button className="btn btn-ghost" onClick={() => setContact(true)}>Contact sales</button>
             </div>
           </div>
         </div>
@@ -199,6 +202,8 @@ export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
             <a href="https://factorialstudio.com/marketing/">Marketing</a>
           </div>
           <p style={{ marginBottom: 10 }}>
+            <button onClick={() => setContact(true)} style={{ color: "var(--gold)", fontWeight: 600, background: "none", border: 0, cursor: "pointer", font: "inherit", padding: 0 }}>Send us a message</button>
+            <span style={{ opacity: 0.45, margin: "0 10px" }}>·</span>
             <a href="mailto:contact@factorialstudio.com" style={{ color: "var(--gold)", fontWeight: 600 }}>contact@factorialstudio.com</a>
             <span style={{ opacity: 0.45, margin: "0 10px" }}>·</span>
             <a href="tel:+923224695140" style={{ color: "var(--gold)", fontWeight: 600 }}>+92 322 469 5140</a>
@@ -206,6 +211,7 @@ export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
           <p>© 2026 Factorial Studio Private Limited · Lahore, Pakistan · Factorial AdLab</p>
         </div>
       </footer>
+      {contact && <ContactDialog onClose={() => setContact(false)} topic="Enterprise / volume enquiry" />}
     </div>
   );
 }

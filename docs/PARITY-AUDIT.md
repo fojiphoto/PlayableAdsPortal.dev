@@ -153,7 +153,7 @@ Legend: **DONE** / **PARTIAL** / **MISSING**. Evidence is `file:line` or route.
 
 ### 1.14 Landing / marketing — DONE (+ live playable demos). Claims to tighten: "20+ networks" (exactly 20), "custom network ordering" (unimplemented), "validated against current spec" (caps are placeholders).
 
-### 1.15 Support / Ops / Admin — `support/*`, `feedback/*`, `contact*`, `reminders/*`, admin role/UI: all MISSING (mailto only).
+### 1.15 Support / Ops / Admin — DONE. Workspace support threads with replies, unread counters and email both ways (`/api/support/thread|threads|threads/:id|reply|close|unread`); bug reports (`/api/feedback/bug|bugs|bugs/:id/handled`); public contact form with honeypot + rate limit replacing every `mailto:` (`/api/contact`, `/api/contact/:id/handled`); reminders (never-exported after 3 days, dormant exporters after 14) with dry run, send-once log and optional daily auto-run (`/api/admin/reminders|logins|run|send`); platform admin role (`users.is_admin`, bootstrapped from `ADMIN_EMAILS`) with an Admin console: overview, users (search, promote, plan override, delete), support inbox, bugs, contact, jobs, reminders. Not done: plugin bans / license watermark (belongs with plugin distribution, gap #13).
 
 ### 1.16 Infrastructure (Blueprint §8) — Postgres, Redis/BullMQ, S3/R2 object storage: MISSING (SQLite + BLOBs). URL routing/deep links: MISSING (page is React state).
 
@@ -204,6 +204,6 @@ landing; two extra networks; a capture-based Unity path that ships *something* w
 | 11 | ~~Runtime API completeness~~ **DONE 2026-10-30** — full `Playable` / `LifeCycle` / `Analytics` / `[AdLabField]`+`[AdLabFieldStep]` contract mirrored from the decompiled runtime, every call wired through the jslib to the shim (`PF` 0.4.0: vars/getVar, setLoadingProgress → preloader bar, languages, haptics, valued events, AppLovin challenge events, pause/resume → C# events); custom variables end to end (plugin scan → compile upload → creative schema/values → dashboard panel → `PF.vars` in exports → applied to fields at scene load); HTML5 playables use `PF.getVar` | Half-declared contract | done |
 | 12 | Preloader kit templates, per-concept kit, server preview | Template library | M |
 | 13 | Plugin distribution (download/version/self-update, licensing) | No way to ship/revoke the plugin | M |
-| 14 | Support/feedback/contact/reminders | Ops tooling (17 endpoints) | M |
+| 14 | ~~Support/feedback/contact/reminders~~ **DONE 2026-11-03** — support threads, bug reports, contact form, reminders and a platform admin role + console (see 1.15) | Ops tooling (17 endpoints) | done |
 | 15 | MRAID stub in preview; URL routing; Turnstile | UX/robustness | S each |
 | 16 | Infra: Postgres, object storage, shared rate-limit store | SQLite BLOB storage won't hold a studio's exports | L |

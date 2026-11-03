@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { listPlans, checkout, billingPortal, cancelSubscription, resumeSubscription, syncBilling } from "../api";
 import type { Plan, PlanStatus } from "../types";
+import { ContactDialog } from "./ContactDialog";
 
-export function Plans({ status, onChanged }: { status: PlanStatus | null; onChanged: (s: PlanStatus) => void }) {
+export function Plans({ status, onChanged, email }: { status: PlanStatus | null; onChanged: (s: PlanStatus) => void; email?: string }) {
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [contact, setContact] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -20,7 +22,7 @@ export function Plans({ status, onChanged }: { status: PlanStatus | null; onChan
     try {
       const res = await checkout(id);
       if (res.contact) {
-        window.location.href = "mailto:contact@factorialstudio.com?subject=Factorial%20AdLab%20Enterprise";
+        setContact(true);
       } else if (res.url) {
         window.location.href = res.url; // → Stripe Checkout / billing portal
       } else if (res.status) {
@@ -195,6 +197,7 @@ export function Plans({ status, onChanged }: { status: PlanStatus | null; onChan
         </div>
       )}
 
+      {contact && <ContactDialog onClose={() => setContact(false)} defaultEmail={email} topic="Enterprise plan enquiry" />}
       <p style={{ marginTop: 18, fontSize: ".8rem", color: "var(--muted)" }}>
         Upgrades go through secure Stripe Checkout. Manage or cancel anytime from the billing portal.
       </p>

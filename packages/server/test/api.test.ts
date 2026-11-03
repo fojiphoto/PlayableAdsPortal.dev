@@ -10,6 +10,8 @@ import { resetDb } from "../src/db.js";
 import { getUserByEmail, setDomainVerified, setUserDomain, setStripeCustomer, setUserBilling, createJob, claimNextJob, recoverStaleJobs, getJob } from "../src/repo.js";
 import { drainJobs } from "../src/jobs.js";
 import { outbox, clearOutbox } from "../src/mail.js";
+import { config } from "../src/config.js";
+import { setAdmin } from "../src/repo.js";
 import { loadFromDir } from "@forge/packager";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -999,6 +1001,184 @@ describe("compile jobs: Unity WebGL build → single-file playable", () => {
   });
 });
 
+describe("support, feedback, contact, admin console, reminders", () => {
+  const makeAdmin = async (email: string) => {
+    const t = await signup(email);
+    setAdmin(getUserByEmail(email)!.id, true);
+    return t;
+  };
+  const get = (url: string, token?: string) => app.inject({ method: "GET", url, headers: token ? bearer(token) : {} });
+  const post = (url: string, payload: Record<string, unknown>, token?: string) => app.inject({ method: "POST", url, headers: token ? bearer(token) : {}, payload });
+
+  it("public contact form: validation, honeypot, admin inbox, handled; non-admins are refused", async () => {
+    expect((await post("/api/contact", { name: "Ana", email: "not-an-email", message: "hi" })).statusCode).toBe(400);
+    expect((await post("/api/contact", { name: "", email: "a@b.co", message: "hi" })).statusCode).toBe(400);
+    // honeypot filled → silently "ok", nothing stored
+    expect((await post("/api/contact", { name: "Bot", email: "bot@spam.co", message: "buy", website: "http://spam" })).json()).toEqual({ ok: true });
+    const ok = await post("/api/contact", { name: "Ana Lee", email: "Ana@Studio.co", company: "Studio Co", message: "We need 500 exports/month." });
+    expect(ok.statusCode).toBe(201);
+    // the support inbox is notified
+    expect(outbox.some((m) => m.to === config.supportEmail && m.subject.includes("[Contact] Ana Lee · Studio Co"))).toBe(true);
+
+    const user = await signup("plainuser@factorialstudio.com");
+    const denied = await get("/api/admin/contact", user);
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json().code).toBe("admin-only");
+
+    const admin = await makeAdmin("ops@factorialstudio.com");
+    const inbox = (await get("/api/admin/contact", admin)).json();
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0]).toMatchObject({ name: "Ana Lee", email: "ana@studio.co", company: "Studio Co" });
+    expect((await post(`/api/contact/${inbox[0].id}/handled`, {}, admin)).json()).toEqual({ handled: true });
+    expect((await get("/api/admin/contact", admin)).json()).toEqual([]);
+    expect((await get("/api/admin/contact?handled=1", admin)).json()).toHaveLength(1);
+  });
+
+  it("support thread round trip: user opens → admin sees unread → replies (emailed) → user unread → read clears it", async () => {
+    const user = await signup("needshelp@factorialstudio.com");
+    const created = await post("/api/support/thread", { subject: "Export fails on Meta", message: "The zip is rejected.\nWhat now?" }, user);
+    expect(created.statusCode).toBe(201);
+    const t = created.json();
+    expect(t).toMatchObject({ subject: "Export fails on Meta", status: "open", unread: 0 });
+    expect(t.messages).toHaveLength(1);
+    expect(outbox.some((m) => m.to === config.supportEmail && m.subject === "[Support] Export fails on Meta")).toBe(true);
+    expect((await post("/api/support/thread", { subject: "", message: "x" }, user)).statusCode).toBe(400);
+
+    const admin = await makeAdmin("support-agent@factorialstudio.com");
+    const open = (await get("/api/admin/support/threads", admin)).json();
+    expect(open[0]).toMatchObject({ id: t.id, unread: 1, userEmail: "needshelp@factorialstudio.com", workspace: "needshelp's workspace", plan: "free" });
+    // admin reads from the console (as=support clears the support side) and replies (flagged fromSupport, emailed)
+    const seen = (await get(`/api/support/threads/${t.id}?as=support`, admin)).json();
+    expect(seen.user.email).toBe("needshelp@factorialstudio.com");
+    clearOutbox();
+    const rep = await post(`/api/support/threads/${t.id}/reply?as=support`, { message: "Meta needs index.html at the zip root — fixed on our side." }, admin);
+    expect(rep.statusCode).toBe(200);
+    expect(rep.json().messages.at(-1)).toMatchObject({ fromSupport: true });
+    expect(outbox.some((m) => m.to === "needshelp@factorialstudio.com" && m.subject.startsWith("Re: Export fails on Meta"))).toBe(true);
+    expect((await get("/api/admin/support/threads", admin)).json()[0].unread).toBe(0);
+
+    // the user sees one unread reply; reading the thread clears it
+    expect((await get("/api/support/unread", user)).json()).toEqual({ count: 1 });
+    expect((await get("/api/support/threads", user)).json()[0].unread).toBe(1);
+    const detail = (await get(`/api/support/threads/${t.id}`, user)).json();
+    expect(detail.messages.map((m: { fromSupport: boolean }) => m.fromSupport)).toEqual([false, true]);
+    expect((await get("/api/support/unread", user)).json()).toEqual({ count: 0 });
+
+    // close, and a reply reopens it; strangers cannot see it
+    expect((await post(`/api/support/threads/${t.id}/close`, {}, user)).json().status).toBe("closed");
+    expect((await get("/api/admin/support/threads?status=closed", admin)).json().map((x: { id: string }) => x.id)).toContain(t.id);
+    await post(`/api/support/threads/${t.id}/reply`, { message: "Still broken for TikTok." }, user);
+    expect((await get(`/api/support/threads/${t.id}`, user)).json().status).toBe("open");
+    const stranger = await signup("nosy@factorialstudio.com");
+    expect((await get(`/api/support/threads/${t.id}`, stranger)).statusCode).toBe(404);
+    expect((await post(`/api/support/threads/${t.id}/reply`, { message: "hi" }, stranger)).statusCode).toBe(404);
+  });
+
+  it("an admin who files a ticket in their own workspace is the customer on the Support page, support in the console", async () => {
+    const founder = await makeAdmin("founder-ticket@factorialstudio.com");
+    const t = (await post("/api/support/thread", { subject: "Self-filed", message: "Testing my own support." }, founder)).json();
+    // reply from the console as support: the founder's customer side gets an unread
+    expect((await post(`/api/support/threads/${t.id}/reply?as=support`, { message: "Support here." }, founder)).json().messages.at(-1).fromSupport).toBe(true);
+    expect((await get("/api/support/unread", founder)).json()).toEqual({ count: 1 });
+    // opening it from the Support page (no as=support) clears the CUSTOMER side
+    const asCustomer = (await get(`/api/support/threads/${t.id}`, founder)).json();
+    expect(asCustomer.unread).toBe(0);
+    expect((await get("/api/support/unread", founder)).json()).toEqual({ count: 0 });
+    // and a reply from the Support page is a customer message, not a support one
+    expect((await post(`/api/support/threads/${t.id}/reply`, { message: "Thanks!" }, founder)).json().messages.at(-1).fromSupport).toBe(false);
+    expect((await get("/api/admin/support/threads", founder)).json().find((x: { id: string }) => x.id === t.id).unread).toBe(2); // opening message + "Thanks!", neither read from the console
+  });
+
+  it("bug reports reach the admin list and can be marked handled", async () => {
+    const user = await signup("bugfinder@factorialstudio.com");
+    expect((await post("/api/feedback/bug", { title: "Preview blank", body: "Safari 17, AppLovin preview is white.", page: "/workspace" }, user)).statusCode).toBe(201);
+    expect((await post("/api/feedback/bug", { title: "", body: "x" }, user)).statusCode).toBe(400);
+    expect((await get("/api/feedback/bugs", user)).statusCode).toBe(403);
+    const admin = await makeAdmin("triage@factorialstudio.com");
+    const bugs = (await get("/api/feedback/bugs", admin)).json();
+    expect(bugs[0]).toMatchObject({ title: "Preview blank", page: "/workspace", userEmail: "bugfinder@factorialstudio.com" });
+    await post(`/api/feedback/bugs/${bugs[0].id}/handled`, {}, admin);
+    expect((await get("/api/feedback/bugs", admin)).json()).toEqual([]);
+    expect((await get("/api/admin/overview", admin)).json()).toMatchObject({ openBugs: 0 });
+  });
+
+  it("admin role: ADMIN_EMAILS bootstrap at login, overview, user search/promote/plan override/delete, self-protection", async () => {
+    config.adminEmails.push("founder@factorialstudio.com");
+    try {
+      await signup("founder@factorialstudio.com");
+      const login = await post("/api/login", { email: "founder@factorialstudio.com", password: "secret123" });
+      expect(login.json().user.isAdmin).toBe(true);
+      const founder = login.json().token as string;
+      expect((await get("/api/me", founder)).json().user.isAdmin).toBe(true);
+
+      const other = await signup("customer@factorialstudio.com");
+      expect((await get("/api/me", other)).json().user.isAdmin).toBe(false);
+      await post("/api/login", { email: "customer@factorialstudio.com", password: "secret123" });
+
+      const ov = (await get("/api/admin/overview", founder)).json();
+      expect(ov.users).toBeGreaterThanOrEqual(2);
+      const found = (await get("/api/admin/users?q=customer", founder)).json();
+      expect(found).toHaveLength(1);
+      expect(found[0]).toMatchObject({ email: "customer@factorialstudio.com", plan: "free", isAdmin: false, workspace: "customer's workspace" });
+      expect(found[0].lastLoginAt).toBeTruthy();
+      const id = found[0].id;
+
+      // plan override (enterprise deal) + promote
+      expect((await app.inject({ method: "PATCH", url: `/api/admin/users/${id}`, headers: bearer(founder), payload: { plan: "enterprise", admin: true } })).json()).toMatchObject({ plan: "enterprise", isAdmin: true });
+      expect((await get("/api/me", other)).json()).toMatchObject({ plan: "enterprise", user: { isAdmin: true } });
+      expect((await app.inject({ method: "PATCH", url: `/api/admin/users/${id}`, headers: bearer(founder), payload: { plan: "platinum" } })).statusCode).toBe(400);
+
+      // cannot demote or delete yourself
+      const selfId = getUserByEmail("founder@factorialstudio.com")!.id;
+      expect((await app.inject({ method: "PATCH", url: `/api/admin/users/${selfId}`, headers: bearer(founder), payload: { admin: false } })).statusCode).toBe(400);
+      expect((await app.inject({ method: "DELETE", url: `/api/admin/users/${selfId}`, headers: bearer(founder) })).statusCode).toBe(400);
+
+      // delete removes the user and the workspaces they own
+      const appId = (await post("/api/apps", { name: "Doomed" }, other)).json().id;
+      expect((await app.inject({ method: "DELETE", url: `/api/admin/users/${id}`, headers: bearer(founder) })).json()).toEqual({ deleted: true });
+      expect(getUserByEmail("customer@factorialstudio.com")).toBeUndefined();
+      expect((await get(`/api/apps/${appId}`, founder)).statusCode).toBe(404);
+      // jobs listing works for admins
+      expect((await get("/api/admin/jobs", founder)).statusCode).toBe(200);
+    } finally {
+      config.adminEmails.splice(config.adminEmails.indexOf("founder@factorialstudio.com"), 1);
+    }
+  });
+
+  it("reminders: never-exported after 3 days and dormant exporters; dry run, send once, logged", async () => {
+    const { getDb } = await import("../src/db.js");
+    const db = getDb();
+    const old = new Date(Date.now() - 10 * 86_400_000).toISOString();
+    const quiet = new Date(Date.now() - 20 * 86_400_000).toISOString();
+    await signup("signedup-old@factorialstudio.com");
+    await signup("signedup-today@factorialstudio.com");
+    await signup("was-active@factorialstudio.com");
+    db.prepare("UPDATE users SET created_at = ? WHERE email IN ('signedup-old@factorialstudio.com', 'was-active@factorialstudio.com')").run(old);
+    const active = getUserByEmail("was-active@factorialstudio.com")!;
+    db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(quiet, active.id);
+    db.prepare("INSERT INTO export_usage (id, user_id, network, created_at) VALUES ('u1', ?, 'unityads', ?)").run(active.id, quiet);
+
+    const admin = await makeAdmin("growth@factorialstudio.com");
+    const c = (await get("/api/admin/reminders", admin)).json();
+    expect(c.candidates["no-export"].map((u: { email: string }) => u.email)).toEqual(["signedup-old@factorialstudio.com"]);
+    expect(c.candidates.dormant.map((u: { email: string }) => u.email)).toEqual(["was-active@factorialstudio.com"]);
+
+    clearOutbox();
+    const dry = (await post("/api/admin/reminders/run", { dryRun: true }, admin)).json();
+    expect(dry).toMatchObject({ dryRun: true, sent: { "no-export": 0, dormant: 0 } });
+    expect(outbox).toHaveLength(0);
+
+    const run = (await post("/api/admin/reminders/run", {}, admin)).json();
+    expect(run.sent).toEqual({ "no-export": 1, dormant: 1 });
+    expect(outbox.map((m) => m.to).sort()).toEqual(["signedup-old@factorialstudio.com", "was-active@factorialstudio.com"]);
+    // logged → nobody is nudged twice
+    expect((await post("/api/admin/reminders/run", {}, admin)).json().sent).toEqual({ "no-export": 0, dormant: 0 });
+    const signupId = getUserByEmail("signedup-today@factorialstudio.com")!.id;
+    expect((await post("/api/admin/reminders/send", { userId: signupId, kind: "nope" }, admin)).statusCode).toBe(400);
+    expect((await post("/api/admin/reminders/send", { userId: signupId, kind: "no-export" }, admin)).json()).toEqual({ sent: true });
+  });
+});
+
 describe("runtime API: custom variables + valued events", () => {
   async function creativeFor(email: string) {
     const token = await signup(email);
@@ -1011,7 +1191,7 @@ describe("runtime API: custom variables + valued events", () => {
     const up = await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() });
     return { token, conceptId, creativeId: up.json().id as string };
   }
-  const patchVars = (token: string, id: string, body: unknown) => app.inject({ method: "PATCH", url: `/api/creatives/${id}`, headers: bearer(token), payload: body });
+  const patchVars = (token: string, id: string, body: Record<string, unknown>) => app.inject({ method: "PATCH", url: `/api/creatives/${id}`, headers: bearer(token), payload: body });
 
   it("schema from the plugin: defaults, typed/clamped edits, free-form keys, injection into the export", async () => {
     const { token, creativeId } = await creativeFor("vars@factorialstudio.com");

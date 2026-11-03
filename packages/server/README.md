@@ -31,6 +31,11 @@ npm run test -w @forge/server
 | POST | `/api/orgs/current/transfer` | hand ownership to a member (owner) |
 | POST / DELETE | `/api/orgs/current/invites[/:id]` | email invite with a 7-day link / revoke (admin) |
 | GET / POST | `/api/invites/:token`, `/api/invites/accept` | what an invite is for (public) / join (signed in as the invited email) |
+| POST / GET | `/api/support/thread`, `/api/support/threads[/:id]`, `…/:id/reply`, `…/:id/close`, `/api/support/unread` | workspace support tickets (admins reply through the same routes) |
+| POST | `/api/feedback/bug` | bug report (admins: `GET /api/feedback/bugs`, `POST …/:id/handled`) |
+| POST | `/api/contact` | public contact form (honeypot `website`, 5/h per IP; admins: `GET /api/admin/contact`, `POST /api/contact/:id/handled`) |
+| GET / PATCH / DELETE | `/api/admin/overview`, `/api/admin/users[/:id]`, `/api/admin/support/threads`, `/api/admin/jobs` | platform admin console (`users.is_admin`; `ADMIN_EMAILS` bootstrap) |
+| GET / POST | `/api/admin/reminders`, `…/logins`, `…/run` (`dryRun`), `…/send` | reminder emails |
 | GET | `/api/analytics?days=30&preview=0` | in-playable funnel (impressions, engagement, CTA, CTR; by network / creative; custom events) + export usage |
 | GET | `/api/creatives/:id/analytics` | per-creative funnel |
 | PATCH | `/api/analytics/settings` | `{ enabled }` — embed beacons in future exports |
