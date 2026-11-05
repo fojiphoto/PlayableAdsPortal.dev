@@ -16,6 +16,7 @@ npm run test -w @forge/server
 |--------|------|---------|
 | GET  | `/api/health` | liveness |
 | GET  | `/api/networks` | catalog of networks + specs |
+| GET  | `/api/config/public` | settings the web app needs before sign-in: `{ turnstileSiteKey }` (null = bot check off) |
 | POST | `/api/creatives` | upload a playable (`multipart`: `file`=.zip or .html; fields: `name`, `appName`, `ctaUrl`, `iosUrl`, `androidUrl`, `entry`) |
 | GET  | `/api/creatives` | list |
 | GET  | `/api/creatives/:id` | details + current build results |

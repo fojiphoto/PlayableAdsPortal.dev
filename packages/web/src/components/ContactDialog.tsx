@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { sendContact } from "../api";
+import { Turnstile, useCaptchaSiteKey } from "./Turnstile";
 
 /** Public contact form (landing "Contact sales", Plans ▸ Enterprise). Lands in the admin console's Contact inbox. */
 export function ContactDialog({ onClose, defaultEmail = "", topic = "" }: { onClose: () => void; defaultEmail?: string; topic?: string }) {
@@ -11,16 +12,20 @@ export function ContactDialog({ onClose, defaultEmail = "", topic = "" }: { onCl
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const siteKey = useCaptchaSiteKey();
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaRun, setCaptchaRun] = useState(0);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setErr(null);
     try {
-      await sendContact({ name, email, company, message, website });
+      await sendContact({ name, email, company, message, website, turnstileToken: captcha ?? undefined });
       setDone(true);
     } catch (er) {
       setErr((er as Error).message);
+      if (siteKey) setCaptchaRun((n) => n + 1); // the token is single-use
     } finally {
       setBusy(false);
     }
@@ -50,8 +55,9 @@ export function ContactDialog({ onClose, defaultEmail = "", topic = "" }: { onCl
             <textarea className={`${input} min-h-[120px]`} placeholder="What do you need? Volume, networks, timeline…" value={message} onChange={(e) => setMessage(e.target.value)} required />
             {/* honeypot — hidden from people, filled by bots */}
             <input tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: -9999, width: 1, height: 1 }} value={website} onChange={(e) => setWebsite(e.target.value)} />
+            {siteKey && <Turnstile siteKey={siteKey} action="contact" onToken={setCaptcha} resetSignal={captchaRun} />}
             {err && <div className="text-sm text-red-400">{err}</div>}
-            <button type="submit" disabled={busy} className="rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40">
+            <button type="submit" disabled={busy || (!!siteKey && !captcha)} className="rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40">
               {busy ? "Sending…" : "Send message"}
             </button>
             <p className="text-xs text-slate-500">Or email contact@factorialstudio.com</p>

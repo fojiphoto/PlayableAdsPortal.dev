@@ -20,6 +20,11 @@ export function rateLimit(key: string, max: number, windowMs: number): boolean {
   return b.count <= max;
 }
 
+/** Forget every window (tests: each case starts with fresh limits). */
+export function resetRateLimits(): void {
+  buckets.clear();
+}
+
 /** Clear a key's window (e.g. after a successful login). */
 export function clearRateLimit(key: string): void {
   buckets.delete(key);

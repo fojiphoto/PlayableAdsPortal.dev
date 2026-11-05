@@ -12,6 +12,7 @@ import { drainJobs } from "../src/jobs.js";
 import { outbox, clearOutbox } from "../src/mail.js";
 import { config } from "../src/config.js";
 import { setAdmin } from "../src/repo.js";
+import { resetRateLimits } from "../src/rate-limit.js";
 import { loadFromDir } from "@forge/packager";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -37,6 +38,7 @@ afterAll(async () => {
 beforeEach(() => {
   resetDb();
   clearOutbox();
+  resetRateLimits();
 });
 
 /** Pull the one-time token out of the last dev-outbox mail's link (?reset=… / ?verify=…). */
@@ -1893,5 +1895,92 @@ describe("SPA deep links", () => {
       cfg.webDist = prev;
       rmSync(dist, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Cloudflare Turnstile on public forms", () => {
+  /** Turn Turnstile on and stub Cloudflare's siteverify: token "good-<action>" passes for that action. */
+  async function withTurnstile(fn: (calls: { body: Record<string, unknown> }[]) => Promise<void>, opts: { down?: boolean } = {}) {
+    const { config: cfg } = await import("../src/config.js");
+    const { vi } = await import("vitest");
+    const calls: { body: Record<string, unknown> }[] = [];
+    const realFetch = globalThis.fetch;
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (!url.includes("challenges.cloudflare.com")) return realFetch(input as never, init);
+      if (opts.down) throw new TypeError("fetch failed");
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push({ body });
+      const m = /^good-(\w+)$/.exec(String(body.response));
+      return new Response(JSON.stringify(m ? { success: true, action: m[1], hostname: "localhost" } : { success: false, "error-codes": ["invalid-input-response"] }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+    cfg.turnstileSiteKey = "site-key-for-tests";
+    cfg.turnstileSecret = "secret-for-tests";
+    try {
+      await fn(calls);
+    } finally {
+      cfg.turnstileSiteKey = "";
+      cfg.turnstileSecret = "";
+      spy.mockRestore();
+    }
+  }
+  const post = (url: string, payload: Record<string, unknown>) => app.inject({ method: "POST", url, payload });
+
+  it("is off (and invisible to the web app) until both keys are set", async () => {
+    expect((await app.inject({ method: "GET", url: "/api/config/public" })).json()).toEqual({ turnstileSiteKey: null });
+    expect((await post("/api/signup", { email: "noturnstile@factorialstudio.com", password: "secret123" })).statusCode).toBe(201);
+  });
+
+  it("sign-up, forgot-password and contact need a valid token for their own form", async () => {
+    await withTurnstile(async (calls) => {
+      expect((await app.inject({ method: "GET", url: "/api/config/public" })).json()).toEqual({ turnstileSiteKey: "site-key-for-tests" });
+
+      const missing = await post("/api/signup", { email: "bot@factorialstudio.com", password: "secret123" });
+      expect(missing.statusCode).toBe(400);
+      expect(missing.json().code).toBe("captcha-required");
+      const bad = await post("/api/signup", { email: "bot@factorialstudio.com", password: "secret123", turnstileToken: "forged" });
+      expect(bad.json().code).toBe("captcha-failed");
+      // a token solved on another form doesn't count
+      expect((await post("/api/signup", { email: "bot@factorialstudio.com", password: "secret123", turnstileToken: "good-contact" })).json().code).toBe("captcha-failed");
+      expect((await post("/api/signup", { email: "human@factorialstudio.com", password: "secret123", turnstileToken: "good-signup" })).statusCode).toBe(201);
+      expect(calls.at(-1)!.body).toMatchObject({ secret: "secret-for-tests", response: "good-signup", idempotency_key: expect.any(String) });
+      // cheap validation happens before the token is spent
+      expect((await post("/api/signup", { email: "", password: "x", turnstileToken: "good-signup" })).statusCode).toBe(400);
+      const before = calls.length;
+      await post("/api/signup", { email: "short@factorialstudio.com", password: "123" });
+      expect(calls.length).toBe(before);
+
+      expect((await post("/api/password/forgot", { email: "human@factorialstudio.com" })).json().code).toBe("captcha-required");
+      expect((await post("/api/password/forgot", { email: "human@factorialstudio.com", turnstileToken: "good-forgot" })).statusCode).toBe(200);
+
+      const contact = { name: "Ana", email: "ana@studio.io", message: "Pricing?" };
+      expect((await post("/api/contact", contact)).json().code).toBe("captcha-required");
+      expect((await post("/api/contact", { ...contact, turnstileToken: "good-contact" })).statusCode).toBe(201);
+      // the honeypot still short-circuits bots before any verification
+      expect((await post("/api/contact", { ...contact, website: "http://spam" })).json()).toEqual({ ok: true });
+
+      // login and signed-in routes are not gated (the Unity plugin signs in without a browser)
+      expect((await post("/api/login", { email: "human@factorialstudio.com", password: "secret123" })).statusCode).toBe(200);
+      // oversized tokens are refused without calling Cloudflare
+      const n = calls.length;
+      expect((await post("/api/contact", { ...contact, turnstileToken: "x".repeat(3000) })).json().code).toBe("captcha-failed");
+      expect(calls.length).toBe(n);
+    });
+  });
+
+  it("fails open if Cloudflare can't be reached (rate limits still apply)", async () => {
+    await withTurnstile(
+      async () => {
+        expect((await post("/api/signup", { email: "outage@factorialstudio.com", password: "secret123", turnstileToken: "anything" })).statusCode).toBe(201);
+      },
+      { down: true },
+    );
+  });
+
+  it("sign-ups are rate-limited per network", async () => {
+    for (let i = 0; i < 10; i++) expect((await post("/api/signup", { email: `burst${i}@factorialstudio.com`, password: "secret123" })).statusCode).toBe(201);
+    expect((await post("/api/signup", { email: "burst-x@factorialstudio.com", password: "secret123" })).statusCode).toBe(429);
   });
 });

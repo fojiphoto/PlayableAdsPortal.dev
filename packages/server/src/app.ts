@@ -22,6 +22,7 @@ import { compileRoutes } from "./routes/compile.js";
 import { supportRoutes } from "./routes/support.js";
 import { adminRoutes } from "./routes/admin.js";
 import { pluginGuard, pluginRoutes } from "./routes/plugin.js";
+import { turnstileEnabled } from "./turnstile.js";
 
 /** Build the Fastify app (exported separately so tests can drive it via inject()). */
 export async function buildApp(): Promise<FastifyInstance> {
@@ -33,6 +34,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(multipart, { limits: { fileSize: config.maxUploadBytes } });
 
   app.get("/api/health", async () => ({ ok: true, service: "forge-server" }));
+  // public settings the web app needs before sign-in (read at runtime, so keys change without a rebuild)
+  app.get("/api/config/public", async () => ({ turnstileSiteKey: turnstileEnabled() ? config.turnstileSiteKey : null }));
 
   // requests from the Unity plugin: minimum version, licence and ban checks (no-op for the website)
   app.addHook("onRequest", pluginGuard);

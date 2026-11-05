@@ -35,6 +35,12 @@ export const config = {
   /** send reminder emails automatically once a day (admins can always run them by hand) */
   remindersAuto: process.env.REMINDERS_AUTO === "1",
 
+  // ── Cloudflare Turnstile (bot check on sign-up, forgot-password, contact) — off unless both are set ──
+  /** public site key, served to the web app by GET /api/config/public */
+  turnstileSiteKey: process.env.TURNSTILE_SITE_KEY ?? "",
+  /** secret key for server-side verification (never sent to the browser) */
+  turnstileSecret: process.env.TURNSTILE_SECRET_KEY ?? "",
+
   // ── Unity plugin distribution ──
   /** the plugin source the server packages per download. Default: packages/unity-plugin */
   pluginDir: process.env.PLUGIN_DIR ?? resolve(here, "../../unity-plugin"),

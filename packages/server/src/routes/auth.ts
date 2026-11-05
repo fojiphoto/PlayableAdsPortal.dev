@@ -22,6 +22,7 @@ import { matchTotpStep } from "../totp.js";
 import { rateLimit, clearRateLimit } from "../rate-limit.js";
 import { sendMail, template } from "../mail.js";
 import { config } from "../config.js";
+import { requireHuman } from "../turnstile.js";
 
 interface Credentials {
   email?: string;
@@ -71,11 +72,14 @@ async function sendVerification(req: FastifyRequest, userId: string, email: stri
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
-  app.post<{ Body: Credentials }>("/api/signup", async (req, reply) => {
+  app.post<{ Body: Credentials & { turnstileToken?: string } }>("/api/signup", async (req, reply) => {
     const email = req.body?.email?.trim().toLowerCase();
     const password = req.body?.password;
     if (!email || !password) return reply.code(400).send({ error: "email and password required" });
     if (password.length < 6) return reply.code(400).send({ error: "password must be at least 6 characters" });
+    // account-farming guard: a handful of sign-ups per address per hour, plus the bot check
+    if (!rateLimit(`signup:${req.ip}`, 10, 60 * 60_000)) return reply.code(429).send({ error: "too many sign-ups from this network — try again later" });
+    if (!(await requireHuman(req, reply, "signup"))) return reply;
     if (getUserByEmail(email)) return reply.code(409).send({ error: "email already registered" });
     const u = createUser(email, hashPassword(password));
     await sendVerification(req, u.id, u.email);
@@ -145,12 +149,13 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
   // ── password reset ──
   // Always 200 so the endpoint can't be used to probe which emails exist.
-  app.post<{ Body: { email?: string } }>("/api/password/forgot", async (req, reply) => {
+  app.post<{ Body: { email?: string; turnstileToken?: string } }>("/api/password/forgot", async (req, reply) => {
     const email = req.body?.email?.trim().toLowerCase();
     if (!email) return reply.code(400).send({ error: "email required" });
     const okPair = rateLimit(`forgot:${req.ip}:${email}`, 5, WINDOW);
     const okIp = rateLimit(`forgot:${req.ip}`, 30, WINDOW);
     if (!okPair || !okIp) return reply.code(429).send({ error: "too many requests — try again later" });
+    if (!(await requireHuman(req, reply, "forgot"))) return reply; // stops reset-mail bombing by bots
 
     const u = getUserByEmail(email);
     if (u) {

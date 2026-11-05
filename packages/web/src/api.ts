@@ -103,8 +103,10 @@ async function patchJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 // ── auth ──
-export const signup = (email: string, password: string) =>
-  postJson<{ token: string; user: AuthUser }>("/signup", { email, password });
+export const signup = (email: string, password: string, turnstileToken?: string) =>
+  postJson<{ token: string; user: AuthUser }>("/signup", { email, password, turnstileToken });
+/** Settings the web app needs before sign-in (e.g. the Turnstile site key; null = bot check off). */
+export const getPublicConfig = () => getJson<{ turnstileSiteKey: string | null }>("/config/public");
 export const login = (email: string, password: string, code?: string) =>
   postJson<{ token: string; user: AuthUser }>("/login", { email, password, code });
 export const me = () => getJson<MeResponse>("/me");
@@ -112,7 +114,7 @@ export const me = () => getJson<MeResponse>("/me");
 // ── email verification + password recovery ──
 export const verifyEmail = (token: string) => postJson<{ verified: true; email: string }>("/signup/verify", { token });
 export const resendVerification = () => postJson<{ sent?: boolean; verified?: boolean }>("/signup/resend", {});
-export const forgotPassword = (email: string) => postJson<{ ok: true }>("/password/forgot", { email });
+export const forgotPassword = (email: string, turnstileToken?: string) => postJson<{ ok: true }>("/password/forgot", { email, turnstileToken });
 export const checkResetToken = (token: string) => postJson<{ valid: boolean }>("/password/reset/check", { token });
 export const resetPassword = (token: string, newPassword: string) => postJson<{ ok: true }>("/password/reset", { token, newPassword });
 
@@ -304,7 +306,8 @@ export const replyThread = (id: string, message: string, asSupport?: boolean) =>
 export const closeThread = (id: string, status: "open" | "closed", asSupport?: boolean) =>
   postJson<SupportThread>(`/support/threads/${id}/close${asQ(asSupport)}`, { status });
 export const reportBug = (title: string, body: string, page?: string) => postJson<{ id: string }>("/feedback/bug", { title, body, page });
-export const sendContact = (c: { name: string; email: string; company?: string; message: string; website?: string }) => postJson<{ ok: true }>("/contact", c);
+export const sendContact = (c: { name: string; email: string; company?: string; message: string; website?: string; turnstileToken?: string }) =>
+  postJson<{ ok: true }>("/contact", c);
 
 // ── platform admin ──
 export const adminOverview = () => getJson<AdminOverview>("/admin/overview");

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { login, signup, setToken, forgotPassword, checkResetToken, resetPassword } from "../api";
 import type { AuthUser } from "../types";
+import { Turnstile, useCaptchaSiteKey } from "./Turnstile";
 
 type Mode = "login" | "signup" | "forgot" | "reset";
 
@@ -29,6 +30,11 @@ export function AuthScreen({
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [tokenValid, setTokenValid] = useState<boolean | null>(null);
+  // bot check on the public forms (sign-up, forgot password) when the server has Turnstile keys
+  const siteKey = useCaptchaSiteKey();
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaRun, setCaptchaRun] = useState(0);
+  const needsCaptcha = (mode === "signup" || mode === "forgot") && !!siteKey;
 
   // validate the reset link before showing the form
   useEffect(() => {
@@ -40,6 +46,7 @@ export function AuthScreen({
 
   function switchMode(m: Mode) {
     setMode(m);
+    setCaptcha(null);
     setErr(null);
     setInfo(null);
   }
@@ -51,7 +58,7 @@ export function AuthScreen({
     setInfo(null);
     try {
       if (mode === "forgot") {
-        await forgotPassword(email);
+        await forgotPassword(email, captcha ?? undefined);
         setInfo("If an account exists for that email, we've sent a reset link. Check your inbox (and spam).");
       } else if (mode === "reset") {
         await resetPassword(resetToken!, password);
@@ -61,7 +68,7 @@ export function AuthScreen({
         setMode("login");
       } else {
         const { token, user } =
-          mode === "login" ? await login(email, password, code || undefined) : await signup(email, password);
+          mode === "login" ? await login(email, password, code || undefined) : await signup(email, password, captcha ?? undefined);
         setToken(token);
         onAuth(user);
       }
@@ -72,11 +79,14 @@ export function AuthScreen({
         setErr("Enter the 6-digit code from your authenticator app.");
       } else if (c === "2fa-invalid") {
         setErr("Invalid code — try again.");
+      } else if (c === "captcha-required" || c === "captcha-failed") {
+        setErr((e as Error).message);
       } else {
         setErr((e as Error).message);
       }
     } finally {
       setBusy(false);
+      if (needsCaptcha) setCaptchaRun((n) => n + 1); // the token is single-use
     }
   }
 
@@ -144,13 +154,15 @@ export function AuthScreen({
             </>
           )}
 
+          {needsCaptcha && siteKey && <Turnstile key={mode} siteKey={siteKey} action={mode as "signup" | "forgot"} onToken={setCaptcha} resetSignal={captchaRun} />}
+
           {err && <div className="mb-3 text-sm text-red-400">{err}</div>}
           {info && <div className="mb-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">{info}</div>}
 
           {!(mode === "reset" && tokenValid === false) && (
             <button
               type="submit"
-              disabled={busy || (mode === "reset" && tokenValid === null)}
+              disabled={busy || (mode === "reset" && tokenValid === null) || (needsCaptcha && !captcha)}
               className="w-full rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40"
             >
               {busy ? "…" : mode === "login" ? "Sign in" : mode === "signup" ? "Sign up" : mode === "forgot" ? "Send reset link" : "Set new password"}

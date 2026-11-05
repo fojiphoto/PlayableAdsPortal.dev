@@ -18,6 +18,7 @@ import { config } from "../config.js";
 import { sendMail, template } from "../mail.js";
 import { rateLimit } from "../rate-limit.js";
 import { siteUrl } from "../site.js";
+import { requireHuman } from "../turnstile.js";
 
 const MAX_BODY = 5000;
 const clean = (s: unknown, max: number) => String(s ?? "").trim().slice(0, max);
@@ -155,7 +156,7 @@ export async function supportRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── public contact form (landing "Contact sales", Enterprise) ──
-  app.post<{ Body: { name?: string; email?: string; company?: string; message?: string; website?: string } }>("/api/contact", async (req, reply) => {
+  app.post<{ Body: { name?: string; email?: string; company?: string; message?: string; website?: string; turnstileToken?: string } }>("/api/contact", async (req, reply) => {
     // honeypot: real forms leave `website` empty; bots fill it → pretend success
     if (req.body?.website) return { ok: true };
     const name = clean(req.body?.name, 120);
@@ -164,6 +165,7 @@ export async function supportRoutes(app: FastifyInstance): Promise<void> {
     const message = clean(req.body?.message, MAX_BODY);
     if (!name || !message || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return reply.code(400).send({ error: "name, a valid email and a message are required" });
     if (!rateLimit(`contact:${req.ip}`, 5, 60 * 60_000)) return reply.code(429).send({ error: "Too many messages — try again later." });
+    if (!(await requireHuman(req, reply, "contact"))) return reply;
     const c = createContact(name, email, company, message);
     void notifySupport(`[Contact] ${name}${company ? ` · ${company}` : ""}`, `${escapeHtml(name)} &lt;${escapeHtml(email)}&gt;${company ? ` (${escapeHtml(company)})` : ""}:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/admin/contact`);
     return reply.code(201).send({ ok: true, id: c.id });
