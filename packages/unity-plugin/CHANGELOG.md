@@ -3,6 +3,10 @@
 The server reads the entry for the current `package.json` version as the release notes shown in the
 plugin window and the dashboard. Keep `Editor/AdLabBuildInfo.cs` in step with `package.json`.
 
+## [0.2.1] - 2026-11-05
+
+- Sign in with two-factor authentication: the window asks for your authenticator code when your account uses 2FA.
+
 ## [0.2.0] - 2026-11-05
 
 - Download the plugin from your dashboard (Settings ▸ Unity plugin) as a .unitypackage licensed to you.

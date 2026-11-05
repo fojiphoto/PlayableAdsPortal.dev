@@ -23,6 +23,9 @@ namespace FactorialAdLab.Editor
         bool showPlugin = true;
         string email = "";
         string password = "";
+        // two-factor sign-in: the server answers 2fa-required, then we ask for the authenticator code
+        string totpCode = "";
+        bool needCode;
         string token = "";
         string status = "";
         CaptureSettings cfg = new CaptureSettings();
@@ -106,9 +109,15 @@ namespace FactorialAdLab.Editor
             {
                 email = EditorGUILayout.TextField("Email", email);
                 password = EditorGUILayout.PasswordField("Password", password);
-                using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password)))
+                if (needCode)
                 {
-                    if (GUILayout.Button("Sign in")) SignIn();
+                    totpCode = EditorGUILayout.TextField("2FA code", totpCode);
+                    GUILayout.Label("The 6-digit code from your authenticator app.", EditorStyles.miniLabel);
+                }
+                bool codeMissing = needCode && CleanCode(totpCode).Length != 6;
+                using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password) || codeMissing))
+                {
+                    if (GUILayout.Button(needCode ? "Verify & sign in" : "Sign in")) SignIn();
                 }
             }
             else
@@ -117,6 +126,8 @@ namespace FactorialAdLab.Editor
                 if (GUILayout.Button("Sign out"))
                 {
                     token = "";
+                    needCode = false;
+                    totpCode = "";
                     EditorPrefs.DeleteKey(TokenKey);
                 }
 
@@ -203,7 +214,8 @@ namespace FactorialAdLab.Editor
         void SignIn()
         {
             status = "Signing in…";
-            string body = JsonUtility.ToJson(new Creds { email = email, password = password });
+            // `code` is ignored for accounts without 2FA; an empty one makes a 2FA account answer 2fa-required
+            string body = JsonUtility.ToJson(new Creds { email = email, password = password, code = needCode ? CleanCode(totpCode) : "" });
             var req = new UnityWebRequest(api.TrimEnd('/') + "/api/login", "POST")
             {
                 uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body)),
@@ -225,12 +237,29 @@ namespace FactorialAdLab.Editor
                         EditorPrefs.SetString(EmailKey, email);
                         status = "Signed in.";
                         password = "";
+                        totpCode = "";
+                        needCode = false;
                     }
                     else status = "Sign in failed: unexpected response.";
                 }
                 else
                 {
-                    status = "Sign in failed: " + (PluginHttp.ServerError(req) ?? req.error + " (" + req.downloadHandler.text + ")");
+                    string errCode = null;
+                    try { errCode = JsonUtility.FromJson<LoginErr>(req.downloadHandler.text)?.code; } catch { }
+                    if (errCode == "2fa-required")
+                    {
+                        needCode = true;
+                        status = "This account uses two-factor authentication: enter the code from your authenticator app.";
+                    }
+                    else if (errCode == "2fa-invalid" || errCode == "2fa-replay")
+                    {
+                        needCode = true;
+                        totpCode = "";
+                        status = errCode == "2fa-replay"
+                            ? "That code was already used. Wait for the next one and try again."
+                            : "That code didn't match. Check your authenticator app and try again.";
+                    }
+                    else status = "Sign in failed: " + (PluginHttp.ServerError(req) ?? req.error + " (" + req.downloadHandler.text + ")");
                 }
                 req.Dispose();
                 Repaint();
@@ -238,7 +267,17 @@ namespace FactorialAdLab.Editor
         }
 
         [System.Serializable]
-        class Creds { public string email; public string password; }
+        class Creds { public string email; public string password; public string code; }
+        [System.Serializable]
+        class LoginErr { public string error; public string code; }
+
+        /// <summary>Digits only (people paste "123 456").</summary>
+        static string CleanCode(string s)
+        {
+            var sb = new StringBuilder();
+            foreach (char c in s ?? "") if (c >= '0' && c <= '9') sb.Append(c);
+            return sb.ToString();
+        }
         [System.Serializable]
         class LoginRes { public string token; public UserObj user; }
         [System.Serializable]

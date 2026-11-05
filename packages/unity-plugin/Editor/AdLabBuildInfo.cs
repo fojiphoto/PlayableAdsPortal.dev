@@ -7,7 +7,7 @@ namespace FactorialAdLab.Editor
     /// </summary>
     internal static class AdLabBuildInfo
     {
-        public const string Version = "0.2.0";
+        public const string Version = "0.2.1";
         public const string Watermark = "";
     }
 }

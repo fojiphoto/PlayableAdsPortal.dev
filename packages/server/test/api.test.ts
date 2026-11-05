@@ -448,6 +448,26 @@ describe("security hardening (audit fixes)", () => {
     expect(r.statusCode).toBe(400);
   });
 
+  it("plugin sign-in contract: an empty code is ignored without 2FA and asks for one with it", async () => {
+    const { generateToken } = await import("../src/totp.js");
+    const plain = await signup("plain-plugin@factorialstudio.com", "secret123");
+    expect(plain).toBeTruthy();
+    // the Unity plugin always sends `code` (JsonUtility serialises an empty string)
+    const ok = await app.inject({ method: "POST", url: "/api/login", headers: { "x-adlab-plugin": "0.2.0" }, payload: { email: "plain-plugin@factorialstudio.com", password: "secret123", code: "" } });
+    expect(ok.statusCode).toBe(200);
+
+    const token = await signup("tfa-plugin@factorialstudio.com", "secret123");
+    const secret = (await app.inject({ method: "POST", url: "/api/2fa/begin", headers: bearer(token) })).json().secret as string;
+    await app.inject({ method: "POST", url: "/api/2fa/confirm", headers: bearer(token), payload: { code: generateToken(secret) } });
+    const login = (code: string) =>
+      app.inject({ method: "POST", url: "/api/login", headers: { "x-adlab-plugin": "0.2.0" }, payload: { email: "tfa-plugin@factorialstudio.com", password: "secret123", code } });
+    const ask = await login("");
+    expect(ask.statusCode).toBe(401);
+    expect(ask.json().code).toBe("2fa-required");
+    expect((await login("000000")).json().code).toBe("2fa-invalid");
+    expect((await login(generateToken(secret))).statusCode).toBe(200);
+  });
+
   it("rejects a replayed 2FA code at login", async () => {
     const { generateToken } = await import("../src/totp.js");
     const token = await signup("replay@factorialstudio.com", "secret123");
