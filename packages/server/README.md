@@ -51,7 +51,7 @@ npm run test -w @forge/server
 | PATCH | `/api/analytics/settings` | `{ enabled }` — embed beacons in future exports |
 | GET/POST | `/api/t/:creativeId/:network?e=&s=` | public beacon collector called from inside playables (no auth) |
 | GET  | `/api/creatives/:id/download/:network` | download one package |
-| GET  | `/api/creatives/:id/preview/:network` | inline HTML for an `<iframe>` |
+| GET  | `/api/creatives/:id/preview/:network[?host=0]` | the export for a sandboxed `<iframe>`, with the network's container simulated (MRAID 2.0 / SDK stubs that report calls to the parent); `host=0` = exact export. Always served with a CSP `sandbox` (opaque origin) |
 | GET  | `/api/creatives/:id/download-all` | all packages as one zip |
 | DELETE | `/api/creatives/:id` | remove |
 

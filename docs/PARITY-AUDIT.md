@@ -108,7 +108,7 @@ Legend: **DONE** / **PARTIAL** / **MISSING**. Evidence is `file:line` or route.
 |---|---|---|
 | `/preview` of exported playable | DONE | `creatives.ts`; `DevicePreview.tsx` |
 | Phone-frame preview + orientation toggle | DONE | `DevicePreview.tsx` |
-| MRAID stub in preview | MISSING | `window.mraid` undefined in the frame → MRAID CTA path never exercised |
+| MRAID stub in preview | DONE (2026-11-05) | Previews get a simulated network host (`packager/src/preview-host.ts`): full MRAID 2.0 `window.mraid` (loading→default+ready, viewableChange, sizeChange, open/close/expand/resize/…) for MRAID networks, and recording stubs for `ExitApi`, `FbPlayableAd`, Mintegral, Pangle, `dapi`, Vungle postMessage and `window.open`. The device preview shows a host console (every call, CTA highlighted) with Hide/Show (viewableChange → pause/resume) and Restart; `?host=0` serves the raw export. Previews are now CSP-sandboxed opaque origins (and the iframe is sandboxed), so uploaded playables can't read the dashboard's token. Verified in headless Chrome incl. the real Unity build booting sandboxed |
 | Shareable preview link | PARTIAL | UUID-guarded URL is shareable; no QR/short link UI |
 
 ### 1.8 Download — DONE (`/download/:network`, `/download-all`).
@@ -207,5 +207,5 @@ landing; two extra networks; a capture-based Unity path that ships *something* w
 | 12 | ~~Preloader kit templates, per-concept kit, server preview~~ **DONE 2026-11-03** — six templates, a kit library per workspace, server-rendered preview, app/concept overrides with inheritance (see 1.9) | Template library | done |
 | 13 | ~~Plugin distribution (download/version/self-update, licensing)~~ **DONE 2026-11-05** — per-download signed, watermarked `.unitypackage`, version/self-update, minimum-version and licence guard, leak tracing and download/user bans (see 1.13) | No way to ship/revoke the plugin | done |
 | 14 | ~~Support/feedback/contact/reminders~~ **DONE 2026-11-03** — support threads, bug reports, contact form, reminders and a platform admin role + console (see 1.15) | Ops tooling (17 endpoints) | done |
-| 15 | MRAID stub in preview; URL routing; Turnstile | UX/robustness | S each |
+| 15 | ~~MRAID stub in preview~~ **DONE 2026-11-05** (simulated host per network + sandboxed previews, see above); URL routing; Turnstile | UX/robustness | S each |
 | 16 | Infra: Postgres, object storage, shared rate-limit store | SQLite BLOB storage won't hold a studio's exports | L |

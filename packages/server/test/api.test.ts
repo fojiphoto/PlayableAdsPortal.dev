@@ -1837,3 +1837,34 @@ describe("unity plugin distribution (download, version, licence, bans)", () => {
     expect(getSetting("plugin_signing_key")).toMatch(/BEGIN PRIVATE KEY/);
   });
 });
+
+describe("device preview: simulated network host + sandbox", () => {
+  it("previews get the network's simulated host and an opaque-origin sandbox; downloads stay untouched", async () => {
+    const token = await signup("preview-host@factorialstudio.com");
+    verifyDomain("preview-host@factorialstudio.com");
+    await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "P" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c" } })).json().id;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "sample.zip", contentType: "application/zip" });
+    const cid = (await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() })).json().id;
+    expect((await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(token), payload: { networks: ["applovin", "google"] } })).statusCode).toBe(200);
+
+    const mraid = await app.inject({ method: "GET", url: `/api/creatives/${cid}/preview/applovin` });
+    expect(mraid.headers["content-security-policy"]).toMatch(/^sandbox allow-scripts/);
+    expect(mraid.headers["content-security-policy"]).not.toContain("allow-same-origin");
+    expect(mraid.body).toContain("__adlabPreviewHost");
+    expect(mraid.body.indexOf("__adlabPreviewHost")).toBeLessThan(mraid.body.indexOf("window.PF ="));
+
+    const google = (await app.inject({ method: "GET", url: `/api/creatives/${cid}/preview/google` })).body;
+    expect(google).toContain('"hook":"google-exitapi"');
+    expect(google).toContain("simulated by the preview host");
+
+    const raw = await app.inject({ method: "GET", url: `/api/creatives/${cid}/preview/applovin?host=0` });
+    expect(raw.body).not.toContain("__adlabPreviewHost");
+    expect(raw.headers["content-security-policy"]).toMatch(/^sandbox/);
+    const dl = await app.inject({ method: "GET", url: `/api/creatives/${cid}/download/applovin` });
+    expect(dl.body).not.toContain("__adlabPreviewHost");
+    expect(dl.body).toBe(raw.body);
+  });
+});

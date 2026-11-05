@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import JSZip from "jszip";
-import { loadFromZip, pack, getNetwork, PRIORITY_NETWORK_IDS, formatBytes, buildCapturePlayable } from "@forge/packager";
+import { loadFromZip, pack, getNetwork, PRIORITY_NETWORK_IDS, formatBytes, buildCapturePlayable, injectPreviewHost } from "@forge/packager";
 import type { PackOptions, PackResult, CaptureBuildOptions, TapZone } from "@forge/packager";
 import { authed } from "../auth.js";
 import {
@@ -183,6 +183,9 @@ function sendBytes(reply: FastifyReply, bytes: Uint8Array, filename: string, con
     .header("Content-Disposition", `attachment; filename="${filename}"`)
     .send(Buffer.from(bytes));
 }
+
+/** Opaque-origin sandbox for previews: scripts, forms and popups run; same-origin access does not. */
+export const PREVIEW_SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-pointer-lock";
 
 export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   // upload a playable under a concept
@@ -459,7 +462,15 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.get<{ Params: { id: string; network: string } }>(
+  /**
+   * Device preview of one export. By default the network's container is simulated (MRAID 2.0 or the
+   * network's SDK globals, see packager/preview-host.ts) so the CTA path really runs and is reported
+   * to the dashboard; `?host=0` serves the export exactly as shipped.
+   *
+   * Uploaded playables are untrusted code: the response is CSP-sandboxed (opaque origin), so a
+   * creative can never read the dashboard's storage or cookies, even when the URL is opened directly.
+   */
+  app.get<{ Params: { id: string; network: string }; Querystring: { host?: string } }>(
     "/api/creatives/:id/preview/:network",
     async (req, reply) => {
       const e = getExport(req.params.id, req.params.network);
@@ -472,7 +483,18 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       } else {
         html = new TextDecoder().decode(e.bytes);
       }
-      return reply.header("Content-Type", "text/html; charset=utf-8").send(html);
+      if (req.query?.host !== "0") {
+        try {
+          html = injectPreviewHost(html, getNetwork(req.params.network));
+        } catch {
+          /* unknown network id: serve as stored */
+        }
+      }
+      return reply
+        .header("Content-Type", "text/html; charset=utf-8")
+        .header("Content-Security-Policy", PREVIEW_SANDBOX)
+        .header("Cache-Control", "no-store")
+        .send(html);
     },
   );
 

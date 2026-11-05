@@ -3,6 +3,7 @@ export * from "./types.js";
 export { NETWORKS, PRIORITY_NETWORK_IDS, getNetwork, allNetworks } from "./networks.js";
 export { inlineToSingleHtml, findExternalRefs, isExternalRef } from "./inline.js";
 export { injectRuntime } from "./wrap.js";
+export { buildPreviewHost, injectPreviewHost } from "./preview-host.js";
 export {
   PRELOADER_TEMPLATES,
   PRELOADER_TEMPLATE_IDS,
