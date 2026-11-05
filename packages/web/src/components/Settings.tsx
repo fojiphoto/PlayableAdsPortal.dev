@@ -2,7 +2,7 @@ import { PluginSection } from "./PluginSection";
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import { changePassword, twofaBegin, twofaConfirm, twofaDisable, twofaStatus } from "../api";
-import { getOrg, renameOrg, inviteMember, revokeInvite, setMemberRole, removeMember, leaveWorkspace, transferOwnership } from "../api";
+import { getOrg, renameOrg, inviteMember, revokeInvite, setMemberRole, removeMember, leaveWorkspace, transferOwnership, setRequire2fa } from "../api";
 import type { AuthUser, OrgDetail, OrgRole, PlanStatus } from "../types";
 
 const input =
@@ -63,6 +63,7 @@ export function Settings({ user, status, onWorkspaceChanged }: { user: AuthUser;
       setEnabled(true);
       setSetup(null);
       setCode("");
+      onWorkspaceChanged?.(); // a workspace that requires 2FA unlocks now
     } catch (err) {
       setTfaMsg((err as Error).message);
     } finally {
@@ -76,6 +77,7 @@ export function Settings({ user, status, onWorkspaceChanged }: { user: AuthUser;
       await twofaDisable(code);
       setEnabled(false);
       setCode("");
+      onWorkspaceChanged?.();
     } catch (err) {
       setTfaMsg((err as Error).message);
     } finally {
@@ -168,7 +170,7 @@ export function Settings({ user, status, onWorkspaceChanged }: { user: AuthUser;
         )}
       </section>
 
-      <WorkspaceSection me={user} onChanged={onWorkspaceChanged} />
+      <WorkspaceSection key={String(user.twoFactor)} me={user} onChanged={onWorkspaceChanged} />
       <PluginSection />
     </div>
   );
@@ -267,12 +269,44 @@ function WorkspaceSection({ me, onChanged }: { me: AuthUser; onChanged?: () => v
         member → admin → owner.
       </p>
 
+      <div className="mb-3 rounded-lg border border-[#1b5540] bg-[#06281c] px-3 py-2.5">
+        <label className="flex items-start gap-2 text-sm text-slate-200">
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-amber-500"
+            checked={!!org.require2fa}
+            disabled={!isAdmin || busy || !me.twoFactor}
+            onChange={(e) => void run(() => setRequire2fa(e.target.checked))}
+          />
+          <span>
+            Require two-factor authentication for every member
+            <span className="block text-xs text-slate-400">
+              {!isAdmin
+                ? "Admins decide this."
+                : !me.twoFactor
+                  ? "Turn on two-factor authentication for your own account (Security, above) to change this."
+                  : org.require2fa
+                    ? `${org.members.filter((m) => !m.twoFactor).length} member(s) without 2FA can sign in but can't use this workspace until they turn it on.`
+                    : "Members without 2FA get an email and can't use the workspace until they turn it on."}
+            </span>
+          </span>
+        </label>
+      </div>
+
       <div className="mb-3 grid gap-1">
         {org.members.map((m) => (
           <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#1b5540] bg-[#06281c] px-3 py-2 text-sm">
             <span className="text-slate-100">
               {m.email}
               {m.id === me.id && <span className="text-xs text-slate-500"> (you)</span>}
+              {isAdmin && (
+                <span
+                  className={`ml-2 rounded px-1.5 py-0.5 text-[10px] ${m.twoFactor ? "bg-emerald-500/15 text-emerald-300" : org.require2fa ? "bg-red-500/15 text-red-300" : "bg-[#123f2d] text-slate-400"}`}
+                  title={m.twoFactor ? "Two-factor authentication is on" : "No two-factor authentication"}
+                >
+                  {m.twoFactor ? "2FA" : "no 2FA"}
+                </span>
+              )}
             </span>
             <span className="flex items-center gap-2 text-xs">
               {canEditRow(m) ? (

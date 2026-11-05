@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authed, hashPassword, verifyPassword } from "../auth.js";
-import { getUserById, setTotp, updatePassword } from "../repo.js";
+import { getUserById, orgsRequiring2fa, setTotp, updatePassword } from "../repo.js";
 import { generateSecret, otpauthURL, verifyTotp } from "../totp.js";
 
 export async function accountRoutes(app: FastifyInstance): Promise<void> {
@@ -49,6 +49,13 @@ export async function accountRoutes(app: FastifyInstance): Promise<void> {
   app.post<{ Body: { code?: string } }>("/api/2fa/disable", authed, async (req, reply) => {
     const u = await getUserById(req.user!.id);
     if (!u || !u.totp_enabled || !u.totp_secret) return reply.code(400).send({ error: "2FA not enabled" });
+    const requiring = await orgsRequiring2fa(u.id);
+    if (requiring.length)
+      return reply.code(409).send({
+        error: `${requiring.join(", ")} require${requiring.length === 1 ? "s" : ""} two-factor authentication. Leave ${requiring.length === 1 ? "that workspace" : "those workspaces"} or ask an admin to drop the requirement first.`,
+        code: "2fa-required-by-workspace",
+        workspaces: requiring,
+      });
     if (!req.body?.code || !verifyTotp(u.totp_secret, req.body.code)) {
       return reply.code(400).send({ error: "invalid code" });
     }

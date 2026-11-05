@@ -1,6 +1,7 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { authed, createOpaqueToken, hashOpaqueToken } from "../auth.js";
 import {
+  setOrgRequire2fa,
   createOrg,
   createOrgInvite,
   currentOrgFor,
@@ -23,6 +24,7 @@ import {
 import { atLeast, isRole, needs, requireRole, workspaceView } from "../orgs.js";
 import { sendMail, template } from "../mail.js";
 import { siteUrl } from "../site.js";
+import { escapeHtml } from "./support.js";
 import { rateLimit } from "../rate-limit.js";
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -34,8 +36,9 @@ async function orgDetail(orgId: string, viewerRole: OrgRole) {
     id: org.id,
     name: org.name,
     role: viewerRole,
+    require2fa: !!org.require_2fa,
     owner: { id: org.owner_user_id, email: owner?.email ?? null },
-    members: await listOrgMembers(org.id),
+    members: (await listOrgMembers(org.id)).map((m) => ({ ...m, twoFactor: !!m.twoFactor })),
     // pending invites are admin-only information
     invites: atLeast(viewerRole, "admin") ? (await listOrgInvites(org.id)).map(inviteView) : [],
     createdAt: org.created_at,
@@ -49,6 +52,28 @@ const inviteView = (i: { id: string; email: string; role: string; expires_at: st
   createdAt: i.created_at,
 });
 
+/** Tell members without 2FA that the workspace now requires it (best effort). */
+async function notify2faRequired(req: FastifyRequest, orgId: string, orgName: string, byEmail: string): Promise<void> {
+  for (const m of await listOrgMembers(orgId)) {
+    if (m.twoFactor) continue;
+    try {
+      await sendMail({
+        to: m.email,
+        subject: `${orgName} now requires two-factor authentication — Factorial AdLab`,
+        html: template(
+          "Turn on two-factor authentication",
+          `${escapeHtml(byEmail)} made two-factor authentication required in the ${escapeHtml(orgName)} workspace. Until you turn it on, you can still sign in, but the workspace stays locked.`,
+          "Set it up now",
+          `${siteUrl(req)}/settings`,
+          "It takes a minute with any authenticator app (Google Authenticator, 1Password, Authy…).",
+        ),
+      });
+    } catch {
+      /* mail is best effort */
+    }
+  }
+}
+
 export async function orgRoutes(app: FastifyInstance): Promise<void> {
   // ── workspaces: list + switch + create ──
   app.get("/api/workspaces", authed, async (req) => {
@@ -59,6 +84,7 @@ export async function orgRoutes(app: FastifyInstance): Promise<void> {
       role: o.role,
       ownerEmail: o.owner_email,
       memberCount: o.member_count,
+      require2fa: !!o.require_2fa,
       isCurrent: o.id === cur.org.id,
     }));
   });
@@ -85,11 +111,25 @@ export async function orgRoutes(app: FastifyInstance): Promise<void> {
     return await orgDetail(ws.org.id, ws.role);
   });
 
-  app.patch<{ Body: { name?: string } }>("/api/orgs/current", needs("admin"), async (req, reply) => {
-    const name = req.body?.name?.trim();
-    if (!name) return reply.code(400).send({ error: "name cannot be empty" });
-    await renameOrg(req.workspace!.org.id, name.slice(0, 80));
-    return await orgDetail(req.workspace!.org.id, req.workspace!.role);
+  /** Rename, and/or set the two-factor policy (`require2fa`) — admins. */
+  app.patch<{ Body: { name?: string; require2fa?: boolean } }>("/api/orgs/current", needs("admin"), async (req, reply) => {
+    const { org, role } = req.workspace!;
+    if (req.body?.name !== undefined) {
+      const name = req.body.name?.trim();
+      if (!name) return reply.code(400).send({ error: "name cannot be empty" });
+      await renameOrg(org.id, name.slice(0, 80));
+    }
+    if (req.body?.require2fa !== undefined) {
+      const on = req.body.require2fa === true;
+      // whoever changes the policy must already comply, so turning it on can never lock out the admin
+      if (!(await getUserById(req.user!.id))?.totp_enabled)
+        return reply.code(400).send({ error: "Turn on two-factor authentication for your own account first (Settings ▸ Security).", code: "2fa-self-required" });
+      if (on !== !!org.require_2fa) {
+        await setOrgRequire2fa(org.id, on);
+        if (on) await notify2faRequired(req, org.id, org.name, req.user!.email);
+      }
+    }
+    return await orgDetail(org.id, role);
   });
 
   // ── members ──

@@ -35,8 +35,8 @@ const RESET_TTL_MS = 60 * 60 * 1000; // 1 h
 const VERIFY_TTL_MS = 48 * 60 * 60 * 1000; // 48 h
 
 
-function userView(u: { id: string; email: string; email_verified?: number; is_admin?: number }) {
-  return { id: u.id, email: u.email, emailVerified: !!u.email_verified, isAdmin: !!u.is_admin };
+function userView(u: { id: string; email: string; email_verified?: number; is_admin?: number; totp_enabled?: number }) {
+  return { id: u.id, email: u.email, emailVerified: !!u.email_verified, isAdmin: !!u.is_admin, twoFactor: !!u.totp_enabled };
 }
 
 /** ADMIN_EMAILS bootstrap: an address on the list becomes an admin the next time it signs in. */

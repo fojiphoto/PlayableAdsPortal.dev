@@ -138,6 +138,8 @@ export const switchWorkspace = (orgId: string) => postJson<WorkspaceRef>("/works
 export const createWorkspace = (name: string) => postJson<WorkspaceRef>("/orgs", { name });
 export const getOrg = () => getJson<OrgDetail>("/orgs/current");
 export const renameOrg = (name: string) => patchJson<OrgDetail>("/orgs/current", { name });
+/** Require two-factor authentication for every member of the current workspace (admins; needs your own 2FA on). */
+export const setRequire2fa = (require2fa: boolean) => patchJson<OrgDetail>("/orgs/current", { require2fa });
 export const inviteMember = (email: string, role: OrgRole) => postJson<OrgDetail>("/orgs/current/invites", { email, role });
 export const revokeInvite = (id: string) => delJson<OrgDetail>(`/orgs/current/invites/${id}`);
 export const setMemberRole = (userId: string, role: OrgRole) => patchJson<OrgDetail>(`/orgs/current/members/${userId}`, { role });

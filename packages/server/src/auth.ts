@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { config } from "./config.js";
+import { currentOrgFor, getUserById } from "./repo.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -71,6 +72,39 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply): Pro
     return;
   }
   req.user = { id: payload.sub, email: payload.email };
+  await requireWorkspace2fa(req, reply);
+}
+
+/**
+ * Routes a member of a 2FA-required workspace can still use without 2FA: setting it up, their account,
+ * and leaving / switching / creating a workspace (so the requirement never traps anyone).
+ */
+const TWO_FA_EXEMPT: [string, RegExp][] = [
+  ["GET", /^\/api\/me$/],
+  ["*", /^\/api\/2fa\//],
+  ["POST", /^\/api\/users\/password$/],
+  ["POST", /^\/api\/signup\/resend$/],
+  ["GET", /^\/api\/workspaces$/],
+  ["POST", /^\/api\/workspaces\/switch$/],
+  ["POST", /^\/api\/orgs$/],
+  ["GET", /^\/api\/orgs\/current$/],
+  ["DELETE", /^\/api\/orgs\/current\/members\/me$/],
+  ["POST", /^\/api\/invites\/accept$/],
+];
+
+/** The workspace's two-factor policy: members without 2FA get 403 `workspace-2fa-required`. */
+async function requireWorkspace2fa(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const path = (req.raw.url ?? "").split("?")[0]!;
+  if (TWO_FA_EXEMPT.some(([m, re]) => (m === "*" || m === req.method) && re.test(path))) return;
+  const ws = await currentOrgFor(req.user!.id);
+  if (!ws.org.require_2fa) return;
+  const u = await getUserById(req.user!.id);
+  if (u?.totp_enabled) return;
+  await reply.code(403).send({
+    error: `${ws.org.name} requires two-factor authentication. Turn it on in Settings ▸ Security (or switch workspace) to continue.`,
+    code: "workspace-2fa-required",
+    workspace: { id: ws.org.id, name: ws.org.name },
+  });
 }
 
 /** Route options spread that marks a route as authenticated. */

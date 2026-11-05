@@ -461,12 +461,16 @@ export interface OrgRow {
   name: string;
   owner_user_id: string;
   default_kit_id: string | null;
+  /** 1 = every member must have two-factor authentication on */
+  require_2fa: number;
   created_at: string;
 }
 export interface OrgMemberView {
   id: string;
   email: string;
   role: OrgRole;
+  /** 1 when the member has two-factor authentication on */
+  twoFactor: number;
   createdAt: string;
 }
 export interface OrgInviteRow {
@@ -485,7 +489,7 @@ export const defaultOrgName = (email: string): string => `${email.split("@")[0] 
 
 /** Create a workspace owned by `ownerId` (also becomes their current workspace if they have none). */
 export async function createOrg(ownerId: string, name: string): Promise<OrgRow> {
-  const row: OrgRow = { id: randomUUID(), name, owner_user_id: ownerId, default_kit_id: null, created_at: now() };
+  const row: OrgRow = { id: randomUUID(), name, owner_user_id: ownerId, default_kit_id: null, require_2fa: 0, created_at: now() };
   const d = db();
   await d.prepare("INSERT INTO orgs (id, name, owner_user_id, created_at) VALUES (?, ?, ?, ?)").run(row.id, row.name, row.owner_user_id, row.created_at);
   await d.prepare("INSERT INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)").run(row.id, ownerId, now());
@@ -494,6 +498,17 @@ export async function createOrg(ownerId: string, name: string): Promise<OrgRow> 
 }
 export async function getOrg(id: string): Promise<OrgRow | undefined> {
   return await db().prepare("SELECT * FROM orgs WHERE id = ?").get(id) as OrgRow | undefined;
+}
+export async function setOrgRequire2fa(id: string, required: boolean): Promise<void> {
+  await db().prepare("UPDATE orgs SET require_2fa = ? WHERE id = ?").run(required ? 1 : 0, id);
+}
+/** Names of the workspaces this user belongs to that require two-factor authentication. */
+export async function orgsRequiring2fa(userId: string): Promise<string[]> {
+  return (
+    await db()
+      .prepare("SELECT o.name FROM org_members m JOIN orgs o ON o.id = m.org_id WHERE m.user_id = ? AND o.require_2fa = 1 ORDER BY o.name")
+      .all<{ name: string }>(userId)
+  ).map((r) => r.name);
 }
 export async function renameOrg(id: string, name: string): Promise<void> {
   await db().prepare("UPDATE orgs SET name = ? WHERE id = ?").run(name, id);
@@ -541,7 +556,7 @@ export async function setCurrentOrg(userId: string, orgId: string): Promise<bool
 export async function listOrgMembers(orgId: string): Promise<OrgMemberView[]> {
   return await db()
     .prepare(
-      `SELECT u.id AS id, u.email AS email, m.role AS role, m.created_at AS "createdAt"
+      `SELECT u.id AS id, u.email AS email, m.role AS role, u.totp_enabled AS "twoFactor", m.created_at AS "createdAt"
        FROM org_members m JOIN users u ON u.id = m.user_id WHERE m.org_id = ?
        ORDER BY CASE m.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'member' THEN 2 ELSE 3 END, m.created_at`,
     )

@@ -360,6 +360,8 @@ const MIGRATIONS = [
     "ALTER TABLE preloader_kits ADD COLUMN logo_key TEXT",
     // gap #16: running jobs prove they're alive, so another instance only recovers truly abandoned ones
     "ALTER TABLE jobs ADD COLUMN heartbeat_at TEXT",
+    // per-workspace policy: every member must have two-factor authentication on
+    "ALTER TABLE orgs ADD COLUMN require_2fa INTEGER NOT NULL DEFAULT 0",
 ];
 
 // node:sqlite takes null (not undefined) and Uint8Array; node-postgres wants Buffers for bytea

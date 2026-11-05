@@ -38,7 +38,7 @@ npm run test -w @forge/server
 | POST / GET | `/api/compile/jobs` (`conceptId` field) / `/api/compile/jobs/:id` | competitor-shaped aliases |
 | GET / POST | `/api/workspaces`, `/api/workspaces/switch` | the caller's workspaces (role, isCurrent) / set the current one |
 | POST | `/api/orgs` | create a workspace (you become owner) |
-| GET / PATCH | `/api/orgs/current` | members + pending invites / rename (admin) |
+| GET / PATCH | `/api/orgs/current` | members (with 2FA status) + pending invites / rename and `require2fa` policy (admin, needs own 2FA) — members without 2FA then get 403 `workspace-2fa-required` until they enable it |
 | PATCH / DELETE | `/api/orgs/current/members/:userId` | change role / remove (admin; `me` = leave) |
 | POST | `/api/orgs/current/transfer` | hand ownership to a member (owner) |
 | POST / DELETE | `/api/orgs/current/invites[/:id]` | email invite with a 7-day link / revoke (admin) |

@@ -70,5 +70,5 @@ export async function billingOwnerId(userId: string): Promise<string> {
 }
 
 export function workspaceView(ws: Workspace, ownerEmail?: string) {
-  return { id: ws.org.id, name: ws.org.name, role: ws.role, ownerId: ws.org.owner_user_id, ownerEmail: ownerEmail ?? null };
+  return { id: ws.org.id, name: ws.org.name, role: ws.role, ownerId: ws.org.owner_user_id, ownerEmail: ownerEmail ?? null, require2fa: !!ws.org.require_2fa };
 }

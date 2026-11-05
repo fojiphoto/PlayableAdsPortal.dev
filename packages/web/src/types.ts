@@ -33,6 +33,8 @@ export interface AuthUser {
   emailVerified?: boolean;
   /** platform admin (Admin console) */
   isAdmin?: boolean;
+  /** two-factor authentication is on */
+  twoFactor?: boolean;
 }
 
 export interface App {
@@ -135,6 +137,8 @@ export interface WorkspaceRef {
   role: OrgRole;
   ownerId: string;
   ownerEmail: string | null;
+  /** every member must have two-factor authentication on */
+  require2fa?: boolean;
 }
 export interface WorkspaceListItem {
   id: string;
@@ -142,12 +146,14 @@ export interface WorkspaceListItem {
   role: OrgRole;
   ownerEmail: string;
   memberCount: number;
+  require2fa?: boolean;
   isCurrent: boolean;
 }
 export interface OrgMember {
   id: string;
   email: string;
   role: OrgRole;
+  twoFactor?: boolean;
   createdAt: string;
 }
 export interface OrgInvite {
@@ -161,6 +167,7 @@ export interface OrgDetail {
   id: string;
   name: string;
   role: OrgRole;
+  require2fa?: boolean;
   owner: { id: string; email: string | null };
   members: OrgMember[];
   invites: OrgInvite[];

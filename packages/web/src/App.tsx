@@ -43,6 +43,8 @@ export default function App() {
   const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([]);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
   const canEdit = !workspace || workspace.role !== "viewer";
+  // the current workspace requires 2FA and this account has none: only Settings (to turn it on) is usable
+  const twoFactorGate = !!workspace?.require2fa && !!user && !user.twoFactor;
 
   useEffect(() => {
     // deep links from emails / Stripe: ?reset=<token>, ?verify=<token>, ?billing=success|cancel
@@ -173,14 +175,21 @@ export default function App() {
 
   /** Re-read everything that depends on the current workspace (the selection lives in the URL). */
   async function refreshWorkspace() {
+    let gated = false;
     try {
       const r = await me();
       setWorkspace(r.workspace);
       setUser(r.user);
+      gated = !!r.workspace?.require2fa && !r.user.twoFactor;
     } catch {
       /* keep going with what we have */
     }
     listWorkspaces().then(setWorkspaces).catch(() => {});
+    if (gated) {
+      // the workspace requires 2FA this account doesn't have: its data stays locked until it's on
+      setApps([]);
+      return;
+    }
     refreshUnread();
     listApps().then(setApps).catch((e) => setErr((e as Error).message));
     getBillingStatus().then(setStatus).catch(() => {});
@@ -368,7 +377,20 @@ export default function App() {
         </div>
       </header>
 
-      {page === "plans" ? (
+      {twoFactorGate && page !== "settings" ? (
+        <main className="min-w-0 flex-1 p-6">
+          <div className="mx-auto mt-10 max-w-lg rounded-xl border border-amber-500/40 bg-amber-500/5 p-6 text-center">
+            <h1 className="mb-2 text-lg font-semibold text-slate-100">{workspace?.name} requires two-factor authentication</h1>
+            <p className="mb-5 text-sm text-slate-300">
+              An admin made 2FA required for everyone in this workspace. Turn it on for your account to continue — it takes a minute with any
+              authenticator app. You can also switch to another workspace from the menu above.
+            </p>
+            <a {...nav({ page: "settings" })} className="inline-block rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500">
+              Set up two-factor authentication
+            </a>
+          </div>
+        </main>
+      ) : page === "plans" ? (
         <main className="min-w-0 flex-1 p-6">
           <Plans status={status} onChanged={setStatus} email={user.email} />
         </main>

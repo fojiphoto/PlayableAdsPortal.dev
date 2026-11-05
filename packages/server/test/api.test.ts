@@ -1984,3 +1984,85 @@ describe("Cloudflare Turnstile on public forms", () => {
     expect((await post("/api/signup", { email: "burst-x@factorialstudio.com", password: "secret123" })).statusCode).toBe(429);
   });
 });
+
+describe("per-workspace two-factor policy", () => {
+  const H = (t: string) => ({ authorization: `Bearer ${t}` });
+  const call = (method: "GET" | "POST" | "PATCH" | "DELETE", url: string, token: string, payload?: Record<string, unknown>) =>
+    app.inject({ method, url, headers: H(token), ...(payload ? { payload } : {}) });
+  async function enable2fa(token: string) {
+    const { generateToken } = await import("../src/totp.js");
+    const secret = (await call("POST", "/api/2fa/begin", token)).json().secret as string;
+    expect((await call("POST", "/api/2fa/confirm", token, { code: generateToken(secret) })).json()).toEqual({ enabled: true });
+    return secret;
+  }
+  async function join(owner: string, email: string, role = "member") {
+    await call("POST", "/api/orgs/current/invites", owner, { email, role });
+    const m = [...outbox].reverse().find((x) => x.to === email && x.html.includes("?invite="))!;
+    const t = await signup(email);
+    await call("POST", "/api/invites/accept", t, { token: m.html.match(/[?&]invite=([a-f0-9]+)/)![1]! });
+    return t;
+  }
+
+  it("admins turn it on only with 2FA themselves; members without 2FA are held at the door until they enable it", async () => {
+    const owner = await signup("policy-owner@factorialstudio.com");
+    const member = await join(owner, "policy-member@factorialstudio.com");
+    await call("POST", "/api/apps", owner, { name: "Shared app" });
+    expect((await call("GET", "/api/orgs/current", owner)).json().require2fa).toBe(false);
+
+    const noSelf = await call("PATCH", "/api/orgs/current", owner, { require2fa: true });
+    expect(noSelf.statusCode).toBe(400);
+    expect(noSelf.json().code).toBe("2fa-self-required");
+    expect((await call("PATCH", "/api/orgs/current", member, { require2fa: true })).statusCode).toBe(403); // members can't
+
+    const ownerSecret = await enable2fa(owner);
+    clearOutbox();
+    const on = (await call("PATCH", "/api/orgs/current", owner, { require2fa: true })).json();
+    expect(on.require2fa).toBe(true);
+    expect(on.members.map((m: { email: string; twoFactor: boolean }) => [m.email, m.twoFactor]).sort()).toEqual([
+      ["policy-member@factorialstudio.com", false],
+      ["policy-owner@factorialstudio.com", true],
+    ]);
+    expect(outbox.filter((m) => m.subject.includes("requires two-factor")).map((m) => m.to)).toEqual(["policy-member@factorialstudio.com"]);
+
+    // the member is blocked from workspace data — everything the plugin and dashboard do
+    const blocked = await call("GET", "/api/apps", member);
+    expect(blocked.statusCode).toBe(403);
+    expect(blocked.json()).toMatchObject({ code: "workspace-2fa-required", workspace: { name: "policy-owner's workspace" } });
+    expect((await call("POST", "/api/apps", member, { name: "x" })).json().code).toBe("workspace-2fa-required");
+    // …but can see why, and fix it or go elsewhere
+    const me = (await call("GET", "/api/me", member)).json();
+    expect(me).toMatchObject({ user: { twoFactor: false }, workspace: { require2fa: true } });
+    expect((await call("GET", "/api/orgs/current", member)).statusCode).toBe(200);
+    const list = (await call("GET", "/api/workspaces", member)).json();
+    const own = list.find((w: { role: string }) => w.role === "owner");
+    expect(list.find((w: { isCurrent: boolean }) => w.isCurrent).require2fa).toBe(true);
+    expect((await call("POST", "/api/workspaces/switch", member, { orgId: own.id })).statusCode).toBe(200);
+    expect((await call("GET", "/api/apps", member)).statusCode).toBe(200); // their own workspace has no policy
+    await call("POST", "/api/workspaces/switch", member, { orgId: on.id });
+    expect((await call("GET", "/api/apps", member)).statusCode).toBe(403);
+
+    // enabling 2FA lets them in; turning it off is refused while the workspace requires it
+    const memberSecret = await enable2fa(member);
+    expect((await call("GET", "/api/apps", member)).json().map((a: { name: string }) => a.name)).toEqual(["Shared app"]);
+    const { generateToken } = await import("../src/totp.js");
+    const off = await call("POST", "/api/2fa/disable", member, { code: generateToken(memberSecret) });
+    expect(off.statusCode).toBe(409);
+    expect(off.json()).toMatchObject({ code: "2fa-required-by-workspace", workspaces: ["policy-owner's workspace"] });
+
+    // the admin drops the policy (still needs 2FA to change it); then the member may turn 2FA off
+    expect((await call("PATCH", "/api/orgs/current", owner, { require2fa: false })).json().require2fa).toBe(false);
+    expect((await call("POST", "/api/2fa/disable", member, { code: generateToken(memberSecret) })).json()).toEqual({ enabled: false });
+    expect(ownerSecret).toBeTruthy();
+  });
+
+  it("a blocked member can still leave the workspace", async () => {
+    const owner = await signup("policy-owner2@factorialstudio.com");
+    const member = await join(owner, "policy-leaver@factorialstudio.com");
+    await enable2fa(owner);
+    await call("PATCH", "/api/orgs/current", owner, { require2fa: true });
+    expect((await call("GET", "/api/apps", member)).statusCode).toBe(403);
+    const left = await call("DELETE", "/api/orgs/current/members/me", member);
+    expect(left.json()).toMatchObject({ left: true, workspace: { role: "owner", require2fa: false } });
+    expect((await call("GET", "/api/apps", member)).statusCode).toBe(200);
+  });
+});
