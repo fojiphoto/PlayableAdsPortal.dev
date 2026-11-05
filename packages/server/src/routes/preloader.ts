@@ -54,9 +54,9 @@ export async function preloaderRoutes(app: FastifyInstance): Promise<void> {
   app.get("/api/kit/templates", async () => PRELOADER_TEMPLATES);
 
   app.get("/api/kits", authed, async (req) => {
-    const ws = currentOrgFor(req.user!.id);
-    const kits = listKits(ws.org.id);
-    const a = kitAssignments(ws.org.id);
+    const ws = await currentOrgFor(req.user!.id);
+    const kits = await listKits(ws.org.id);
+    const a = await kitAssignments(ws.org.id);
     const usage = (id: string) => a.apps.filter((x) => x.kit_id === id).length + a.concepts.filter((x) => x.kit_id === id).length;
     return {
       kits: kits.map((k) => ({ ...kitView(k), usedBy: usage(k.id) + (ws.org.default_kit_id === k.id ? 1 : 0) })),
@@ -74,13 +74,13 @@ export async function preloaderRoutes(app: FastifyInstance): Promise<void> {
   const create = async (req: FastifyRequest, reply: FastifyReply) => {
     const org = req.workspace!.org;
     const orgId = org.id;
-    if (listKits(orgId).length >= MAX_KITS_PER_WORKSPACE)
+    if ((await listKits(orgId)).length >= MAX_KITS_PER_WORKSPACE)
       return reply.code(400).send({ error: `A workspace can have at most ${MAX_KITS_PER_WORKSPACE} kits — delete one first.`, code: "kit-limit" });
     const f = parseKitBody(req.body as KitBody, true);
     if (typeof f === "string") return reply.code(400).send({ error: f });
-    const kit = createKit(orgId, f as KitFields);
+    const kit = await createKit(orgId, f as KitFields);
     // the first kit of a workspace becomes its default, so a new user's first save "just works"
-    if (!org.default_kit_id) setDefaultKit(orgId, kit.id);
+    if (!org.default_kit_id) await setDefaultKit(orgId, kit.id);
     return reply.code(201).send(kitView(kit));
   };
   app.post("/api/kits", needs("admin"), create);
@@ -89,17 +89,17 @@ export async function preloaderRoutes(app: FastifyInstance): Promise<void> {
   app.patch<{ Params: { id: string } }>("/api/kits/:id", needs("admin"), async (req, reply) => {
     const f = parseKitBody(req.body as KitBody, false);
     if (typeof f === "string") return reply.code(400).send({ error: f });
-    const k = updateKit(req.params.id, req.workspace!.org.id, f);
+    const k = await updateKit(req.params.id, req.workspace!.org.id, f);
     return k ? kitView(k) : reply.code(404).send({ error: "kit not found" });
   });
 
   app.post<{ Params: { id: string } }>("/api/kits/:id/duplicate", needs("admin"), async (req, reply) => {
     const orgId = req.workspace!.org.id;
-    const k = getKit(req.params.id, orgId);
+    const k = await getKit(req.params.id, orgId);
     if (!k) return reply.code(404).send({ error: "kit not found" });
-    if (listKits(orgId).length >= MAX_KITS_PER_WORKSPACE)
+    if ((await listKits(orgId)).length >= MAX_KITS_PER_WORKSPACE)
       return reply.code(400).send({ error: `A workspace can have at most ${MAX_KITS_PER_WORKSPACE} kits — delete one first.`, code: "kit-limit" });
-    const copy = createKit(orgId, {
+    const copy = await createKit(orgId, {
       name: `${k.name} copy`.slice(0, 60),
       template: k.template,
       bg: k.bg,
@@ -113,15 +113,15 @@ export async function preloaderRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.delete<{ Params: { id: string } }>("/api/kits/:id", needs("admin"), async (req, reply) =>
-    deleteKit(req.params.id, req.workspace!.org.id) ? { deleted: true } : reply.code(404).send({ error: "kit not found" }),
+    await deleteKit(req.params.id, req.workspace!.org.id) ? { deleted: true } : reply.code(404).send({ error: "kit not found" }),
   );
 
   /** The workspace default kit (null = exports get no preloader unless an app/concept picks one). */
   app.put<{ Body: { kitId?: string | null } }>("/api/kits/default", needs("admin"), async (req, reply) => {
     const orgId = req.workspace!.org.id;
     const id = req.body?.kitId ?? null;
-    if (id !== null && !getKit(id, orgId)) return reply.code(400).send({ error: "kit not found in this workspace" });
-    setDefaultKit(orgId, id);
+    if (id !== null && !await getKit(id, orgId)) return reply.code(400).send({ error: "kit not found in this workspace" });
+    await setDefaultKit(orgId, id);
     return { defaultKitId: id };
   });
 
@@ -134,12 +134,12 @@ export async function preloaderRoutes(app: FastifyInstance): Promise<void> {
     const f = parseKitBody({ ...req.body, name: "preview" }, true);
     if (typeof f === "string") return reply.code(400).send({ error: f });
     if (req.body?.logoDataUri === undefined) delete f.logo; // keep the saved image of kitId
-    const saved = req.body?.kitId ? getKit(req.body.kitId, currentOrgFor(req.user!.id).org.id) : undefined;
+    const saved = req.body?.kitId ? await getKit(req.body.kitId, (await currentOrgFor(req.user!.id)).org.id) : undefined;
     return sendPreview(reply, fieldsToConfig(f, saved ? logoUri(saved.logo, saved.logo_mime) : null), req.body?.progress);
   });
 
   app.get<{ Params: { id: string }; Querystring: { progress?: string } }>("/api/kits/:id/preview", authed, async (req, reply) => {
-    const k = getKit(req.params.id, currentOrgFor(req.user!.id).org.id);
+    const k = await getKit(req.params.id, (await currentOrgFor(req.user!.id)).org.id);
     if (!k) return reply.code(404).send({ error: "kit not found" });
     const p = req.query?.progress !== undefined ? Number(req.query.progress) : undefined;
     return sendPreview(reply, kitToConfig(k), Number.isFinite(p) ? p : undefined);
@@ -147,8 +147,8 @@ export async function preloaderRoutes(app: FastifyInstance): Promise<void> {
 
   // ── legacy single-preloader API (pre-kit dashboard, scripts): maps onto the workspace default kit ──
   app.get("/api/preloader", authed, async (req) => {
-    const org = currentOrgFor(req.user!.id).org;
-    const kits = listKits(org.id);
+    const org = (await currentOrgFor(req.user!.id)).org;
+    const kits = await listKits(org.id);
     const k = kits.find((x) => x.id === org.default_kit_id) ?? kits[0];
     return { enabled: !!k && k.id === org.default_kit_id, bg: k?.bg ?? null, logoDataUri: k ? logoUri(k.logo, k.logo_mime) : null };
   });
@@ -172,21 +172,21 @@ export async function preloaderRoutes(app: FastifyInstance): Promise<void> {
     else if (fields.removeLogo === "1") f.logo = null;
 
     const org = req.workspace!.org;
-    const kits = listKits(org.id);
+    const kits = await listKits(org.id);
     const target = kits.find((x) => x.id === org.default_kit_id) ?? kits[0];
     const k = target
-      ? updateKit(target.id, org.id, f)!
-      : createKit(org.id, { name: "Brand kit", template: "classic", bg: null, accent: null, text: null, showPercent: false, ...f });
+      ? (await updateKit(target.id, org.id, f))!
+      : await createKit(org.id, { name: "Brand kit", template: "classic", bg: null, accent: null, text: null, showPercent: false, ...f });
     const enabled = fields.enabled === "1" || fields.enabled === "true";
-    setDefaultKit(org.id, enabled ? k.id : null);
+    await setDefaultKit(org.id, enabled ? k.id : null);
     return { enabled, bg: k.bg, logoDataUri: logoUri(k.logo, k.logo_mime) };
   });
 }
 
 /** Validate an app/concept `kitId` patch value: null (inherit), "none", or a kit of this workspace. */
-export function checkKitRef(kitId: unknown, orgId: string): { ok: true; value: string | null } | { ok: false; error: string } {
+export async function checkKitRef(kitId: unknown, orgId: string): Promise<{ ok: true; value: string | null } | { ok: false; error: string }> {
   if (kitId === null) return { ok: true, value: null };
   if (kitId === NO_KIT) return { ok: true, value: NO_KIT };
-  if (typeof kitId === "string" && getKit(kitId, orgId)) return { ok: true, value: kitId };
+  if (typeof kitId === "string" && await getKit(kitId, orgId)) return { ok: true, value: kitId };
   return { ok: false, error: `kitId must be a kit of this workspace, "${NO_KIT}", or null` };
 }

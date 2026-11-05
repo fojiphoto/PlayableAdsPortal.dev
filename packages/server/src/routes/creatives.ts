@@ -16,7 +16,8 @@ import {
   updateCreative,
   upsertExport,
   type CreativeRow,
-  type ExportRow,
+  type ExportMeta,
+  listExportsWithBytes,
 } from "../repo.js";
 import { enqueue, registerJobHandler, JobError } from "../jobs.js";
 import { parseNetworkOrder } from "./apps.js";
@@ -51,7 +52,7 @@ function packView(r: PackResult) {
   };
 }
 
-function exportView(e: ExportRow) {
+function exportView(e: ExportMeta) {
   return {
     network: e.network,
     networkName: networkName(e.network),
@@ -86,13 +87,13 @@ export type PreparedExport =
  * @param analyticsBase public origin of this API (https://app.factorialstudio.dev); when given and the
  *   app owner has in-playable analytics on, the package beacons to `${analyticsBase}/api/t/...`.
  */
-export function prepareExport(userId: string, creativeId: string, body: ExportBody, analyticsBase?: string): PreparedExport {
-  const cr = getCreativeOwned(creativeId, userId);
+export async function prepareExport(userId: string, creativeId: string, body: ExportBody, analyticsBase?: string): Promise<PreparedExport> {
+  const cr = await getCreativeOwned(creativeId, userId);
   if (!cr) return { ok: false, status: 404, body: { error: "not found" } };
 
   // publisher gate: the app owner's company domain must be verified (app-ads.txt / verify file)
   // before anything ships to a network — the same gate the competitor applies.
-  const owner = getUserById(creativeOwnerId(cr.id) ?? userId);
+  const owner = await getUserById(await creativeOwnerId(cr.id) ?? userId);
   if (!owner?.domain_verified) {
     return {
       ok: false,
@@ -104,7 +105,7 @@ export function prepareExport(userId: string, creativeId: string, body: ExportBo
     };
   }
 
-  const concept = getConceptOwned(cr.concept_id, userId);
+  const concept = await getConceptOwned(cr.concept_id, userId);
   const customOrder = parseNetworkOrder(concept?.network_order);
   const ids = body.networks && body.networks.length ? body.networks : (customOrder ?? [...PRIORITY_NETWORK_IDS]);
   try {
@@ -114,7 +115,7 @@ export function prepareExport(userId: string, creativeId: string, body: ExportBo
   }
 
   // plan gate: the WORKSPACE OWNER's plan — allowed networks + rolling-30-day quota
-  const gate = checkExport(owner.id, ids);
+  const gate = await checkExport(owner.id, ids);
   if (!gate.ok) return { ok: false, status: 402, body: gate as unknown as Record<string, unknown> };
 
   const stored = JSON.parse(cr.options_json) as PackOptions;
@@ -125,12 +126,12 @@ export function prepareExport(userId: string, creativeId: string, body: ExportBo
     androidUrl: body.androidUrl ?? stored.androidUrl,
     variables: stored.variables,
     // the kit picked for this concept / its app / the workspace default
-    preloader: preloaderForConcept(cr.concept_id),
+    preloader: await preloaderForConcept(cr.concept_id),
     analytics: analyticsBase && owner.analytics_enabled ? { endpoint: `${analyticsBase}/api/t`, creativeId: cr.id } : undefined,
   };
   // only count a network toward quota the first time this creative exports it —
   // re-exporting an unchanged creative must not keep burning the 30-day allowance
-  const already = new Set(listExports(cr.id).map((e) => e.network));
+  const already = new Set((await listExports(cr.id)).map((e) => e.network));
   // `userId` carried here is the quota account = the workspace owner (members spend the org's allowance)
   return { ok: true, userId: owner.id, cr, ids, opts, already };
 }
@@ -146,10 +147,10 @@ export async function executeExport(
     const id = prep.ids[i]!;
     onProgress?.(i, prep.ids.length, id);
     const r = await pack(source, getNetwork(id), prep.opts);
-    upsertExport(prep.cr.id, r);
+    await upsertExport(prep.cr.id, r);
     results.push(r);
   }
-  for (const id of prep.ids) if (!prep.already.has(id)) addExportUsage(prep.userId, id);
+  for (const id of prep.ids) if (!prep.already.has(id)) await addExportUsage(prep.userId, id);
   onProgress?.(prep.ids.length, prep.ids.length, null);
   return results.map(packView);
 }
@@ -163,7 +164,7 @@ export interface ExportJobPayload extends ExportBody {
 /** Worker handler for kind "export" — re-runs the gates, then packs with progress. */
 registerJobHandler("export", async (job, progress) => {
   const p = JSON.parse(job.payload_json) as ExportJobPayload;
-  const prep = prepareExport(job.user_id, p.creativeId, p, p.analyticsBase);
+  const prep = await prepareExport(job.user_id, p.creativeId, p, p.analyticsBase);
   if (!prep.ok) throw new JobError(String(prep.body.error ?? "Export rejected"), typeof prep.body.code === "string" ? prep.body.code : undefined);
   progress(0, "Loading source…");
   const exported = await executeExport(prep, (done, total, net) => {
@@ -193,7 +194,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     "/api/concepts/:conceptId/creatives",
     needs("member"),
     async (req, reply) => {
-      const concept = getConceptOwned(req.params.conceptId, req.user!.id);
+      const concept = await getConceptOwned(req.params.conceptId, req.user!.id);
       if (!concept) return reply.code(404).send({ error: "concept not found" });
 
       let fileBuf: Buffer | undefined;
@@ -236,7 +237,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         iosUrl: fields.iosUrl || undefined,
         androidUrl: fields.androidUrl || undefined,
       };
-      const row = createCreative({
+      const row = await createCreative({
         conceptId: concept.id,
         name,
         entry,
@@ -260,7 +261,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     "/api/concepts/:conceptId/capture",
     needs("member"),
     async (req, reply) => {
-      const concept = getConceptOwned(req.params.conceptId, req.user!.id);
+      const concept = await getConceptOwned(req.params.conceptId, req.user!.id);
       if (!concept) return reply.code(404).send({ error: "concept not found" });
 
       const MAX_FRAMES = 240;
@@ -343,7 +344,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
         iosUrl: fields.iosUrl || undefined,
         androidUrl: fields.androidUrl || undefined,
       };
-      const row = createCreative({
+      const row = await createCreative({
         conceptId: concept.id,
         name,
         entry: "index.html",
@@ -365,7 +366,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
 
   // creative detail + its exports
   app.get<{ Params: { id: string } }>("/api/creatives/:id", authed, async (req, reply) => {
-    const cr = getCreativeOwned(req.params.id, req.user!.id);
+    const cr = await getCreativeOwned(req.params.id, req.user!.id);
     if (!cr) return reply.code(404).send({ error: "not found" });
     const options = JSON.parse(cr.options_json) as StoredOptions;
     return {
@@ -377,7 +378,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       variables: options.variables ?? {},
       variableSchema: options.variableSchema ?? [],
       createdAt: cr.created_at,
-      exports: listExports(cr.id).map(exportView),
+      exports: (await listExports(cr.id)).map(exportView),
     };
   });
 
@@ -387,7 +388,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     Params: { id: string };
     Body: { name?: string; ctaUrl?: string | null; iosUrl?: string | null; androidUrl?: string | null; variables?: unknown; variableSchema?: unknown };
   }>("/api/creatives/:id", needs("member"), async (req, reply) => {
-    const cr = getCreativeOwned(req.params.id, req.user!.id);
+    const cr = await getCreativeOwned(req.params.id, req.user!.id);
     if (!cr) return reply.code(404).send({ error: "not found" });
     const name = req.body?.name?.trim();
     if (req.body?.name !== undefined && !name) return reply.code(400).send({ error: "name cannot be empty" });
@@ -410,8 +411,8 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
       variables,
       variableSchema,
     };
-    updateCreative(cr.id, req.user!.id, { name, optionsJson: JSON.stringify(options) });
-    const fresh = getCreativeOwned(cr.id, req.user!.id)!;
+    await updateCreative(cr.id, req.user!.id, { name, optionsJson: JSON.stringify(options) });
+    const fresh = (await getCreativeOwned(cr.id, req.user!.id))!;
     return { id: fresh.id, name: fresh.name, entry: fresh.entry, conceptId: fresh.concept_id, options, variables, variableSchema, createdAt: fresh.created_at };
   });
 
@@ -424,7 +425,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
     async (req, reply) => {
       const body = req.body ?? {};
       const analyticsBase = publicBase(req);
-      const prep = prepareExport(req.user!.id, req.params.id, body, analyticsBase);
+      const prep = await prepareExport(req.user!.id, req.params.id, body, analyticsBase);
       if (!prep.ok) return reply.code(prep.status).send(prep.body);
 
       const wantAsync = body.async === true || req.query?.async === "1" || req.query?.async === "true";
@@ -437,7 +438,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
           androidUrl: body.androidUrl,
           analyticsBase,
         };
-        const job = enqueue(req.user!.id, "export", payload);
+        const job = await enqueue(req.user!.id, "export", payload);
         return reply.code(202).send({ jobId: job.id, status: job.status, statusUrl: `/api/jobs/${job.id}` });
       }
 
@@ -447,7 +448,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.delete<{ Params: { id: string } }>("/api/creatives/:id", needs("admin"), async (req, reply) => {
-    return deleteCreative(req.params.id, req.user!.id)
+    return await deleteCreative(req.params.id, req.user!.id)
       ? { deleted: true }
       : reply.code(404).send({ error: "not found" });
   });
@@ -456,7 +457,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string; network: string } }>(
     "/api/creatives/:id/download/:network",
     async (req, reply) => {
-      const e = getExport(req.params.id, req.params.network);
+      const e = await getExport(req.params.id, req.params.network);
       if (!e) return reply.code(404).send({ error: "not exported" });
       return sendBytes(reply, e.bytes, e.filename, e.format === "zip" ? "application/zip" : "text/html");
     },
@@ -473,7 +474,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Params: { id: string; network: string }; Querystring: { host?: string } }>(
     "/api/creatives/:id/preview/:network",
     async (req, reply) => {
-      const e = getExport(req.params.id, req.params.network);
+      const e = await getExport(req.params.id, req.params.network);
       if (!e) return reply.code(404).send({ error: "not exported" });
       let html: string;
       if (e.format === "zip") {
@@ -499,7 +500,7 @@ export async function creativeRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get<{ Params: { id: string } }>("/api/creatives/:id/download-all", async (req, reply) => {
-    const exports = listExports(req.params.id);
+    const exports = await listExportsWithBytes(req.params.id);
     if (exports.length === 0) return reply.code(404).send({ error: "nothing exported" });
     const zip = new JSZip();
     for (const e of exports) zip.file(e.filename, e.bytes);

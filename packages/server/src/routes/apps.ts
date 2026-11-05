@@ -18,7 +18,7 @@ import {
   updateConcept,
   type AppRow,
   type ConceptRow,
-  type CreativeRow,
+  type CreativeMeta,
 } from "../repo.js";
 import { getPlan } from "../plans.js";
 import { billingOwnerId, needs, requireRole } from "../orgs.js";
@@ -51,27 +51,29 @@ const conceptView = (c: ConceptRow) => ({
   kitId: c.kit_id,
   createdAt: c.created_at,
 });
-const creativeRef = (c: CreativeRow) => ({ id: c.id, name: c.name, entry: c.entry, createdAt: c.created_at });
+const creativeRef = (c: CreativeMeta) => ({ id: c.id, name: c.name, entry: c.entry, createdAt: c.created_at });
 
 export async function appRoutes(app: FastifyInstance): Promise<void> {
   // ── apps ──
   app.post<{ Body: { name?: string; platform?: string } }>("/api/apps", needs("member"), async (req, reply) => {
     const name = req.body?.name?.trim();
     if (!name) return reply.code(400).send({ error: "name required" });
-    return reply.code(201).send(appView(createApp(req.user!.id, req.workspace!.org.id, name, req.body?.platform)));
+    return reply.code(201).send(appView(await createApp(req.user!.id, req.workspace!.org.id, name, req.body?.platform)));
   });
 
   app.get("/api/apps", authed, async (req) =>
-    listApps(req.user!.id).map((a) => ({
-      ...appView(a),
-      conceptCount: listConcepts(a.id).length,
-    })),
+    Promise.all(
+      (await listApps(req.user!.id)).map(async (a) => ({
+        ...appView(a),
+        conceptCount: (await listConcepts(a.id)).length,
+      })),
+    ),
   );
 
   app.get<{ Params: { id: string } }>("/api/apps/:id", authed, async (req, reply) => {
-    const a = getAppOwned(req.params.id, req.user!.id);
+    const a = await getAppOwned(req.params.id, req.user!.id);
     if (!a) return reply.code(404).send({ error: "not found" });
-    return { ...appView(a), concepts: listConcepts(a.id).map(conceptView) };
+    return { ...appView(a), concepts: (await listConcepts(a.id)).map(conceptView) };
   });
 
   // rename / re-platform
@@ -84,19 +86,19 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
       // preloader kit for the whole app (null = workspace default, "none" = no preloader)
       let kit: string | null | undefined;
       if (req.body?.kitId !== undefined) {
-        const r = checkKitRef(req.body.kitId, req.workspace!.org.id);
+        const r = await checkKitRef(req.body.kitId, req.workspace!.org.id);
         if (!r.ok) return reply.code(400).send({ error: r.error });
         kit = r.value;
       }
-      if (!updateApp(req.params.id, req.user!.id, { name, platform: req.body?.platform }))
+      if (!await updateApp(req.params.id, req.user!.id, { name, platform: req.body?.platform }))
         return reply.code(404).send({ error: "not found" });
-      if (kit !== undefined) setAppKit(req.params.id, kit);
-      return appView(getAppOwned(req.params.id, req.user!.id)!);
+      if (kit !== undefined) await setAppKit(req.params.id, kit);
+      return appView((await getAppOwned(req.params.id, req.user!.id))!);
     },
   );
 
   app.delete<{ Params: { id: string } }>("/api/apps/:id", needs("admin"), async (req, reply) => {
-    return deleteApp(req.params.id, req.user!.id)
+    return await deleteApp(req.params.id, req.user!.id)
       ? { deleted: true }
       : reply.code(404).send({ error: "not found" });
   });
@@ -106,24 +108,24 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
     "/api/apps/:appId/concepts",
     needs("member"),
     async (req, reply) => {
-      const a = getAppOwned(req.params.appId, req.user!.id);
+      const a = await getAppOwned(req.params.appId, req.user!.id);
       if (!a) return reply.code(404).send({ error: "app not found" });
       const name = req.body?.name?.trim();
       if (!name) return reply.code(400).send({ error: "name required" });
-      return reply.code(201).send(conceptView(createConcept(a.id, name)));
+      return reply.code(201).send(conceptView(await createConcept(a.id, name)));
     },
   );
 
   app.get<{ Params: { appId: string } }>("/api/apps/:appId/concepts", authed, async (req, reply) => {
-    const a = getAppOwned(req.params.appId, req.user!.id);
+    const a = await getAppOwned(req.params.appId, req.user!.id);
     if (!a) return reply.code(404).send({ error: "app not found" });
-    return listConcepts(a.id).map(conceptView);
+    return (await listConcepts(a.id)).map(conceptView);
   });
 
   app.get<{ Params: { id: string } }>("/api/concepts/:id", authed, async (req, reply) => {
-    const c = getConceptOwned(req.params.id, req.user!.id);
+    const c = await getConceptOwned(req.params.id, req.user!.id);
     if (!c) return reply.code(404).send({ error: "not found" });
-    return { ...conceptView(c), preloader: effectiveKitView(c.id), creatives: listCreatives(c.id).map(creativeRef) };
+    return { ...conceptView(c), preloader: await effectiveKitView(c.id), creatives: (await listCreatives(c.id)).map(creativeRef) };
   });
 
   // rename, and (Enterprise) set a custom export network order used when none is passed to /export
@@ -131,15 +133,15 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
     "/api/concepts/:id",
     needs("member"),
     async (req, reply) => {
-      const c = getConceptOwned(req.params.id, req.user!.id);
+      const c = await getConceptOwned(req.params.id, req.user!.id);
       if (!c) return reply.code(404).send({ error: "not found" });
       const name = req.body?.name?.trim();
       if (req.body?.name !== undefined && !name) return reply.code(400).send({ error: "name cannot be empty" });
 
       let networkOrder: string[] | null | undefined = undefined;
       if (req.body?.networkOrder !== undefined) {
-        if (!requireRole(req, reply, "admin")) return reply; // changing the export set is an admin action
-        const plan = getPlan(getUserById(billingOwnerId(req.user!.id))?.plan); // the workspace's plan
+        if (!await requireRole(req, reply, "admin")) return reply; // changing the export set is an admin action
+        const plan = getPlan((await getUserById(await billingOwnerId(req.user!.id)))?.plan); // the workspace's plan
         if (!plan.networkOrdering) {
           return reply.code(402).send({
             error: `Custom network ordering is an Enterprise feature (you're on ${plan.name}).`,
@@ -160,17 +162,17 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
       }
       // preloader kit for this concept (null = inherit from the app / workspace, "none" = no preloader)
       if (req.body?.kitId !== undefined) {
-        const r = checkKitRef(req.body.kitId, req.workspace!.org.id);
+        const r = await checkKitRef(req.body.kitId, req.workspace!.org.id);
         if (!r.ok) return reply.code(400).send({ error: r.error });
-        setConceptKit(c.id, r.value);
+        await setConceptKit(c.id, r.value);
       }
-      updateConcept(c.id, req.user!.id, { name, networkOrder });
-      return { ...conceptView(getConceptOwned(c.id, req.user!.id)!), preloader: effectiveKitView(c.id) };
+      await updateConcept(c.id, req.user!.id, { name, networkOrder });
+      return { ...conceptView((await getConceptOwned(c.id, req.user!.id))!), preloader: await effectiveKitView(c.id) };
     },
   );
 
   app.delete<{ Params: { id: string } }>("/api/concepts/:id", needs("admin"), async (req, reply) => {
-    return deleteConcept(req.params.id, req.user!.id)
+    return await deleteConcept(req.params.id, req.user!.id)
       ? { deleted: true }
       : reply.code(404).send({ error: "not found" });
   });

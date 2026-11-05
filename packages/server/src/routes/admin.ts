@@ -26,7 +26,7 @@ export function adminOnly(): RouteShorthandOptions {
   const ph = base.preHandler;
   const prior: preHandlerHookHandler[] = ph ? (Array.isArray(ph) ? ph : [ph]) : [];
   const gate: preHandlerHookHandler = async (req, reply) => {
-    if (!getUserById(req.user!.id)?.is_admin) return reply.code(403).send({ error: "Admin only.", code: "admin-only" });
+    if (!(await getUserById(req.user!.id))?.is_admin) return reply.code(403).send({ error: "Admin only.", code: "admin-only" });
   };
   return { ...base, preHandler: [...prior, gate] };
 }
@@ -39,11 +39,11 @@ export function adminOnly(): RouteShorthandOptions {
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   const admin = adminOnly();
 
-  app.get("/api/admin/overview", admin, async () => adminStats());
+  app.get("/api/admin/overview", admin, async () => await adminStats());
 
   // ── users ──
   app.get<{ Querystring: { q?: string; limit?: string } }>("/api/admin/users", admin, async (req) =>
-    listUsersAdmin(String(req.query?.q ?? "").trim(), Math.min(200, Number(req.query?.limit ?? 50) || 50)).map((u) => ({
+    (await listUsersAdmin(String(req.query?.q ?? "").trim(), Math.min(200, Number(req.query?.limit ?? 50) || 50))).map((u) => ({
       id: u.id,
       email: u.email,
       plan: u.plan,
@@ -59,28 +59,28 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.patch<{ Params: { id: string }; Body: { admin?: boolean; plan?: string } }>("/api/admin/users/:id", admin, async (req, reply) => {
-    const u = getUserById(req.params.id);
+    const u = await getUserById(req.params.id);
     if (!u) return reply.code(404).send({ error: "not found" });
     if (typeof req.body?.admin === "boolean") {
       if (u.id === req.user!.id && !req.body.admin) return reply.code(400).send({ error: "You cannot remove your own admin role." });
-      setAdmin(u.id, req.body.admin);
+      await setAdmin(u.id, req.body.admin);
     }
     if (req.body?.plan !== undefined) {
       if (!allPlans().some((p) => p.id === req.body!.plan)) return reply.code(400).send({ error: "unknown plan" });
-      setUserPlan(u.id, req.body.plan); // manual override (enterprise deals, comps); Stripe webhooks still win later
+      await setUserPlan(u.id, req.body.plan); // manual override (enterprise deals, comps); Stripe webhooks still win later
     }
-    const fresh = getUserById(u.id)!;
+    const fresh = (await getUserById(u.id))!;
     return { id: fresh.id, email: fresh.email, plan: fresh.plan, isAdmin: fresh.is_admin === 1 };
   });
 
   app.delete<{ Params: { id: string } }>("/api/admin/users/:id", admin, async (req, reply) => {
     if (req.params.id === req.user!.id) return reply.code(400).send({ error: "You cannot delete yourself." });
-    return deleteUserAdmin(req.params.id) ? { deleted: true } : reply.code(404).send({ error: "not found" });
+    return await deleteUserAdmin(req.params.id) ? { deleted: true } : reply.code(404).send({ error: "not found" });
   });
 
   // ── support / feedback / contact (admin views; replies go through /api/support/threads/:id/reply) ──
   app.get<{ Querystring: { status?: string } }>("/api/admin/support/threads", admin, async (req) =>
-    listThreadsAdmin(req.query?.status === "closed" ? "closed" : req.query?.status === "all" ? undefined : "open").map((t) => ({
+    (await listThreadsAdmin(req.query?.status === "closed" ? "closed" : req.query?.status === "all" ? undefined : "open")).map((t) => ({
       ...threadView(t, true),
       userEmail: t.user_email,
       workspace: t.org_name,
@@ -89,7 +89,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.get<{ Querystring: { handled?: string } }>("/api/feedback/bugs", admin, async (req) =>
-    listBugs(req.query?.handled === "1").map((b) => ({
+    (await listBugs(req.query?.handled === "1")).map((b) => ({
       id: b.id,
       title: b.title,
       body: b.body,
@@ -100,16 +100,16 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       createdAt: b.created_at,
     })),
   );
-  app.post<{ Params: { id: string } }>("/api/feedback/bugs/:id/handled", admin, async (req, reply) => (markBugHandled(req.params.id) ? { handled: true } : reply.code(404).send({ error: "not found" })));
+  app.post<{ Params: { id: string } }>("/api/feedback/bugs/:id/handled", admin, async (req, reply) => (await markBugHandled(req.params.id) ? { handled: true } : reply.code(404).send({ error: "not found" })));
 
   app.get<{ Querystring: { handled?: string } }>("/api/admin/contact", admin, async (req) =>
-    listContacts(req.query?.handled === "1").map((c) => ({ id: c.id, name: c.name, email: c.email, company: c.company, message: c.message, handledAt: c.handled_at, createdAt: c.created_at })),
+    (await listContacts(req.query?.handled === "1")).map((c) => ({ id: c.id, name: c.name, email: c.email, company: c.company, message: c.message, handledAt: c.handled_at, createdAt: c.created_at })),
   );
-  app.post<{ Params: { id: string } }>("/api/contact/:id/handled", admin, async (req, reply) => (markContactHandled(req.params.id) ? { handled: true } : reply.code(404).send({ error: "not found" })));
+  app.post<{ Params: { id: string } }>("/api/contact/:id/handled", admin, async (req, reply) => (await markContactHandled(req.params.id) ? { handled: true } : reply.code(404).send({ error: "not found" })));
 
   // ── jobs ──
   app.get<{ Querystring: { status?: string; limit?: string } }>("/api/admin/jobs", admin, async (req) =>
-    listJobsAdmin(req.query?.status || undefined, Math.min(200, Number(req.query?.limit ?? 50) || 50)).map((j) => ({
+    (await listJobsAdmin(req.query?.status || undefined, Math.min(200, Number(req.query?.limit ?? 50) || 50))).map((j) => ({
       id: j.id,
       kind: j.kind,
       status: j.status,
@@ -124,15 +124,15 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   // ── reminders (nudges to dormant / never-exported accounts) ──
   app.get("/api/admin/reminders", admin, async () => {
     const out: Record<string, unknown> = {};
-    for (const kind of REMINDER_KINDS) out[kind] = reminderCandidates(kind).map((u) => ({ id: u.id, email: u.email, createdAt: u.created_at, lastLoginAt: u.last_login_at }));
+    for (const kind of REMINDER_KINDS) out[kind] = (await reminderCandidates(kind)).map((u) => ({ id: u.id, email: u.email, createdAt: u.created_at, lastLoginAt: u.last_login_at }));
     return { kinds: REMINDER_KINDS, candidates: out };
   });
-  app.get("/api/admin/reminders/logins", admin, async () => recentLogins(50).map((u) => ({ id: u.id, email: u.email, lastLoginAt: u.last_login_at })));
+  app.get("/api/admin/reminders/logins", admin, async () => (await recentLogins(50)).map((u) => ({ id: u.id, email: u.email, lastLoginAt: u.last_login_at })));
   app.post<{ Body: { dryRun?: boolean; kind?: string } }>("/api/admin/reminders/run", admin, async (req) =>
     runReminders({ dryRun: !!req.body?.dryRun, kind: REMINDER_KINDS.includes(req.body?.kind as ReminderKind) ? (req.body!.kind as ReminderKind) : undefined, site: siteUrl(req) }),
   );
   app.post<{ Body: { userId?: string; kind?: string } }>("/api/admin/reminders/send", admin, async (req, reply) => {
-    const u = req.body?.userId ? getUserById(req.body.userId) : undefined;
+    const u = req.body?.userId ? await getUserById(req.body.userId) : undefined;
     const kind = req.body?.kind as ReminderKind;
     if (!u || !REMINDER_KINDS.includes(kind)) return reply.code(400).send({ error: "userId and a known kind are required" });
     await sendReminder(u, kind, siteUrl(req));

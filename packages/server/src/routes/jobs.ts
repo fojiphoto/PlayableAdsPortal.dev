@@ -7,11 +7,11 @@ import { jobView } from "../jobs.js";
 export async function jobRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Querystring: { limit?: string } }>("/api/jobs", authed, async (req) => {
     const limit = Number(req.query?.limit ?? 20) || 20;
-    return listJobs(req.user!.id, limit).map(jobView);
+    return (await listJobs(req.user!.id, limit)).map(jobView);
   });
 
   app.get<{ Params: { id: string } }>("/api/jobs/:id", authed, async (req, reply) => {
-    const j = getJobOwned(req.params.id, req.user!.id);
+    const j = await getJobOwned(req.params.id, req.user!.id);
     if (!j) return reply.code(404).send({ error: "not found" });
     return jobView(j);
   });

@@ -28,17 +28,17 @@ async function fixtureZip(): Promise<Buffer> {
 let app: FastifyInstance;
 
 beforeAll(async () => {
-  resetDb();
+  await resetDb();
   app = await buildApp();
   await app.ready();
 });
 afterAll(async () => {
   await app.close();
 });
-beforeEach(() => {
-  resetDb();
+beforeEach(async () => {
+  await resetDb();
   clearOutbox();
-  resetRateLimits();
+  await resetRateLimits();
 });
 
 /** Pull the one-time token out of the last dev-outbox mail's link (?reset=… / ?verify=…). */
@@ -57,10 +57,10 @@ async function signup(email = "dev@factorialstudio.com", password = "secret123")
 }
 const bearer = (t: string) => ({ authorization: `Bearer ${t}` });
 /** Exports are gated on a verified company domain — mark the user verified (as /api/domain/check would). */
-function verifyDomain(email = "dev@factorialstudio.com"): void {
-  const u = getUserByEmail(email)!;
-  setUserDomain(u.id, "factorialstudio.dev", "fav-test");
-  setDomainVerified(u.id, 1);
+async function verifyDomain(email = "dev@factorialstudio.com"): Promise<void> {
+  const u = (await getUserByEmail(email))!;
+  await setUserDomain(u.id, "factorialstudio.dev", "fav-test");
+  await setDomainVerified(u.id, 1);
 }
 
 describe("health + networks", () => {
@@ -102,7 +102,7 @@ describe("auth", () => {
 describe("app → concept → creative → export flow", () => {
   it("full happy path, persisted", async () => {
     const token = await signup();
-    verifyDomain();
+    await verifyDomain();
     // free plan is Unity-Ads-only; switch to a paid plan to export multiple networks
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
 
@@ -239,7 +239,7 @@ describe("billing / plan enforcement", () => {
 
   it("free plan blocks non-Unity networks, allows Unity Ads", async () => {
     const token = await signup();
-    verifyDomain();
+    await verifyDomain();
     const cid = await setupCreative(token);
     const blocked = await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(token), payload: { networks: ["applovin"] } });
     expect(blocked.statusCode).toBe(402);
@@ -250,7 +250,7 @@ describe("billing / plan enforcement", () => {
 
   it("upgrading unlocks all networks and counts usage", async () => {
     const token = await signup();
-    verifyDomain();
+    await verifyDomain();
     const cid = await setupCreative(token);
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
     const ok = await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(token), payload: { networks: ["applovin", "meta"] } });
@@ -273,7 +273,7 @@ describe("capture → creative (Phase 2.1)", () => {
 
   it("builds a flipbook playable from an uploaded frame sequence, then exports it", async () => {
     const token = await signup("cap@factorialstudio.com");
-    verifyDomain("cap@factorialstudio.com");
+    await verifyDomain("cap@factorialstudio.com");
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Beat Matrix" } })).json().id;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "hop" } })).json().id;
@@ -308,7 +308,7 @@ describe("capture → creative (Phase 2.1)", () => {
 
   it("authors a tap zone + rich end-card (Phase 2.2) into the built playable", async () => {
     const token = await signup("cap22@factorialstudio.com");
-    verifyDomain("cap22@factorialstudio.com");
+    await verifyDomain("cap22@factorialstudio.com");
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "starter" } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Beat Matrix" } })).json().id;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "hop" } })).json().id;
@@ -501,7 +501,7 @@ describe("quick wins: domain gate, rename/update, network order", () => {
     const blocked = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["unityads"] } });
     expect(blocked.statusCode).toBe(403);
     expect(blocked.json().code).toBe("domain-unverified");
-    verifyDomain("gate@factorialstudio.com");
+    await verifyDomain("gate@factorialstudio.com");
     const ok = await app.inject({ method: "POST", url: `/api/creatives/${creativeId}/export`, headers: bearer(token), payload: { networks: ["unityads"] } });
     expect(ok.statusCode).toBe(200);
   });
@@ -533,7 +533,7 @@ describe("quick wins: domain gate, rename/update, network order", () => {
 
   it("custom network order: Enterprise-only, validated, and used as the default export set", async () => {
     const token = await signup("order@factorialstudio.com");
-    verifyDomain("order@factorialstudio.com");
+    await verifyDomain("order@factorialstudio.com");
     const { conceptId, creativeId } = await appConceptCreative(token);
 
     // not on Enterprise -> 402
@@ -634,10 +634,10 @@ describe("billing state: period end, cancel/resume, sync", () => {
     cancel_at_period_end: over.cancel_at_period_end ?? false,
     items: { data: [{ price: { id: over.price ?? PRICE }, current_period_end: PERIOD_END }] },
   });
-  const seed = (email: string) => {
-    const u = getUserByEmail(email)!;
-    setStripeCustomer(u.id, "cus_1");
-    setUserBilling(u.id, "studio", "sub_1", "active", { renewsAt: null, cancelAtPeriodEnd: false });
+  const seed = async (email: string) => {
+    const u = (await getUserByEmail(email))!;
+    await setStripeCustomer(u.id, "cus_1");
+    await setUserBilling(u.id, "studio", "sub_1", "active", { renewsAt: null, cancelAtPeriodEnd: false });
     return u.id;
   };
   const status = async (token: string) => (await app.inject({ method: "GET", url: "/api/billing/status", headers: bearer(token) })).json();
@@ -648,7 +648,7 @@ describe("billing state: period end, cancel/resume, sync", () => {
     process.env.STRIPE_PRICE_STUDIO = PRICE;
     try {
       const token = await signup("state@factorialstudio.com");
-      seed("state@factorialstudio.com");
+      await seed("state@factorialstudio.com");
       const payload = JSON.stringify({ type: "customer.subscription.updated", data: { object: subObj({ cancel_at_period_end: true }) } });
       const t = Math.floor(Date.now() / 1000);
       const sig = createHmac("sha256", WH).update(`${t}.${payload}`).digest("hex");
@@ -694,7 +694,7 @@ describe("billing state: period end, cancel/resume, sync", () => {
     }) as typeof fetch;
     try {
       const token = await signup("stripestate@factorialstudio.com");
-      seed("stripestate@factorialstudio.com");
+      await seed("stripestate@factorialstudio.com");
 
       const c = await app.inject({ method: "POST", url: "/api/billing/cancel", headers: bearer(token), payload: {} });
       expect(c.statusCode).toBe(200);
@@ -729,7 +729,7 @@ describe("async jobs: export runs on the worker", () => {
   /** signup → verified domain → Starter plan → app → concept → uploaded creative */
   async function creativeFor(email: string, plan: string | null = "starter") {
     const token = await signup(email);
-    verifyDomain(email);
+    await verifyDomain(email);
     if (plan) await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Jobs App", platform: "ios" } })).json().id;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c1" } })).json().id;
@@ -820,16 +820,16 @@ describe("async jobs: export runs on the worker", () => {
 
   it("restart recovery: interrupted running jobs are re-queued once, then failed", async () => {
     await signup("jobsrecover@factorialstudio.com");
-    const u = getUserByEmail("jobsrecover@factorialstudio.com")!;
-    const job = createJob(u.id, "export", { creativeId: "none" });
-    expect(claimNextJob()?.id).toBe(job.id); // worker took it (attempt 1)…
-    expect(getJob(job.id)!.status).toBe("running");
-    expect(recoverStaleJobs()).toBe(1); // …process died → back to the queue
-    expect(getJob(job.id)).toMatchObject({ status: "queued", attempts: 1 });
-    expect(claimNextJob()?.id).toBe(job.id); // attempt 2 dies too
-    expect(recoverStaleJobs()).toBe(1);
-    expect(getJob(job.id)).toMatchObject({ status: "failed", error: "Interrupted by a server restart" });
-    expect(claimNextJob()).toBeUndefined();
+    const u = (await getUserByEmail("jobsrecover@factorialstudio.com"))!;
+    const job = await createJob(u.id, "export", { creativeId: "none" });
+    expect((await claimNextJob())?.id).toBe(job.id); // worker took it (attempt 1)…
+    expect((await getJob(job.id))!.status).toBe("running");
+    expect(await recoverStaleJobs()).toBe(1); // …process died → back to the queue
+    expect(await getJob(job.id)).toMatchObject({ status: "queued", attempts: 1 });
+    expect((await claimNextJob())?.id).toBe(job.id); // attempt 2 dies too
+    expect(await recoverStaleJobs()).toBe(1);
+    expect(await getJob(job.id)).toMatchObject({ status: "failed", error: "Interrupted by a server restart" });
+    expect(await claimNextJob()).toBeUndefined();
   });
 });
 
@@ -837,7 +837,7 @@ describe("in-playable analytics: collector + dashboard funnel", () => {
   const UUID_RE = /^[0-9a-f-]{36}$/;
   async function creativeFor(email: string) {
     const token = await signup(email);
-    verifyDomain(email);
+    await verifyDomain(email);
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Tracked App", platform: "ios" } })).json().id;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c1" } })).json().id;
@@ -950,7 +950,7 @@ describe("compile jobs: Unity WebGL build → single-file playable", () => {
   }
   async function setup(email: string) {
     const token = await signup(email);
-    verifyDomain(email);
+    await verifyDomain(email);
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Hop Ball", platform: "ios" } })).json().id;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "unity" } })).json().id;
@@ -1026,7 +1026,7 @@ describe("compile jobs: Unity WebGL build → single-file playable", () => {
 describe("support, feedback, contact, admin console, reminders", () => {
   const makeAdmin = async (email: string) => {
     const t = await signup(email);
-    setAdmin(getUserByEmail(email)!.id, true);
+    await setAdmin((await getUserByEmail(email))!.id, true);
     return t;
   };
   const get = (url: string, token?: string) => app.inject({ method: "GET", url, headers: token ? bearer(token) : {} });
@@ -1151,14 +1151,14 @@ describe("support, feedback, contact, admin console, reminders", () => {
       expect((await app.inject({ method: "PATCH", url: `/api/admin/users/${id}`, headers: bearer(founder), payload: { plan: "platinum" } })).statusCode).toBe(400);
 
       // cannot demote or delete yourself
-      const selfId = getUserByEmail("founder@factorialstudio.com")!.id;
+      const selfId = (await getUserByEmail("founder@factorialstudio.com"))!.id;
       expect((await app.inject({ method: "PATCH", url: `/api/admin/users/${selfId}`, headers: bearer(founder), payload: { admin: false } })).statusCode).toBe(400);
       expect((await app.inject({ method: "DELETE", url: `/api/admin/users/${selfId}`, headers: bearer(founder) })).statusCode).toBe(400);
 
       // delete removes the user and the workspaces they own
       const appId = (await post("/api/apps", { name: "Doomed" }, other)).json().id;
       expect((await app.inject({ method: "DELETE", url: `/api/admin/users/${id}`, headers: bearer(founder) })).json()).toEqual({ deleted: true });
-      expect(getUserByEmail("customer@factorialstudio.com")).toBeUndefined();
+      expect(await getUserByEmail("customer@factorialstudio.com")).toBeUndefined();
       expect((await get(`/api/apps/${appId}`, founder)).statusCode).toBe(404);
       // jobs listing works for admins
       expect((await get("/api/admin/jobs", founder)).statusCode).toBe(200);
@@ -1168,17 +1168,17 @@ describe("support, feedback, contact, admin console, reminders", () => {
   });
 
   it("reminders: never-exported after 3 days and dormant exporters; dry run, send once, logged", async () => {
-    const { getDb } = await import("../src/db.js");
-    const db = getDb();
+    const { db: openDb } = await import("../src/db.js");
+    const db = openDb();
     const old = new Date(Date.now() - 10 * 86_400_000).toISOString();
     const quiet = new Date(Date.now() - 20 * 86_400_000).toISOString();
     await signup("signedup-old@factorialstudio.com");
     await signup("signedup-today@factorialstudio.com");
     await signup("was-active@factorialstudio.com");
-    db.prepare("UPDATE users SET created_at = ? WHERE email IN ('signedup-old@factorialstudio.com', 'was-active@factorialstudio.com')").run(old);
-    const active = getUserByEmail("was-active@factorialstudio.com")!;
-    db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(quiet, active.id);
-    db.prepare("INSERT INTO export_usage (id, user_id, network, created_at) VALUES ('u1', ?, 'unityads', ?)").run(active.id, quiet);
+    await db.prepare("UPDATE users SET created_at = ? WHERE email IN ('signedup-old@factorialstudio.com', 'was-active@factorialstudio.com')").run(old);
+    const active = (await getUserByEmail("was-active@factorialstudio.com"))!;
+    await db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(quiet, active.id);
+    await db.prepare("INSERT INTO export_usage (id, user_id, network, created_at) VALUES ('u1', ?, 'unityads', ?)").run(active.id, quiet);
 
     const admin = await makeAdmin("growth@factorialstudio.com");
     const c = (await get("/api/admin/reminders", admin)).json();
@@ -1195,7 +1195,7 @@ describe("support, feedback, contact, admin console, reminders", () => {
     expect(outbox.map((m) => m.to).sort()).toEqual(["signedup-old@factorialstudio.com", "was-active@factorialstudio.com"]);
     // logged → nobody is nudged twice
     expect((await post("/api/admin/reminders/run", {}, admin)).json().sent).toEqual({ "no-export": 0, dormant: 0 });
-    const signupId = getUserByEmail("signedup-today@factorialstudio.com")!.id;
+    const signupId = (await getUserByEmail("signedup-today@factorialstudio.com"))!.id;
     expect((await post("/api/admin/reminders/send", { userId: signupId, kind: "nope" }, admin)).statusCode).toBe(400);
     expect((await post("/api/admin/reminders/send", { userId: signupId, kind: "no-export" }, admin)).json()).toEqual({ sent: true });
   });
@@ -1204,7 +1204,7 @@ describe("support, feedback, contact, admin console, reminders", () => {
 describe("runtime API: custom variables + valued events", () => {
   async function creativeFor(email: string) {
     const token = await signup(email);
-    verifyDomain(email);
+    await verifyDomain(email);
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Vars", platform: "ios" } })).json().id;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c" } })).json().id;
@@ -1369,7 +1369,7 @@ describe("organizations / workspaces / roles", () => {
 
   it("roles are enforced: viewer reads only, member creates/exports, admin manages, owner bills; plan + quota follow the owner", async () => {
     const owner = await signup("roles-owner@factorialstudio.com");
-    verifyDomain("roles-owner@factorialstudio.com");
+    await verifyDomain("roles-owner@factorialstudio.com");
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(owner), payload: { plan: "studio" } });
     const ownerOrg = (await me(owner)).workspace.id;
     const join = async (email: string, role: string) => {
@@ -1441,14 +1441,14 @@ describe("organizations / workspaces / roles", () => {
     const owner = await signup("legacy-owner@factorialstudio.com");
     const friend = await signup("legacy-friend@factorialstudio.com");
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(owner), payload: { name: "Old App" } })).json().id;
-    const o = getUserByEmail("legacy-owner@factorialstudio.com")!;
-    const f = getUserByEmail("legacy-friend@factorialstudio.com")!;
+    const o = (await getUserByEmail("legacy-owner@factorialstudio.com"))!;
+    const f = (await getUserByEmail("legacy-friend@factorialstudio.com"))!;
     // simulate a database from before orgs existed, then run the startup migration on it
-    const { getDb, migrateOrgs } = await import("../src/db.js");
-    const db = getDb();
-    db.exec("DELETE FROM org_members; DELETE FROM orgs; UPDATE users SET current_org_id = NULL; UPDATE apps SET org_id = NULL");
-    db.prepare("INSERT INTO memberships (id, owner_user_id, member_user_id, role, created_at) VALUES ('m1', ?, ?, 'admin', '2026-01-01T00:00:00.000Z')").run(o.id, f.id);
-    migrateOrgs(db);
+    const { db: openDb, migrateOrgs } = await import("../src/db.js");
+    const db = openDb();
+    await db.exec("DELETE FROM org_members; DELETE FROM orgs; UPDATE users SET current_org_id = NULL; UPDATE apps SET org_id = NULL");
+    await db.prepare("INSERT INTO memberships (id, owner_user_id, member_user_id, role, created_at) VALUES ('m1', ?, ?, 'admin', '2026-01-01T00:00:00.000Z')").run(o.id, f.id);
+    await migrateOrgs(db);
 
     expect((await me(owner)).workspace).toMatchObject({ name: "legacy-owner's workspace", role: "owner" });
     expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(owner) })).statusCode).toBe(200);
@@ -1457,7 +1457,7 @@ describe("organizations / workspaces / roles", () => {
     expect((await switchTo(friend, shared.id)).statusCode).toBe(200);
     expect((await app.inject({ method: "GET", url: `/api/apps/${appId}`, headers: bearer(friend) })).statusCode).toBe(200);
     // running it again changes nothing
-    migrateOrgs(db);
+    await migrateOrgs(db);
     expect((await ws(owner)).length).toBe(1);
   });
 });
@@ -1468,7 +1468,7 @@ describe("preloader kits (templates, per-app/concept kits, server preview)", () 
   const mkKit = (token: string, body: Record<string, unknown>) => app.inject({ method: "POST", url: "/api/kits", headers: bearer(token), payload: body });
   async function setup(email: string) {
     const token = await signup(email);
-    verifyDomain(email);
+    await verifyDomain(email);
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "Kit App" } })).json().id as string;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "Kit Concept" } })).json().id as string;
@@ -1636,18 +1636,18 @@ describe("preloader kits (templates, per-app/concept kits, server preview)", () 
     expect(s.defaultKitId).toBe(s.kits[0].id);
 
     // a database from before kits: one enabled legacy row becomes a "Brand kit" that is the workspace default
-    const u = getUserByEmail("kits-legacy@factorialstudio.com")!;
-    const { getDb, migratePreloaders } = await import("../src/db.js");
-    const db = getDb();
-    db.exec("DELETE FROM preloader_kits; UPDATE orgs SET default_kit_id = NULL");
-    db.prepare("INSERT INTO preloaders (user_id, logo, logo_mime, bg, enabled, updated_at) VALUES (?, ?, 'image/png', '#0a0b0c', 1, '2026-01-01T00:00:00.000Z')").run(u.id, Buffer.from("old-logo"));
-    migratePreloaders(db);
+    const u = (await getUserByEmail("kits-legacy@factorialstudio.com"))!;
+    const { db: openDb, migratePreloaders } = await import("../src/db.js");
+    const db = openDb();
+    await db.exec("DELETE FROM preloader_kits; UPDATE orgs SET default_kit_id = NULL");
+    await db.prepare("INSERT INTO preloaders (user_id, logo, logo_mime, bg, enabled, updated_at) VALUES (?, ?, 'image/png', '#0a0b0c', 1, '2026-01-01T00:00:00.000Z')").run(u.id, Buffer.from("old-logo"));
+    await migratePreloaders(db);
     s = await kits(token);
     expect(s.kits).toEqual([
       expect.objectContaining({ name: "Brand kit", template: "classic", bg: "#0a0b0c", logoDataUri: "data:image/png;base64," + Buffer.from("old-logo").toString("base64") }),
     ]);
     expect(s.defaultKitId).toBe(s.kits[0].id);
-    migratePreloaders(db); // idempotent: the legacy row is gone
+    await migratePreloaders(db); // idempotent: the legacy row is gone
     expect((await kits(token)).kits).toHaveLength(1);
   });
 });
@@ -1656,7 +1656,7 @@ describe("unity plugin distribution (download, version, licence, bans)", () => {
   const pluginDir = join(here, "..", "..", "unity-plugin");
   const makeAdmin = async (email: string) => {
     const t = await signup(email);
-    setAdmin(getUserByEmail(email)!.id, true);
+    await setAdmin((await getUserByEmail(email))!.id, true);
     return t;
   };
   /** Download the plugin and unpack it: pathname → { bytes, meta, guid }. */
@@ -1742,7 +1742,7 @@ describe("unity plugin distribution (download, version, licence, bans)", () => {
     const lic = licenseOf(text);
     expect(lic).toMatchObject({ wm, licensee: "plugin-dl@factorialstudio.com", workspace: "plugin-dl's workspace" });
     const { verifyLicense } = await import("../src/plugin/license.js");
-    expect(verifyLicense(lic.compact)).toMatchObject({ wm, email: "plugin-dl@factorialstudio.com" });
+    expect(await verifyLicense(lic.compact)).toMatchObject({ wm, email: "plugin-dl@factorialstudio.com" });
 
     // the release file's public key (what the C# side imports) verifies the signature too
     const rel = JSON.parse(text("Assets/FactorialAdLab/Editor/FactorialAdLabRelease.json"));
@@ -1834,16 +1834,16 @@ describe("unity plugin distribution (download, version, licence, bans)", () => {
     const lic = licenseOf(text);
     const { resetLicenseKeyCache, verifyLicense } = await import("../src/plugin/license.js");
     resetLicenseKeyCache(); // as after a restart
-    expect(verifyLicense(lic.compact)).not.toBeNull();
+    expect(await verifyLicense(lic.compact)).not.toBeNull();
     const { getSetting } = await import("../src/repo.js");
-    expect(getSetting("plugin_signing_key")).toMatch(/BEGIN PRIVATE KEY/);
+    expect(await getSetting("plugin_signing_key")).toMatch(/BEGIN PRIVATE KEY/);
   });
 });
 
 describe("device preview: simulated network host + sandbox", () => {
   it("previews get the network's simulated host and an opaque-origin sandbox; downloads stay untouched", async () => {
     const token = await signup("preview-host@factorialstudio.com");
-    verifyDomain("preview-host@factorialstudio.com");
+    await verifyDomain("preview-host@factorialstudio.com");
     await app.inject({ method: "POST", url: "/api/billing/plan", headers: bearer(token), payload: { plan: "studio" } });
     const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "P" } })).json().id;
     const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "c" } })).json().id;

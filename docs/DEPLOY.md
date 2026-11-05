@@ -91,6 +91,33 @@ dev secret). `FORGE_DB` must point at the persistent disk (`/data/forge.db`).
 
 ---
 
+## Scaling out: Postgres + object storage (optional)
+
+Out of the box the server keeps everything in one SQLite file on the persistent disk, with uploads and
+exports stored inside it. That's right for one instance and a small team. Two independent upgrades, each
+off until you set its variables (see `.env.example`):
+
+**1. Files → an object store (do this first: it's what fills the disk).** Create a bucket (Cloudflare R2:
+R2 → Create bucket, then *Manage R2 API tokens* → a token with Object Read & Write on that bucket). In
+Render set `BLOB_STORE=s3`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION=auto`, `S3_ACCESS_KEY_ID`,
+`S3_SECRET_ACCESS_KEY` and redeploy. New files go to the bucket at once; old ones keep working from the
+database. Then, from the Render shell, move the old ones (safe while the app runs):
+
+    npm run blobs -w @forge/server -- migrate
+
+On SQLite, run `VACUUM` afterwards to give the space back. `-- migrate --to-db` moves everything back.
+
+**2. Database → Postgres (for a managed DB or several instances).** Create a Postgres database (Render →
+New → PostgreSQL, or Neon/Supabase) and copy its *internal* connection string. Then, in a quiet moment:
+
+1. Scale the web service to 0 instances (or stop writes).
+2. From the Render shell: `DATABASE_URL=<url> npm run db:to-postgres -w @forge/server`
+   — creates the schema, copies every table, verifies the counts; the SQLite file is left as a backup.
+3. Set `DATABASE_URL` on the service and start it again.
+
+With Postgres, rate limits, the job queue (claims are compare-and-set, running jobs heart-beat) and the
+daily reminder run are shared, so you can add instances. Keep `JWT_SECRET` identical on all of them.
+
 ## ✅ What only you can do (I can't — needs your accounts/payment)
 
 1. **Create/choose the Node host** (Render / Fly / Railway / a VPS) and connect this GitHub repo —

@@ -47,7 +47,7 @@ export function needs(min: OrgRole): RouteShorthandOptions {
   const ph = base.preHandler;
   const prior: preHandlerHookHandler[] = ph ? (Array.isArray(ph) ? ph : [ph]) : [];
   const gate: preHandlerHookHandler = async (req, reply) => {
-    const ws = currentOrgFor(req.user!.id);
+    const ws = await currentOrgFor(req.user!.id);
     req.workspace = ws;
     if (!atLeast(ws.role, min)) return forbid(reply, ws.role, min);
   };
@@ -55,8 +55,8 @@ export function needs(min: OrgRole): RouteShorthandOptions {
 }
 
 /** Inline check for handlers that only sometimes need a higher role (e.g. one field of a PATCH). */
-export function requireRole(req: FastifyRequest, reply: FastifyReply, min: OrgRole): Workspace | undefined {
-  const ws = req.workspace ?? currentOrgFor(req.user!.id);
+export async function requireRole(req: FastifyRequest, reply: FastifyReply, min: OrgRole): Promise<Workspace | undefined> {
+  const ws = req.workspace ?? await currentOrgFor(req.user!.id);
   if (!atLeast(ws.role, min)) {
     forbid(reply, ws.role, min);
     return undefined;
@@ -65,8 +65,8 @@ export function requireRole(req: FastifyRequest, reply: FastifyReply, min: OrgRo
 }
 
 /** The user whose plan / domain / billing / quota govern the caller's current workspace. */
-export function billingOwnerId(userId: string): string {
-  return currentOrgFor(userId).org.owner_user_id;
+export async function billingOwnerId(userId: string): Promise<string> {
+  return (await currentOrgFor(userId)).org.owner_user_id;
 }
 
 export function workspaceView(ws: Workspace, ownerEmail?: string) {

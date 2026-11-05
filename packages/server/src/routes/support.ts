@@ -63,59 +63,67 @@ function actingAsSupport(isAdmin: boolean, as: string | undefined, threadOrg: st
   return isAdmin && (as === "support" || threadOrg !== myOrg);
 }
 
+/** A thread's messages with each author's email (one lookup per distinct author). */
+async function messagesView(threadId: string) {
+  const msgs = await listMessages(threadId);
+  const emails = new Map<string, string | null>();
+  for (const id of new Set(msgs.map((m) => m.author_user_id))) emails.set(id, (await getUserById(id))?.email ?? null);
+  return msgs.map((m) => messageView(m, emails.get(m.author_user_id)));
+}
+
 export async function supportRoutes(app: FastifyInstance): Promise<void> {
   // ── threads ──
   app.get("/api/support/threads", authed, async (req) => {
-    const ws = currentOrgFor(req.user!.id);
-    return listThreadsForOrg(ws.org.id).map((t) => threadView(t));
+    const ws = await currentOrgFor(req.user!.id);
+    return (await listThreadsForOrg(ws.org.id)).map((t) => threadView(t));
   });
 
-  app.get("/api/support/unread", authed, async (req) => ({ count: unreadForOrg(currentOrgFor(req.user!.id).org.id) }));
+  app.get("/api/support/unread", authed, async (req) => ({ count: await unreadForOrg((await currentOrgFor(req.user!.id)).org.id) }));
 
   app.post<{ Body: { subject?: string; message?: string } }>("/api/support/thread", authed, async (req, reply) => {
     const subject = clean(req.body?.subject, 160);
     const message = clean(req.body?.message, MAX_BODY);
     if (!subject || !message) return reply.code(400).send({ error: "subject and message are required" });
-    if (!rateLimit(`support:new:${req.user!.id}`, 10, 60 * 60_000)) return reply.code(429).send({ error: "Too many tickets this hour." });
-    const ws = currentOrgFor(req.user!.id);
-    const t = createThread(ws.org.id, req.user!.id, subject);
-    addMessage(t.id, req.user!.id, false, message);
+    if (!await rateLimit(`support:new:${req.user!.id}`, 10, 60 * 60_000)) return reply.code(429).send({ error: "Too many tickets this hour." });
+    const ws = await currentOrgFor(req.user!.id);
+    const t = await createThread(ws.org.id, req.user!.id, subject);
+    await addMessage(t.id, req.user!.id, false, message);
     void notifySupport(`[Support] ${subject}`, `${req.user!.email} (${ws.org.name}) opened a ticket:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/admin/support/${t.id}`);
-    return reply.code(201).send({ ...threadView(getThread(t.id)!), messages: listMessages(t.id).map((m) => messageView(m, req.user!.email)) });
+    return reply.code(201).send({ ...threadView((await getThread(t.id))!), messages: (await listMessages(t.id)).map((m) => messageView(m, req.user!.email)) });
   });
 
   /** Read a thread (marks it read for the viewer's side). Members of the workspace, or admins. */
   app.get<{ Params: { id: string }; Querystring: { as?: string } }>("/api/support/threads/:id", authed, async (req, reply) => {
-    const t = getThread(req.params.id);
-    const me = getUserById(req.user!.id);
-    const ws = currentOrgFor(req.user!.id);
+    const t = await getThread(req.params.id);
+    const me = await getUserById(req.user!.id);
+    const ws = await currentOrgFor(req.user!.id);
     const isAdmin = !!me?.is_admin;
     if (!t || (!isAdmin && t.org_id !== ws.org.id)) return reply.code(404).send({ error: "This ticket isn't in your current workspace." });
     const asSupport = actingAsSupport(isAdmin, req.query?.as, t.org_id, ws.org.id);
-    markThreadRead(t.id, asSupport);
-    const author = getUserById(t.user_id);
+    await markThreadRead(t.id, asSupport);
+    const author = await getUserById(t.user_id);
     return {
-      ...threadView(getThread(t.id)!, asSupport),
+      ...threadView((await getThread(t.id))!, asSupport),
       user: { id: t.user_id, email: author?.email ?? null },
       orgId: t.org_id,
-      messages: listMessages(t.id).map((m) => messageView(m, getUserById(m.author_user_id)?.email)),
+      messages: await messagesView(t.id),
     };
   });
 
   app.post<{ Params: { id: string }; Querystring: { as?: string }; Body: { message?: string } }>("/api/support/threads/:id/reply", authed, async (req, reply) => {
-    const t = getThread(req.params.id);
-    const me = getUserById(req.user!.id);
-    const ws = currentOrgFor(req.user!.id);
+    const t = await getThread(req.params.id);
+    const me = await getUserById(req.user!.id);
+    const ws = await currentOrgFor(req.user!.id);
     if (!t || (!me?.is_admin && t.org_id !== ws.org.id)) return reply.code(404).send({ error: "This ticket isn't in your current workspace." });
     // "isAdmin" below means: this message is FROM SUPPORT (flagged, emailed to the user)
     const isAdmin = actingAsSupport(!!me?.is_admin, req.query?.as, t.org_id, ws.org.id);
     const message = clean(req.body?.message, MAX_BODY);
     if (!message) return reply.code(400).send({ error: "message required" });
-    if (!rateLimit(`support:reply:${req.user!.id}`, 60, 60 * 60_000)) return reply.code(429).send({ error: "Slow down." });
-    addMessage(t.id, req.user!.id, isAdmin, message);
-    if (t.status === "closed") setThreadStatus(t.id, "open");
+    if (!await rateLimit(`support:reply:${req.user!.id}`, 60, 60 * 60_000)) return reply.code(429).send({ error: "Slow down." });
+    await addMessage(t.id, req.user!.id, isAdmin, message);
+    if (t.status === "closed") await setThreadStatus(t.id, "open");
     if (isAdmin) {
-      const user = getUserById(t.user_id);
+      const user = await getUserById(t.user_id);
       if (user) {
         try {
           await sendMail({
@@ -130,17 +138,17 @@ export async function supportRoutes(app: FastifyInstance): Promise<void> {
     } else {
       void notifySupport(`[Support] Re: ${t.subject}`, `${req.user!.email} replied:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/admin/support/${t.id}`);
     }
-    return { ...threadView(getThread(t.id)!, isAdmin), messages: listMessages(t.id).map((m) => messageView(m, getUserById(m.author_user_id)?.email)) };
+    return { ...threadView((await getThread(t.id))!, isAdmin), messages: await messagesView(t.id) };
   });
 
   app.post<{ Params: { id: string }; Querystring: { as?: string }; Body: { status?: string } }>("/api/support/threads/:id/close", authed, async (req, reply) => {
-    const t = getThread(req.params.id);
-    const me = getUserById(req.user!.id);
-    const ws = currentOrgFor(req.user!.id);
+    const t = await getThread(req.params.id);
+    const me = await getUserById(req.user!.id);
+    const ws = await currentOrgFor(req.user!.id);
     if (!t || (!me?.is_admin && t.org_id !== ws.org.id)) return reply.code(404).send({ error: "This ticket isn't in your current workspace." });
     const status = req.body?.status === "open" ? "open" : "closed";
-    setThreadStatus(t.id, status);
-    return threadView(getThread(t.id)!, actingAsSupport(!!me?.is_admin, req.query?.as, t.org_id, ws.org.id));
+    await setThreadStatus(t.id, status);
+    return threadView((await getThread(t.id))!, actingAsSupport(!!me?.is_admin, req.query?.as, t.org_id, ws.org.id));
   });
 
   // ── bug reports ──
@@ -148,9 +156,9 @@ export async function supportRoutes(app: FastifyInstance): Promise<void> {
     const title = clean(req.body?.title, 160);
     const body = clean(req.body?.body, MAX_BODY);
     if (!title || !body) return reply.code(400).send({ error: "title and body are required" });
-    if (!rateLimit(`bug:${req.user!.id}`, 20, 60 * 60_000)) return reply.code(429).send({ error: "Too many reports this hour." });
-    const ws = currentOrgFor(req.user!.id);
-    const b = createBug(ws.org.id, req.user!.id, title, body, clean(req.body?.page, 200) || null);
+    if (!await rateLimit(`bug:${req.user!.id}`, 20, 60 * 60_000)) return reply.code(429).send({ error: "Too many reports this hour." });
+    const ws = await currentOrgFor(req.user!.id);
+    const b = await createBug(ws.org.id, req.user!.id, title, body, clean(req.body?.page, 200) || null);
     void notifySupport(`[Bug] ${title}`, `${req.user!.email} (${ws.org.name})${b.page ? ` on ${escapeHtml(b.page)}` : ""}:<br><br>${escapeHtml(body).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/admin/bugs`);
     return reply.code(201).send({ id: b.id, title: b.title, createdAt: b.created_at });
   });
@@ -164,9 +172,9 @@ export async function supportRoutes(app: FastifyInstance): Promise<void> {
     const company = clean(req.body?.company, 160) || null;
     const message = clean(req.body?.message, MAX_BODY);
     if (!name || !message || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return reply.code(400).send({ error: "name, a valid email and a message are required" });
-    if (!rateLimit(`contact:${req.ip}`, 5, 60 * 60_000)) return reply.code(429).send({ error: "Too many messages — try again later." });
+    if (!await rateLimit(`contact:${req.ip}`, 5, 60 * 60_000)) return reply.code(429).send({ error: "Too many messages — try again later." });
     if (!(await requireHuman(req, reply, "contact"))) return reply;
-    const c = createContact(name, email, company, message);
+    const c = await createContact(name, email, company, message);
     void notifySupport(`[Contact] ${name}${company ? ` · ${company}` : ""}`, `${escapeHtml(name)} &lt;${escapeHtml(email)}&gt;${company ? ` (${escapeHtml(company)})` : ""}:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/admin/contact`);
     return reply.code(201).send({ ok: true, id: c.id });
   });

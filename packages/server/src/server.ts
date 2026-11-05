@@ -10,7 +10,7 @@ if (config.isProduction && isDevSecret) {
 
 const app = await buildApp();
 // in-process async worker (export jobs): recovers anything interrupted by the last restart, then polls
-startWorker();
+await startWorker();
 app.addHook("onClose", async () => stopWorker());
 
 try {

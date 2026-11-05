@@ -38,14 +38,14 @@ export function kitView(k: KitRow) {
 }
 
 /** The preloader to inject when exporting a creative of this concept (concept → app → workspace default). */
-export function preloaderForConcept(conceptId: string): PreloaderConfig | undefined {
-  const { kit } = resolveKit(conceptId);
+export async function preloaderForConcept(conceptId: string): Promise<PreloaderConfig | undefined> {
+  const { kit } = await resolveKit(conceptId);
   return kit ? kitToConfig(kit) : undefined;
 }
 
 /** What the dashboard shows next to a concept: which kit its exports get, and where that came from. */
-export function effectiveKitView(conceptId: string) {
-  const { kit, source } = resolveKit(conceptId);
+export async function effectiveKitView(conceptId: string) {
+  const { kit, source } = await resolveKit(conceptId);
   return { kitId: kit?.id ?? null, kitName: kit?.name ?? null, source };
 }
 

@@ -89,7 +89,7 @@ export function pluginSourceFiles(dir = config.pluginDir): string[] {
  * watermark stamped into AdLabBuildInfo.cs, plus the signed licence and the release file (version,
  * signing public key, and the API base the plugin should talk to).
  */
-export function buildPluginPackage(opts: { licenseFile: string; watermark: string; apiBase: string }, dir = config.pluginDir): Uint8Array {
+export async function buildPluginPackage(opts: { licenseFile: string; watermark: string; apiBase: string }, dir = config.pluginDir): Promise<Uint8Array> {
   const rel = currentRelease(dir);
   const enc = new TextEncoder();
   const entries: PackageEntry[] = pluginSourceFiles(dir).map((f) => {
@@ -100,7 +100,7 @@ export function buildPluginPackage(opts: { licenseFile: string; watermark: strin
     }
     return { path: `${INSTALL_ROOT}/${f}`, bytes };
   });
-  const key = publicKeyParams();
+  const key = await publicKeyParams();
   const release = {
     version: rel.version,
     commit: rel.commit,

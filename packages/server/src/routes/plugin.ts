@@ -67,13 +67,13 @@ export async function pluginGuard(req: FastifyRequest, reply: FastifyReply): Pro
   const compact = header(req, LICENSE_HEADER);
   let lid: string | null = null;
   if (compact) {
-    const lic = verifyLicense(compact);
+    const lic = await verifyLicense(compact);
     if (!lic) {
       await reply.code(403).send({ error: "The plugin's licence file is damaged or was not issued by Factorial AdLab. Download the plugin again.", code: "plugin-license-invalid" });
       return;
     }
     lid = lic.lid;
-    if (activePluginBan("download", lid)) {
+    if (await activePluginBan("download", lid)) {
       await reply.code(403).send({ error: banMessage(), code: "plugin-banned" });
       return;
     }
@@ -82,11 +82,11 @@ export async function pluginGuard(req: FastifyRequest, reply: FastifyReply): Pro
     return;
   }
 
-  if (uid && activePluginBan("user", uid)) {
+  if (uid && await activePluginBan("user", uid)) {
     await reply.code(403).send({ error: banMessage(), code: "plugin-banned" });
     return;
   }
-  if (lid && uid) touchPluginUsage(lid, uid, ver);
+  if (lid && uid) await touchPluginUsage(lid, uid, ver);
 }
 
 const downloadView = (d: PluginDownloadStats) => ({
@@ -121,18 +121,18 @@ export async function pluginRoutes(app: FastifyInstance): Promise<void> {
 
   /** A fresh, signed .unitypackage for the signed-in user (one licence per download). */
   app.get("/api/plugin/download", authed, async (req, reply) => {
-    const me = getUserById(req.user!.id);
+    const me = await getUserById(req.user!.id);
     if (!me) return reply.code(401).send({ error: "unauthorized" });
-    if (activePluginBan("user", me.id)) return reply.code(403).send({ error: banMessage(), code: "plugin-banned" });
-    if (!rateLimit(`plugin:dl:${me.id}`, 20, 60 * 60_000)) return reply.code(429).send({ error: "Too many downloads this hour." });
+    if (await activePluginBan("user", me.id)) return reply.code(403).send({ error: banMessage(), code: "plugin-banned" });
+    if (!await rateLimit(`plugin:dl:${me.id}`, 20, 60 * 60_000)) return reply.code(429).send({ error: "Too many downloads this hour." });
 
     const rel = currentRelease();
-    const ws = currentOrgFor(me.id);
+    const ws = await currentOrgFor(me.id);
     const lid = randomUUID();
     const wm = watermarkFor(lid);
-    const lic = issueLicense({ lid, wm, uid: me.id, email: me.email, org: ws.org.name, ver: rel.version });
-    const bytes = buildPluginPackage({ licenseFile: lic.file, watermark: wm, apiBase: siteUrl(req) });
-    createPluginDownload({ id: lid, wm, user_id: me.id, email: me.email, org_id: ws.org.id, version: rel.version, ip: req.ip ?? null });
+    const lic = await issueLicense({ lid, wm, uid: me.id, email: me.email, org: ws.org.name, ver: rel.version });
+    const bytes = await buildPluginPackage({ licenseFile: lic.file, watermark: wm, apiBase: siteUrl(req) });
+    await createPluginDownload({ id: lid, wm, user_id: me.id, email: me.email, org_id: ws.org.id, version: rel.version, ip: req.ip ?? null });
     return reply
       .header("Content-Type", "application/octet-stream")
       .header("Content-Disposition", `attachment; filename="FactorialAdLab-${rel.version}.unitypackage"`)
@@ -142,12 +142,12 @@ export async function pluginRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /** The caller's own downloads (licence codes, versions, when each was last used). */
-  app.get("/api/plugin/downloads", authed, async (req) => listPluginDownloadsFor(req.user!.id).map(downloadView));
+  app.get("/api/plugin/downloads", authed, async (req) => (await listPluginDownloadsFor(req.user!.id)).map(downloadView));
 
   // ── admin: downloads, leak tracing, bans ──
   const admin = adminOnly();
   app.get<{ Querystring: { q?: string; shared?: string } }>("/api/admin/plugin/downloads", admin, async (req) =>
-    listPluginDownloadsAdmin(req.query?.q ?? "", req.query?.shared === "1").map((d) => ({
+    (await listPluginDownloadsAdmin(req.query?.q ?? "", req.query?.shared === "1")).map((d) => ({
       ...downloadView(d),
       userId: d.user_id,
       email: d.email,
@@ -157,7 +157,7 @@ export async function pluginRoutes(app: FastifyInstance): Promise<void> {
     })),
   );
   app.get<{ Params: { id: string } }>("/api/admin/plugin/downloads/:id", admin, async (req, reply) => {
-    const d = getPluginDownload(req.params.id);
+    const d = await getPluginDownload(req.params.id);
     if (!d) return reply.code(404).send({ error: "download not found" });
     return {
       id: d.id,
@@ -165,12 +165,12 @@ export async function pluginRoutes(app: FastifyInstance): Promise<void> {
       email: d.email,
       version: d.version,
       createdAt: d.created_at,
-      usage: pluginUsageFor(d.id).map((u) => ({ userId: u.user_id, email: u.email, firstSeen: u.first_seen, lastSeen: u.last_seen, version: u.last_version, requests: u.requests })),
+      usage: (await pluginUsageFor(d.id)).map((u) => ({ userId: u.user_id, email: u.email, firstSeen: u.first_seen, lastSeen: u.last_seen, version: u.last_version, requests: u.requests })),
     };
   });
 
   app.get<{ Querystring: { all?: string } }>("/api/plugin/bans", admin, async (req) =>
-    listPluginBans(req.query?.all === "1").map((b) => ({
+    (await listPluginBans(req.query?.all === "1")).map((b) => ({
       id: b.id,
       scope: b.scope,
       target: b.target,
@@ -192,18 +192,18 @@ export async function pluginRoutes(app: FastifyInstance): Promise<void> {
     if (scope !== "download" && scope !== "user") return reply.code(400).send({ error: 'scope must be "download" or "user"' });
     if (!raw) return reply.code(400).send({ error: "target required" });
     let target: string | undefined;
-    if (scope === "download") target = getPluginDownload(raw)?.id;
+    if (scope === "download") target = (await getPluginDownload(raw))?.id;
     else {
-      target = (getUserById(raw) ?? getUserByEmail(raw.toLowerCase()))?.id;
+      target = (await getUserById(raw) ?? await getUserByEmail(raw.toLowerCase()))?.id;
       if (target === req.user!.id) return reply.code(400).send({ error: "You can't ban yourself." });
     }
     if (!target) return reply.code(404).send({ error: scope === "download" ? "No download with that licence id or code." : "No user with that id or email." });
-    if (activePluginBan(scope, target)) return reply.code(409).send({ error: "Already banned." });
-    const b = createPluginBan(scope, target, reason, req.user!.id);
+    if (await activePluginBan(scope, target)) return reply.code(409).send({ error: "Already banned." });
+    const b = await createPluginBan(scope, target, reason, req.user!.id);
     return reply.code(201).send({ id: b.id, scope: b.scope, target: b.target, reason: b.reason, createdAt: b.created_at });
   });
 
   app.post<{ Params: { id: string } }>("/api/plugin/bans/:id/lift", admin, async (req, reply) =>
-    liftPluginBan(req.params.id, req.user!.id) ? { lifted: true } : reply.code(404).send({ error: "no active ban with that id" }),
+    await liftPluginBan(req.params.id, req.user!.id) ? { lifted: true } : reply.code(404).send({ error: "no active ban with that id" }),
   );
 }

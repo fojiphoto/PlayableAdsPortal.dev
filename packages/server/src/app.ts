@@ -5,7 +5,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { config } from "./config.js";
-import { getDb } from "./db.js";
+import { initDb } from "./db.js";
 import { networkRoutes } from "./routes/networks.js";
 import { authRoutes } from "./routes/auth.js";
 import { appRoutes } from "./routes/apps.js";
@@ -26,7 +26,7 @@ import { turnstileEnabled } from "./turnstile.js";
 
 /** Build the Fastify app (exported separately so tests can drive it via inject()). */
 export async function buildApp(): Promise<FastifyInstance> {
-  getDb(); // ensure the database + schema exist
+  await initDb(); // open (and create/upgrade) the database: SQLite by default, Postgres with DATABASE_URL
 
   const app = Fastify({ logger: false, bodyLimit: config.maxUploadBytes });
 

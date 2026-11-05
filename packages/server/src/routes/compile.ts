@@ -29,10 +29,10 @@ export interface CompileJobPayload {
 
 registerJobHandler("compile", async (job, progress) => {
   const p = JSON.parse(job.payload_json) as CompileJobPayload;
-  const up = getUpload(p.uploadId);
+  const up = await getUpload(p.uploadId);
   if (!up || up.user_id !== job.user_id) throw new JobError("The uploaded build is no longer available — upload it again.", "upload-missing");
   try {
-    const concept = getConceptOwned(p.conceptId, job.user_id);
+    const concept = await getConceptOwned(p.conceptId, job.user_id);
     if (!concept) throw new JobError("Concept not found", "concept-missing");
 
     progress(5, "Unpacking the build…");
@@ -54,7 +54,7 @@ registerJobHandler("compile", async (job, progress) => {
       variables: defaultsOf(variableSchema),
       variableSchema,
     };
-    const row = createCreative({ conceptId: concept.id, name, entry: "index.html", sourceZip, optionsJson: JSON.stringify(options) });
+    const row = await createCreative({ conceptId: concept.id, name, entry: "index.html", sourceZip, optionsJson: JSON.stringify(options) });
 
     const fitsNetworks = allNetworks()
       .filter((n) => r.breakdown.embedded <= n.maxSizeBytes)
@@ -77,7 +77,7 @@ registerJobHandler("compile", async (job, progress) => {
     if (e instanceof CompileError) throw new JobError(e.message, e.code);
     throw e;
   } finally {
-    deleteUpload(up.id); // the input is only needed once
+    await deleteUpload(up.id); // the input is only needed once
   }
 });
 
@@ -101,11 +101,11 @@ async function readMultipart(req: FastifyRequest): Promise<{ file?: Buffer; file
 export async function compileRoutes(app: FastifyInstance): Promise<void> {
   async function startCompile(req: FastifyRequest, reply: FastifyReply, conceptIdFrom: (fields: Fields) => string | undefined) {
     const uid = req.user!.id;
-    if (!rateLimit(`compile:${uid}`, 20, 60 * 60_000)) return reply.code(429).send({ error: "Too many compiles — try again in an hour." });
+    if (!await rateLimit(`compile:${uid}`, 20, 60 * 60_000)) return reply.code(429).send({ error: "Too many compiles — try again in an hour." });
 
     const { file, filename, fields } = await readMultipart(req);
     const conceptId = conceptIdFrom(fields);
-    const concept = conceptId ? getConceptOwned(conceptId, uid) : undefined;
+    const concept = conceptId ? await getConceptOwned(conceptId, uid) : undefined;
     if (!concept) return reply.code(404).send({ error: "concept not found" });
     if (!file) return reply.code(400).send({ error: "no build uploaded (multipart field 'file', a .zip of the WebGL build folder)" });
     // zip magic "PK\x03\x04"
@@ -121,7 +121,7 @@ export async function compileRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: `variables: ${(e as Error).message}` });
       }
     }
-    const uploadId = createUpload(uid, filename, new Uint8Array(file));
+    const uploadId = await createUpload(uid, filename, new Uint8Array(file));
     const payload: CompileJobPayload = {
       uploadId,
       conceptId: concept.id,
@@ -133,7 +133,7 @@ export async function compileRoutes(app: FastifyInstance): Promise<void> {
       androidUrl: fields.androidUrl || undefined,
       variableSchema,
     };
-    const job = enqueue(uid, "compile", payload);
+    const job = await enqueue(uid, "compile", payload);
     return reply.code(202).send({ jobId: job.id, status: job.status, statusUrl: `/api/jobs/${job.id}`, uploadBytes: file.length });
   }
 
@@ -142,7 +142,7 @@ export async function compileRoutes(app: FastifyInstance): Promise<void> {
   // competitor-shaped aliases: POST /api/compile/jobs (conceptId as a form field), GET /api/compile/jobs/:id
   app.post("/api/compile/jobs", needs("member"), (req, reply) => startCompile(req, reply, (f) => f.conceptId));
   app.get<{ Params: { id: string } }>("/api/compile/jobs/:id", authed, async (req, reply) => {
-    const j = getJobOwned(req.params.id, req.user!.id);
+    const j = await getJobOwned(req.params.id, req.user!.id);
     if (!j || j.kind !== "compile") return reply.code(404).send({ error: "not found" });
     return jobView(j);
   });

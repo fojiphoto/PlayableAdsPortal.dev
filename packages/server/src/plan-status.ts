@@ -18,14 +18,14 @@ export interface PlanStatus {
   hasSubscription: boolean;
 }
 
-export function planStatus(userId: string): PlanStatus {
-  const user = getUserById(userId);
+export async function planStatus(userId: string): Promise<PlanStatus> {
+  const user = await getUserById(userId);
   const plan = getPlan(user?.plan);
   return {
     plan: plan.id,
     planName: plan.name,
     limit: plan.exportsPer30d,
-    used: countExportUsageSince(userId, since30dIso()),
+    used: await countExportUsageSince(userId, since30dIso()),
     networks: plan.networks,
     status: user?.plan_status ?? null,
     renewsAt: user?.plan_renews_at ?? null,
@@ -39,8 +39,8 @@ export type ExportCheck =
   | { ok: false; code: "network-not-in-plan" | "quota-exceeded"; error: string; blocked?: string[]; used?: number; limit?: number };
 
 /** Enforce plan rules before an export: allowed networks + rolling-30-day quota. */
-export function checkExport(userId: string, networkIds: string[]): ExportCheck {
-  const user = getUserById(userId);
+export async function checkExport(userId: string, networkIds: string[]): Promise<ExportCheck> {
+  const user = await getUserById(userId);
   const plan = getPlan(user?.plan);
 
   const blocked = networkIds.filter((id) => !networkAllowed(plan, id));
@@ -55,7 +55,7 @@ export function checkExport(userId: string, networkIds: string[]): ExportCheck {
   }
 
   if (plan.exportsPer30d != null) {
-    const used = countExportUsageSince(userId, since30dIso());
+    const used = await countExportUsageSince(userId, since30dIso());
     if (used + networkIds.length > plan.exportsPer30d) {
       return {
         ok: false,

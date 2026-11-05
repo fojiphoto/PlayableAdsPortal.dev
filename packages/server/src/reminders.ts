@@ -6,13 +6,13 @@
  */
 import { config } from "./config.js";
 import { sendMail, template } from "./mail.js";
-import { logReminder, reminderCandidatesNoExport, reminderCandidatesDormant, type UserRow } from "./repo.js";
+import { logReminder, reminderCandidatesNoExport, reminderCandidatesDormant, takeLease, type UserRow } from "./repo.js";
 
 export const REMINDER_KINDS = ["no-export", "dormant"] as const;
 export type ReminderKind = (typeof REMINDER_KINDS)[number];
 
-export function reminderCandidates(kind: ReminderKind): UserRow[] {
-  return kind === "no-export" ? reminderCandidatesNoExport(3) : reminderCandidatesDormant(14, 30);
+export async function reminderCandidates(kind: ReminderKind): Promise<UserRow[]> {
+  return kind === "no-export" ? await reminderCandidatesNoExport(3) : await reminderCandidatesDormant(14, 30);
 }
 
 export async function sendReminder(u: UserRow, kind: ReminderKind, site: string): Promise<void> {
@@ -40,7 +40,7 @@ export async function sendReminder(u: UserRow, kind: ReminderKind, site: string)
           ),
         };
   await sendMail({ to: u.email, ...mail });
-  logReminder(u.id, kind);
+  await logReminder(u.id, kind);
 }
 
 export interface ReminderRun {
@@ -53,7 +53,7 @@ export async function runReminders(opts: { dryRun?: boolean; kind?: ReminderKind
   const kinds = opts.kind ? [opts.kind] : [...REMINDER_KINDS];
   const out: ReminderRun = { dryRun: !!opts.dryRun, sent: { "no-export": 0, dormant: 0 }, candidates: { "no-export": [], dormant: [] } };
   for (const kind of kinds) {
-    const users = reminderCandidates(kind);
+    const users = await reminderCandidates(kind);
     out.candidates[kind] = users.map((u) => u.email);
     if (opts.dryRun) continue;
     for (const u of users) {
@@ -69,11 +69,15 @@ export async function runReminders(opts: { dryRun?: boolean; kind?: ReminderKind
 }
 
 let lastAuto = 0;
-/** Called from the job worker's tick: once a day when REMINDERS_AUTO=1. */
+/**
+ * Called from the job worker's tick: once a day when REMINDERS_AUTO=1. The day's run is claimed through a
+ * lease in the database, so with several instances only one of them sends.
+ */
 export async function autoRemindersTick(nowMs = Date.now()): Promise<void> {
   if (!config.remindersAuto) return;
-  if (nowMs - lastAuto < 24 * 60 * 60_000) return;
+  if (nowMs - lastAuto < 60 * 60_000) return; // check the shared lease at most hourly
   lastAuto = nowMs;
+  if (!(await takeLease("reminders", 24 * 60 * 60_000, nowMs))) return;
   const r = await runReminders({});
   const total = r.sent["no-export"] + r.sent.dormant;
   if (total) console.log(`[reminders] sent ${r.sent["no-export"]} no-export + ${r.sent.dormant} dormant`);

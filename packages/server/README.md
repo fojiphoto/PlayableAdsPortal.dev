@@ -10,6 +10,17 @@ npm run dev -w @forge/server      # http://localhost:4000
 npm run test -w @forge/server
 ```
 
+## Storage
+
+| Concern | Default | Scaled-out | How |
+|---|---|---|---|
+| Database | SQLite file (`FORGE_DB`) | Postgres (`DATABASE_URL`) | `src/db.ts`: one async API, SQLite-style SQL rewritten for Postgres; `npm run db:to-postgres` copies the data |
+| Files (uploads, exports, kit logos) | inline in the DB | disk (`BLOB_STORE=fs`) or S3/R2 (`BLOB_STORE=s3`) | `src/blobstore.ts`; rows keep a `*_key`; `npm run blobs -- migrate \| sweep` |
+| Rate limits | in memory | `rate_limits` table (`RATE_LIMIT_STORE=db`, default with Postgres) | `src/rate-limit.ts` |
+| Job queue | `jobs` table, one worker | the same table shared by every instance (CAS claims + heartbeats) | `src/jobs.ts` |
+
+`npm test` runs the suite on SQLite, `npm run test:pg` runs the same suite on real Postgres (PGlite).
+
 ## Endpoints
 
 | Method | Path | Purpose |

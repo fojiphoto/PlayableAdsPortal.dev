@@ -8,8 +8,28 @@ export const config = {
   host: process.env.HOST ?? "0.0.0.0",
   /** upload size ceiling (bytes) */
   maxUploadBytes: Number(process.env.MAX_UPLOAD_BYTES ?? 50 * 1024 * 1024),
+  /** Postgres connection string; when set the server uses Postgres instead of SQLite (gap #16) */
+  databaseUrl: process.env.DATABASE_URL ?? "",
   /** sqlite file path, or ":memory:" for tests */
   dbPath: process.env.FORGE_DB ?? join(process.cwd(), "data", "forge.db"),
+  /**
+   * Where uploads/exports/logos are stored (gap #16): "db" (inline, default), "fs" (BLOB_DIR) or "s3"
+   * (any S3-compatible store — Cloudflare R2, AWS S3, B2, MinIO).
+   */
+  blobs: {
+    driver: (["db", "fs", "s3"].includes(process.env.BLOB_STORE ?? "") ? process.env.BLOB_STORE : "db") as "db" | "fs" | "s3",
+    dir: process.env.BLOB_DIR ?? join(dirname(process.env.FORGE_DB ?? join(process.cwd(), "data", "forge.db")), "blobs"),
+    s3: {
+      endpoint: process.env.S3_ENDPOINT ?? "",
+      bucket: process.env.S3_BUCKET ?? "",
+      region: process.env.S3_REGION ?? "auto",
+      accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "",
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "",
+      prefix: process.env.S3_PREFIX ?? "",
+    },
+  },
+  /** rate-limit counters: "memory" (one instance) or "db" (shared by every instance; default with Postgres) */
+  rateLimitStore: (process.env.RATE_LIMIT_STORE === "db" || process.env.RATE_LIMIT_STORE === "memory" ? process.env.RATE_LIMIT_STORE : "") as "" | "db" | "memory",
   /** HMAC secret for auth tokens — MUST be set in production */
   jwtSecret: process.env.JWT_SECRET ?? "dev-insecure-secret-change-me",
   /** token lifetime in seconds (default 7 days) */

@@ -1,6 +1,6 @@
 import { createHash, createHmac, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, type KeyObject } from "node:crypto";
 import { config } from "../config.js";
-import { getSetting, setSetting } from "../repo.js";
+import { getSetting, setSettingIfAbsent } from "../repo.js";
 
 /**
  * Plugin licences (the competitor's `PlayableForgeLicense.json`: watermark + RSA signature).
@@ -31,11 +31,12 @@ export interface LicensePayload {
 const SETTING = "plugin_signing_key";
 let cached: { pem: string; priv: KeyObject; pub: KeyObject; kid: string } | null = null;
 
-function loadKey() {
-  let pem = config.pluginSigningKey || getSetting(SETTING);
+async function loadKey() {
+  let pem = config.pluginSigningKey || await getSetting(SETTING);
   if (!pem) {
-    pem = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-    setSetting(SETTING, pem);
+    const fresh = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    // first writer wins: two instances generating at once still end up signing with the same key
+    pem = await setSettingIfAbsent(SETTING, fresh);
   }
   if (cached && cached.pem === pem) return cached;
   const priv = createPrivateKey(pem);
@@ -46,8 +47,8 @@ function loadKey() {
 }
 
 /** The public key as RSA modulus/exponent (standard base64), which C#'s RSAParameters imports anywhere. */
-export function publicKeyParams(): { kid: string; modulus: string; exponent: string } {
-  const k = loadKey();
+export async function publicKeyParams(): Promise<{ kid: string; modulus: string; exponent: string }> {
+  const k = await loadKey();
   const jwk = k.pub.export({ format: "jwk" }) as { n: string; e: string };
   const b64 = (s: string) => Buffer.from(s, "base64url").toString("base64");
   return { kid: k.kid, modulus: b64(jwk.n), exponent: b64(jwk.e) };
@@ -60,8 +61,8 @@ export function watermarkFor(lid: string): string {
 }
 
 /** Sign a licence; returns the compact form `payload.sig` and the file the package carries. */
-export function issueLicense(p: Omit<LicensePayload, "v" | "kid" | "iat">): { compact: string; file: string; payload: LicensePayload } {
-  const k = loadKey();
+export async function issueLicense(p: Omit<LicensePayload, "v" | "kid" | "iat">): Promise<{ compact: string; file: string; payload: LicensePayload }> {
+  const k = await loadKey();
   const payload: LicensePayload = { v: 1, ...p, iat: Math.floor(Date.now() / 1000), kid: k.kid };
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const sig = sign("sha256", Buffer.from(body), k.priv).toString("base64");
@@ -74,13 +75,13 @@ export function issueLicense(p: Omit<LicensePayload, "v" | "kid" | "iat">): { co
 }
 
 /** Verify a compact licence from the X-AdLab-License header; null if malformed or not signed by us. */
-export function verifyLicense(compact: string): LicensePayload | null {
+export async function verifyLicense(compact: string): Promise<LicensePayload | null> {
   const dot = compact.lastIndexOf(".");
   if (dot <= 0 || compact.length > 4096) return null;
   const body = compact.slice(0, dot);
   const sig = compact.slice(dot + 1);
   try {
-    if (!verify("sha256", Buffer.from(body), loadKey().pub, Buffer.from(sig, "base64"))) return null;
+    if (!verify("sha256", Buffer.from(body), (await loadKey()).pub, Buffer.from(sig, "base64"))) return null;
     const p = JSON.parse(Buffer.from(body, "base64url").toString()) as LicensePayload;
     return p && p.v === 1 && typeof p.lid === "string" ? p : null;
   } catch {

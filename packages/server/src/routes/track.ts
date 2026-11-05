@@ -28,13 +28,13 @@ export async function trackRoutes(app: FastifyInstance): Promise<void> {
     reply.header("cache-control", "no-store, private").header("access-control-allow-origin", "*");
     const respond = () => (req.method === "GET" ? reply.type("image/gif").send(GIF) : reply.code(204).send());
 
-    if (!rateLimit(`track:${req.ip}`, 600, 60_000)) return reply.code(429).send();
+    if (!await rateLimit(`track:${req.ip}`, 600, 60_000)) return reply.code(429).send();
 
     const { creativeId } = req.params;
     const q = req.query ?? {};
     const event = String(q.e ?? "");
     const session = String(q.s ?? "");
-    if (!UUID.test(creativeId) || !isEventKind(event) || !SESSION.test(session) || !creativeExists(creativeId)) return respond();
+    if (!UUID.test(creativeId) || !isEventKind(event) || !SESSION.test(session) || !await creativeExists(creativeId)) return respond();
 
     let network = String(req.params.network ?? "").slice(0, 40);
     try {
@@ -44,7 +44,7 @@ export async function trackRoutes(app: FastifyInstance): Promise<void> {
     }
     const name = event === "custom" ? String(q.n ?? "").slice(0, 64) || null : null;
     const value = event === "custom" && q.v !== undefined && Number.isFinite(Number(q.v)) ? Number(q.v) : null;
-    insertEvent(creativeId, network, event, session, name, q.p === "1", value);
+    await insertEvent(creativeId, network, event, session, name, q.p === "1", value);
     return respond();
   };
 

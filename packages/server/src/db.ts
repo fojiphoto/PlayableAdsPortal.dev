@@ -1,14 +1,42 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config.js";
 
+/**
+ * Database layer (parity gap #16): one async interface over two engines.
+ *
+ *   SQLite   (default)  — node:sqlite, a file on the persistent disk; zero setup.
+ *   Postgres            — DATABASE_URL=postgres://… (node-postgres pool), for a managed DB and for
+ *                         running several server instances. Tests also run against PGlite (real
+ *                         Postgres in WASM, FORGE_DB_DRIVER=pglite) so both dialects stay green.
+ *
+ * Queries are written once, SQLite-style (`?` placeholders); the Postgres driver rewrites them
+ * ($1…, INSERT OR IGNORE → ON CONFLICT DO NOTHING) and normalises results to what SQLite returns
+ * (numbers for COUNT/SUM, 0/1 for booleans), so callers never branch on the engine.
+ */
+
 // Load Node's built-in SQLite via createRequire so the bundler/test-runner (Vite) doesn't try
 // to resolve "node:sqlite" as a package. Types come from the erased `import type`.
 const nodeRequire = createRequire(import.meta.url);
-const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
-type DB = InstanceType<typeof DatabaseSync>;
+type SqliteDB = InstanceType<typeof import("node:sqlite").DatabaseSync>;
+
+export interface Statement {
+  get<T = unknown>(...params: unknown[]): Promise<T | undefined>;
+  all<T = unknown>(...params: unknown[]): Promise<T[]>;
+  run(...params: unknown[]): Promise<{ changes: number }>;
+}
+export interface Database {
+  readonly kind: "sqlite" | "postgres";
+  prepare(sql: string): Statement;
+  /** one or more statements without parameters (schema, maintenance) */
+  exec(sql: string): Promise<void>;
+  /** run `fn` in a transaction; queries made inside it (through db()) join it */
+  tx<T>(fn: () => Promise<T>): Promise<T>;
+  close(): Promise<void>;
+}
 
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
@@ -290,22 +318,16 @@ CREATE TABLE IF NOT EXISTS exports (
   created_at      TEXT NOT NULL,
   UNIQUE(creative_id, network)
 );
+-- shared fixed-window rate limits (used when the database is shared by several instances)
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key      TEXT PRIMARY KEY,
+  count    INTEGER NOT NULL,
+  reset_at BIGINT NOT NULL
+);
 `;
 
-let db: DB | undefined;
-
-export function initDb(path: string = config.dbPath): DB {
-  if (path !== ":memory:") {
-    try {
-      mkdirSync(dirname(path), { recursive: true });
-    } catch {
-      /* ignore */
-    }
-  }
-  db = new DatabaseSync(path);
-  db.exec(SCHEMA);
-  // migrations for pre-existing databases (ignore if the column already exists)
-  for (const stmt of [
+/** Additive migrations for databases created by older versions (idempotent). */
+const MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'",
     "ALTER TABLE users ADD COLUMN totp_secret TEXT",
     "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
@@ -331,16 +353,355 @@ export function initDb(path: string = config.dbPath): DB {
     "ALTER TABLE orgs ADD COLUMN default_kit_id TEXT",
     "ALTER TABLE apps ADD COLUMN kit_id TEXT",
     "ALTER TABLE concepts ADD COLUMN kit_id TEXT",
-  ]) {
+    // gap #16: binary data can live in an object store (the *_key column), the inline column then stays empty
+    "ALTER TABLE creatives ADD COLUMN source_key TEXT",
+    "ALTER TABLE exports ADD COLUMN bytes_key TEXT",
+    "ALTER TABLE uploads ADD COLUMN bytes_key TEXT",
+    "ALTER TABLE preloader_kits ADD COLUMN logo_key TEXT",
+    // gap #16: running jobs prove they're alive, so another instance only recovers truly abandoned ones
+    "ALTER TABLE jobs ADD COLUMN heartbeat_at TEXT",
+];
+
+// node:sqlite takes null (not undefined) and Uint8Array; node-postgres wants Buffers for bytea
+function normParam(v: unknown): unknown {
+  if (v === undefined) return null;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  return v;
+}
+
+// ── SQLite ───────────────────────────────────────────────────────────────────
+class SqliteDatabase implements Database {
+  readonly kind = "sqlite" as const;
+  private cache = new Map<string, ReturnType<SqliteDB["prepare"]>>();
+  private txScope = new AsyncLocalStorage<boolean>();
+  private txDone: Promise<void> | null = null;
+  constructor(readonly raw: SqliteDB) {}
+
+  /** While a transaction is open, statements from outside it wait (one connection is shared). */
+  private async gate(): Promise<void> {
+    while (this.txDone && !this.txScope.getStore()) await this.txDone;
+  }
+  private stmt(sql: string) {
+    let s = this.cache.get(sql);
+    if (!s) {
+      s = this.raw.prepare(sql);
+      this.cache.set(sql, s);
+    }
+    return s;
+  }
+  prepare(sql: string): Statement {
+    return {
+      get: async <T>(...p: unknown[]) => {
+        await this.gate();
+        return this.stmt(sql).get(...(p.map(normParam) as never[])) as T | undefined;
+      },
+      all: async <T>(...p: unknown[]) => {
+        await this.gate();
+        return this.stmt(sql).all(...(p.map(normParam) as never[])) as T[];
+      },
+      run: async (...p: unknown[]) => {
+        await this.gate();
+        return { changes: Number(this.stmt(sql).run(...(p.map(normParam) as never[])).changes) };
+      },
+    };
+  }
+  async exec(sql: string): Promise<void> {
+    await this.gate();
+    this.raw.exec(sql);
+  }
+  async tx<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.txScope.getStore()) return fn(); // nested: join the open transaction
+    await this.gate();
+    let release!: () => void;
+    this.txDone = new Promise<void>((r) => (release = r));
     try {
-      db.exec(stmt);
-    } catch {
-      /* column already present */
+      return await this.txScope.run(true, async () => {
+        this.raw.exec("BEGIN");
+        try {
+          const out = await fn();
+          this.raw.exec("COMMIT");
+          return out;
+        } catch (e) {
+          this.raw.exec("ROLLBACK");
+          throw e;
+        }
+      });
+    } finally {
+      this.txDone = null;
+      release();
     }
   }
-  migrateOrgs(db);
-  migratePreloaders(db);
-  return db;
+  async close(): Promise<void> {
+    this.cache.clear();
+    try {
+      this.raw.close();
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
+// ── Postgres (node-postgres pool, or PGlite in tests) ─────────────────────────
+interface PgResult {
+  rows: Record<string, unknown>[];
+  rowCount?: number | null;
+  affectedRows?: number;
+}
+interface PgClient {
+  query(text: string, params?: unknown[]): Promise<PgResult>;
+  /** several statements, no parameters */
+  execMany(sql: string): Promise<void>;
+}
+interface PgBackend {
+  root: PgClient;
+  transaction<T>(fn: (c: PgClient) => Promise<T>): Promise<T>;
+  close(): Promise<void>;
+}
+
+const pgSqlCache = new Map<string, string>();
+/** SQLite-style SQL → Postgres: `?` → `$n` (outside quotes), INSERT OR IGNORE → ON CONFLICT DO NOTHING. */
+export function toPostgresSql(sql: string): string {
+  const hit = pgSqlCache.get(sql);
+  if (hit) return hit;
+  let out = "";
+  let n = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i]!;
+    if (quote) {
+      out += ch;
+      if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+    } else if (ch === "?") out += `$${++n}`;
+    else out += ch;
+  }
+  if (/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i.test(out)) out = out.replace(/INSERT\s+OR\s+IGNORE\s+INTO/i, "INSERT INTO").trimEnd().replace(/;?$/, " ON CONFLICT DO NOTHING");
+  pgSqlCache.set(sql, out);
+  return out;
+}
+
+/** Postgres returns booleans (EXISTS…) where SQLite returns 0/1; keep callers dialect-free. */
+function normRow<T>(row: Record<string, unknown> | undefined): T | undefined {
+  if (!row) return undefined;
+  for (const k in row) if (typeof row[k] === "boolean") row[k] = row[k] ? 1 : 0;
+  return row as T;
+}
+function pgParam(v: unknown): unknown {
+  const n = normParam(v);
+  if (n instanceof Uint8Array && !Buffer.isBuffer(n)) return Buffer.from(n.buffer, n.byteOffset, n.byteLength);
+  return n;
+}
+
+class PgDatabase implements Database {
+  readonly kind = "postgres" as const;
+  private scope = new AsyncLocalStorage<PgClient>();
+  constructor(private backend: PgBackend) {}
+  private client(): PgClient {
+    return this.scope.getStore() ?? this.backend.root;
+  }
+  prepare(sql: string): Statement {
+    const text = toPostgresSql(sql);
+    const q = (p: unknown[]) => this.client().query(text, p.map(pgParam));
+    return {
+      get: async <T>(...p: unknown[]) => normRow<T>((await q(p)).rows[0]),
+      all: async <T>(...p: unknown[]) => (await q(p)).rows.map((r) => normRow<T>(r)!),
+      run: async (...p: unknown[]) => {
+        const r = await q(p);
+        return { changes: Number(r.rowCount ?? r.affectedRows ?? 0) };
+      },
+    };
+  }
+  async exec(sql: string): Promise<void> {
+    await this.client().execMany(sql);
+  }
+  async tx<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.scope.getStore()) return fn();
+    return this.backend.transaction((c) => this.scope.run(c, fn));
+  }
+  async close(): Promise<void> {
+    await this.backend.close();
+  }
+}
+
+/** The schema in Postgres types (BYTEA, DOUBLE PRECISION), without SQLite pragmas. */
+export function postgresSchema(): string {
+  return SCHEMA.replace(/PRAGMA[^;]*;/g, "").replace(/\bBLOB\b/g, "BYTEA").replace(/\bREAL\b/g, "DOUBLE PRECISION");
+}
+const pgMigration = (stmt: string) =>
+  stmt.replace(/ADD COLUMN /, "ADD COLUMN IF NOT EXISTS ").replace(/\bBLOB\b/g, "BYTEA").replace(/\bREAL\b/g, "DOUBLE PRECISION");
+
+// COUNT/SUM come back as int8/numeric strings; make them numbers like SQLite's
+const INT8 = 20;
+const NUMERIC = 1700;
+
+async function openNodePostgres(url: string): Promise<PgBackend> {
+  const pg = (await import("pg")).default;
+  pg.types.setTypeParser(INT8, (v: string) => Number(v));
+  pg.types.setTypeParser(NUMERIC, (v: string) => Number(v));
+  const pool = new pg.Pool({
+    connectionString: url,
+    max: Number(process.env.PG_POOL_MAX ?? 10),
+    ssl: /sslmode=(require|verify)/.test(url) || process.env.PGSSL === "1" ? { rejectUnauthorized: process.env.PGSSL_REJECT_UNAUTHORIZED !== "0" } : undefined,
+  });
+  const wrap = (c: { query: (t: string, p?: unknown[]) => Promise<PgResult> }): PgClient => ({
+    query: (t, p) => c.query(t, p),
+    execMany: async (sql) => {
+      await c.query(sql);
+    },
+  });
+  return {
+    root: wrap(pool as never),
+    async transaction(fn) {
+      const c = await pool.connect();
+      try {
+        await c.query("BEGIN");
+        const out = await fn(wrap(c as never));
+        await c.query("COMMIT");
+        return out;
+      } catch (e) {
+        await c.query("ROLLBACK").catch(() => {});
+        throw e;
+      } finally {
+        c.release();
+      }
+    },
+    close: () => pool.end(),
+  };
+}
+
+async function openPglite(): Promise<PgBackend> {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const lite = new PGlite({ parsers: { [INT8]: (v: string) => Number(v), [NUMERIC]: (v: string) => Number(v) } });
+  await lite.waitReady;
+  const wrap = (c: { query: (t: string, p?: unknown[]) => Promise<unknown>; exec: (s: string) => Promise<unknown> }): PgClient => ({
+    query: (t, p) => c.query(t, p) as Promise<PgResult>,
+    execMany: async (sql) => {
+      await c.exec(sql);
+    },
+  });
+  return {
+    root: wrap(lite as never),
+    transaction: (fn) => lite.transaction((tx) => fn(wrap(tx as never))),
+    close: () => lite.close(),
+  };
+}
+
+// ── lifecycle ────────────────────────────────────────────────────────────────
+export type DbDriver = "sqlite" | "postgres" | "pglite";
+let current: Database | undefined;
+
+/** Which engine this process uses: FORGE_DB_DRIVER, else Postgres when DATABASE_URL is set, else SQLite. */
+export function dbDriver(): DbDriver {
+  const d = process.env.FORGE_DB_DRIVER;
+  if (d === "sqlite" || d === "postgres" || d === "pglite") return d;
+  return config.databaseUrl ? "postgres" : "sqlite";
+}
+
+/** The open database. Call `initDb()` once at startup (the app, scripts and tests do). */
+export function db(): Database {
+  if (!current) throw new Error("database not initialised — await initDb() first");
+  return current;
+}
+
+async function createSchema(d: Database): Promise<void> {
+  if (d.kind === "sqlite") {
+    await d.exec(SCHEMA);
+    for (const stmt of MIGRATIONS) {
+      try {
+        await d.exec(stmt);
+      } catch {
+        /* column already present */
+      }
+    }
+  } else {
+    await d.exec(postgresSchema());
+    for (const stmt of MIGRATIONS) await d.exec(pgMigration(stmt));
+  }
+}
+
+/**
+ * Open a database and create/upgrade its schema, without making it the app's database (scripts that
+ * copy between two databases use this; the app uses `initDb`).
+ */
+export async function openDatabase(opts: { driver?: DbDriver; path?: string; url?: string } = {}): Promise<Database> {
+  const driver = opts.driver ?? dbDriver();
+  let d: Database;
+  if (driver === "sqlite") {
+    const path = opts.path ?? config.dbPath;
+    if (path !== ":memory:") {
+      try {
+        mkdirSync(dirname(path), { recursive: true });
+      } catch {
+        /* ignore */
+      }
+    }
+    const { DatabaseSync } = nodeRequire("node:sqlite") as typeof import("node:sqlite");
+    d = new SqliteDatabase(new DatabaseSync(path));
+  } else if (driver === "pglite") {
+    d = new PgDatabase(await openPglite());
+  } else {
+    const url = opts.url ?? config.databaseUrl;
+    if (!url) throw new Error("DATABASE_URL is required for the postgres driver");
+    d = new PgDatabase(await openNodePostgres(url));
+  }
+  await createSchema(d);
+  return d;
+}
+
+/** Open (and create/upgrade) the app's database. Idempotent. */
+export async function initDb(opts: { driver?: DbDriver; path?: string; url?: string } = {}): Promise<Database> {
+  if (current) return current;
+  const d = await openDatabase(opts);
+  current = d;
+  await migrateOrgs(d);
+  await migratePreloaders(d);
+  return d;
+}
+
+/** Tables in creation order — parents before children, so copying in this order satisfies foreign keys. */
+export const TABLE_ORDER: string[] = [...SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]!);
+
+/** Column names of a table. */
+export async function columnsOf(d: Database, table: string): Promise<string[]> {
+  if (d.kind === "sqlite") return (await d.prepare(`SELECT name FROM pragma_table_info('${table}')`).all<{ name: string }>()).map((r) => r.name);
+  return (
+    await d
+      .prepare("SELECT column_name AS name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = ? ORDER BY ordinal_position")
+      .all<{ name: string }>(table)
+  ).map((r) => r.name);
+}
+
+export async function closeDb(): Promise<void> {
+  const d = current;
+  current = undefined;
+  await d?.close();
+}
+
+/** Every application table (for resets and the SQLite → Postgres copy). */
+export async function tableNames(d: Database = db()): Promise<string[]> {
+  if (d.kind === "sqlite")
+    return (await d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid").all<{ name: string }>()).map((r) => r.name);
+  return (await d.prepare("SELECT tablename AS name FROM pg_tables WHERE schemaname = current_schema() ORDER BY tablename").all<{ name: string }>()).map((r) => r.name);
+}
+
+/**
+ * For tests: an empty database. SQLite gets a fresh in-memory file; Postgres/PGlite keep the
+ * connection and truncate every table (much faster than re-creating the engine).
+ */
+export async function resetDb(): Promise<void> {
+  const driver = dbDriver();
+  if (driver === "sqlite") {
+    await closeDb();
+    await initDb({ driver, path: ":memory:" });
+    return;
+  }
+  if (!current) {
+    await initDb({ driver });
+  }
+  const names = await tableNames(current!);
+  if (names.length) await current!.exec(`TRUNCATE ${names.map((n) => `"${n}"`).join(", ")} CASCADE`);
 }
 
 /**
@@ -348,29 +709,33 @@ export function initDb(path: string = config.dbPath): DB {
  * without a workspace join their creator's, the current-workspace pointer is set, and the legacy
  * flat `memberships` rows become org memberships of the owner's workspace.
  */
-export function migrateOrgs(db: DB): void {
+export async function migrateOrgs(d: Database = db()): Promise<void> {
   const nowIso = new Date().toISOString();
-  const orphans = db
+  const orphans = await d
     .prepare("SELECT u.id, u.email FROM users u WHERE NOT EXISTS (SELECT 1 FROM orgs o WHERE o.owner_user_id = u.id)")
-    .all() as unknown as { id: string; email: string }[];
-  const insOrg = db.prepare("INSERT INTO orgs (id, name, owner_user_id, created_at) VALUES (?, ?, ?, ?)");
-  const insMem = db.prepare("INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)");
+    .all<{ id: string; email: string }>();
+  const insOrg = d.prepare("INSERT INTO orgs (id, name, owner_user_id, created_at) VALUES (?, ?, ?, ?)");
+  const insMem = d.prepare("INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)");
   for (const u of orphans) {
     const id = randomUUID();
-    insOrg.run(id, `${u.email.split("@")[0] || "my"}'s workspace`, u.id, nowIso);
-    insMem.run(id, u.id, nowIso);
+    await insOrg.run(id, `${u.email.split("@")[0] || "my"}'s workspace`, u.id, nowIso);
+    await insMem.run(id, u.id, nowIso);
   }
-  db.exec(
-    "UPDATE apps SET org_id = (SELECT o.id FROM orgs o WHERE o.owner_user_id = apps.user_id ORDER BY o.created_at LIMIT 1) WHERE org_id IS NULL",
-  );
-  db.exec(
-    "UPDATE users SET current_org_id = (SELECT o.id FROM orgs o WHERE o.owner_user_id = users.id ORDER BY o.created_at LIMIT 1) WHERE current_org_id IS NULL",
-  );
-  db.exec(
-    `INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at)
-     SELECT o.id, m.member_user_id, CASE WHEN m.role = 'admin' THEN 'admin' ELSE 'member' END, m.created_at
-     FROM memberships m JOIN orgs o ON o.owner_user_id = m.owner_user_id`,
-  );
+  await d
+    .prepare("UPDATE apps SET org_id = (SELECT o.id FROM orgs o WHERE o.owner_user_id = apps.user_id ORDER BY o.created_at LIMIT 1) WHERE org_id IS NULL")
+    .run();
+  await d
+    .prepare(
+      "UPDATE users SET current_org_id = (SELECT o.id FROM orgs o WHERE o.owner_user_id = users.id ORDER BY o.created_at LIMIT 1) WHERE current_org_id IS NULL",
+    )
+    .run();
+  await d
+    .prepare(
+      `INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at)
+       SELECT o.id, m.member_user_id, CASE WHEN m.role = 'admin' THEN 'admin' ELSE 'member' END, m.created_at
+       FROM memberships m JOIN orgs o ON o.owner_user_id = m.owner_user_id`,
+    )
+    .run();
 }
 
 /**
@@ -378,54 +743,32 @@ export function migrateOrgs(db: DB): void {
  * a "Brand kit" in every workspace that user owns — the workspace default when it was enabled — and the
  * legacy row is removed once copied, so it never re-runs.
  */
-export function migratePreloaders(db: DB): void {
-  const rows = db.prepare("SELECT * FROM preloaders").all() as unknown as {
+export async function migratePreloaders(d: Database = db()): Promise<void> {
+  const rows = await d.prepare("SELECT * FROM preloaders").all<{
     user_id: string;
     logo: Uint8Array | null;
     logo_mime: string | null;
     bg: string | null;
     enabled: number;
-  }[];
+  }>();
   if (!rows.length) return;
   const nowIso = new Date().toISOString();
-  const orgsOf = db.prepare("SELECT id FROM orgs WHERE owner_user_id = ?");
-  const ins = db.prepare(
+  const orgsOf = d.prepare("SELECT id FROM orgs WHERE owner_user_id = ?");
+  const ins = d.prepare(
     "INSERT INTO preloader_kits (id, org_id, name, template, bg, logo, logo_mime, created_at, updated_at) VALUES (?, ?, 'Brand kit', 'classic', ?, ?, ?, ?, ?)",
   );
-  const setDefault = db.prepare("UPDATE orgs SET default_kit_id = ? WHERE id = ? AND default_kit_id IS NULL");
-  const del = db.prepare("DELETE FROM preloaders WHERE user_id = ?");
-  db.exec("BEGIN");
-  try {
+  const setDefault = d.prepare("UPDATE orgs SET default_kit_id = ? WHERE id = ? AND default_kit_id IS NULL");
+  const del = d.prepare("DELETE FROM preloaders WHERE user_id = ?");
+  await d.tx(async () => {
     for (const r of rows) {
       if (r.logo || r.bg) {
-        for (const o of orgsOf.all(r.user_id) as unknown as { id: string }[]) {
+        for (const o of await orgsOf.all<{ id: string }>(r.user_id)) {
           const id = randomUUID();
-          ins.run(id, o.id, r.bg, r.logo ? Buffer.from(r.logo) : null, r.logo_mime, nowIso, nowIso);
-          if (r.enabled) setDefault.run(id, o.id);
+          await ins.run(id, o.id, r.bg, r.logo ? Buffer.from(r.logo) : null, r.logo_mime, nowIso, nowIso);
+          if (r.enabled) await setDefault.run(id, o.id);
         }
       }
-      del.run(r.user_id);
+      await del.run(r.user_id);
     }
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
-}
-
-export function getDb(): DB {
-  if (!db) initDb();
-  return db!;
-}
-
-/** For tests: swap in a fresh in-memory database. */
-export function resetDb(): void {
-  if (db) {
-    try {
-      db.close();
-    } catch {
-      /* ignore */
-    }
-  }
-  initDb(":memory:");
+  });
 }
