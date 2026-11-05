@@ -169,6 +169,47 @@ CREATE TABLE IF NOT EXISTS preloader_kits (
 );
 CREATE INDEX IF NOT EXISTS idx_kits_org ON preloader_kits(org_id);
 
+-- server-side settings that must survive restarts (e.g. the generated plugin licence signing key)
+CREATE TABLE IF NOT EXISTS app_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- Unity plugin distribution (gap #13): every download is a signed, watermarked licence
+CREATE TABLE IF NOT EXISTS plugin_downloads (
+  id         TEXT PRIMARY KEY,               -- licence id (lid), embedded in the package
+  wm         TEXT NOT NULL UNIQUE,           -- short watermark code shown to people (XXXX-XXXX-XXXX)
+  user_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  email      TEXT NOT NULL,                  -- kept even if the user is deleted (leak tracing)
+  org_id     TEXT,
+  version    TEXT NOT NULL,
+  ip         TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plugin_dl_user ON plugin_downloads(user_id, created_at);
+-- which accounts use which download (a download used by many accounts = a leaked copy)
+CREATE TABLE IF NOT EXISTS plugin_usage (
+  lid          TEXT NOT NULL,
+  user_id      TEXT NOT NULL,
+  first_seen   TEXT NOT NULL,
+  last_seen    TEXT NOT NULL,
+  last_version TEXT,
+  requests     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (lid, user_id)
+);
+CREATE TABLE IF NOT EXISTS plugin_bans (
+  id         TEXT PRIMARY KEY,
+  scope      TEXT NOT NULL,                  -- download | user
+  target     TEXT NOT NULL,                  -- licence id, or user id
+  reason     TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  lifted_at  TEXT,
+  lifted_by  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_plugin_bans_target ON plugin_bans(scope, target);
+
 CREATE TABLE IF NOT EXISTS apps (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

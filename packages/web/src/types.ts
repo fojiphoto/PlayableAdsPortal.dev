@@ -341,6 +341,44 @@ export interface AdminOverview {
   unreadThreads: number;
   openBugs: number;
   openContacts: number;
+  pluginDownloads30d: number;
+  pluginBans: number;
+}
+
+// ── Unity plugin distribution ──
+export interface PluginRelease {
+  version: string;
+  unity: string;
+  displayName: string;
+  releasedAt: string | null;
+  notes: string[];
+  commit: string | null;
+  minVersion: string | null;
+}
+export interface PluginDownload {
+  id: string;
+  wm: string;
+  version: string;
+  createdAt: string;
+  accounts: number;
+  lastSeenAt: string | null;
+  banned: boolean;
+}
+export interface AdminPluginDownload extends PluginDownload {
+  userId: string | null;
+  email: string;
+  ip: string | null;
+  otherAccounts: number;
+  requests: number;
+}
+export interface PluginBan {
+  id: string;
+  scope: "download" | "user";
+  target: string;
+  targetLabel: string | null;
+  reason: string | null;
+  createdAt: string;
+  liftedAt: string | null;
 }
 export interface AdminUser {
   id: string;

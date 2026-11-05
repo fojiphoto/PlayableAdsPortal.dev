@@ -1,3 +1,4 @@
+import { PluginSection } from "./PluginSection";
 import { useEffect, useState, type FormEvent } from "react";
 import QRCode from "qrcode";
 import { changePassword, twofaBegin, twofaConfirm, twofaDisable, twofaStatus } from "../api";
@@ -168,6 +169,7 @@ export function Settings({ user, status, onWorkspaceChanged }: { user: AuthUser;
       </section>
 
       <WorkspaceSection me={user} onChanged={onWorkspaceChanged} />
+      <PluginSection />
     </div>
   );
 }

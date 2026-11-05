@@ -17,9 +17,10 @@ import {
 } from "../api";
 import type { AdminOverview, AdminUser, AdminThread, AdminBug, AdminContact, AdminJob, Plan, SupportThreadDetail } from "../types";
 import { ThreadView } from "./Support";
+import { AdminPlugin } from "./AdminPlugin";
 
-type Tab = "overview" | "users" | "support" | "bugs" | "contact" | "jobs" | "reminders";
-const TABS: Tab[] = ["overview", "users", "support", "bugs", "contact", "jobs", "reminders"];
+type Tab = "overview" | "users" | "support" | "bugs" | "contact" | "jobs" | "reminders" | "plugin";
+const TABS: Tab[] = ["overview", "users", "support", "bugs", "contact", "jobs", "reminders", "plugin"];
 
 /** Platform admin console (users, support inbox, bug reports, contact form, jobs, reminders). */
 export function Admin({ initialTab, initialThreadId, me }: { initialTab?: string | null; initialThreadId?: string | null; me: string }) {
@@ -51,6 +52,7 @@ export function Admin({ initialTab, initialThreadId, me }: { initialTab?: string
       {tab === "contact" && <Contacts />}
       {tab === "jobs" && <Jobs />}
       {tab === "reminders" && <Reminders />}
+      {tab === "plugin" && <AdminPlugin />}
     </div>
   );
 }
@@ -68,6 +70,7 @@ function Overview({ ov }: { ov: AdminOverview | null }) {
     ["Open tickets", ov.openThreads, `${ov.unreadThreads} unread`],
     ["Open bugs", ov.openBugs],
     ["New contacts", ov.openContacts],
+    ["Plugin downloads · 30d", ov.pluginDownloads30d, `${ov.pluginBans} active bans`],
   ];
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-5">

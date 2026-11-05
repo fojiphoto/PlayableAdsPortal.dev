@@ -872,6 +872,8 @@ export function adminStats() {
     unreadThreads: one("SELECT COUNT(*) n FROM support_threads WHERE admin_unread > 0"),
     openBugs: one("SELECT COUNT(*) n FROM feedback_bugs WHERE handled_at IS NULL"),
     openContacts: one("SELECT COUNT(*) n FROM contact_messages WHERE handled_at IS NULL"),
+    pluginDownloads30d: one("SELECT COUNT(*) n FROM plugin_downloads WHERE created_at >= ?", monthAgo),
+    pluginBans: one("SELECT COUNT(*) n FROM plugin_bans WHERE lifted_at IS NULL"),
   };
 }
 export interface AdminUserRow extends UserRow {
@@ -1043,4 +1045,112 @@ export function reminderCandidatesDormant(idleDays: number, cooldownDays: number
        ORDER BY u.last_login_at LIMIT 500`,
     )
     .all(idle, cooldown) as unknown as UserRow[];
+}
+
+// ── settings ─────────────────────────────────────────────────────────────────
+export function getSetting(key: string): string | undefined {
+  return (getDb().prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as { value: string } | undefined)?.value;
+}
+export function setSetting(key: string, value: string): void {
+  getDb()
+    .prepare("INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+    .run(key, value, now());
+}
+
+// ── Unity plugin distribution ────────────────────────────────────────────────
+export interface PluginDownloadRow {
+  id: string;
+  wm: string;
+  user_id: string | null;
+  email: string;
+  org_id: string | null;
+  version: string;
+  ip: string | null;
+  created_at: string;
+}
+export interface PluginBanRow {
+  id: string;
+  scope: "download" | "user";
+  target: string;
+  reason: string | null;
+  created_by: string | null;
+  created_at: string;
+  lifted_at: string | null;
+  lifted_by: string | null;
+}
+export function createPluginDownload(r: Omit<PluginDownloadRow, "created_at">): PluginDownloadRow {
+  const row = { ...r, created_at: now() };
+  getDb()
+    .prepare("INSERT INTO plugin_downloads (id, wm, user_id, email, org_id, version, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(row.id, row.wm, row.user_id, row.email, row.org_id, row.version, row.ip, row.created_at);
+  return row;
+}
+export function getPluginDownload(idOrWm: string): PluginDownloadRow | undefined {
+  return getDb().prepare("SELECT * FROM plugin_downloads WHERE id = ? OR wm = ?").get(idOrWm, idOrWm.toUpperCase()) as PluginDownloadRow | undefined;
+}
+/** Record that `userId` made a plugin request with download `lid`. */
+export function touchPluginUsage(lid: string, userId: string, version: string | null): void {
+  const t = now();
+  getDb()
+    .prepare(
+      `INSERT INTO plugin_usage (lid, user_id, first_seen, last_seen, last_version, requests) VALUES (?, ?, ?, ?, ?, 1)
+       ON CONFLICT(lid, user_id) DO UPDATE SET last_seen = excluded.last_seen, last_version = excluded.last_version, requests = requests + 1`,
+    )
+    .run(lid, userId, t, t, version);
+}
+export interface PluginDownloadStats extends PluginDownloadRow {
+  accounts: number;
+  other_accounts: number;
+  requests: number;
+  last_seen: string | null;
+  banned: number;
+}
+const DOWNLOAD_STATS = `
+  SELECT d.*,
+    (SELECT COUNT(*) FROM plugin_usage u WHERE u.lid = d.id) AS accounts,
+    (SELECT COUNT(*) FROM plugin_usage u WHERE u.lid = d.id AND (d.user_id IS NULL OR u.user_id <> d.user_id)) AS other_accounts,
+    (SELECT COALESCE(SUM(requests), 0) FROM plugin_usage u WHERE u.lid = d.id) AS requests,
+    (SELECT MAX(last_seen) FROM plugin_usage u WHERE u.lid = d.id) AS last_seen,
+    EXISTS (SELECT 1 FROM plugin_bans b WHERE b.lifted_at IS NULL AND ((b.scope = 'download' AND b.target = d.id) OR (b.scope = 'user' AND b.target = d.user_id))) AS banned
+  FROM plugin_downloads d`;
+export function listPluginDownloadsFor(userId: string, limit = 20): PluginDownloadStats[] {
+  return getDb().prepare(`${DOWNLOAD_STATS} WHERE d.user_id = ? ORDER BY d.created_at DESC LIMIT ?`).all(userId, limit) as unknown as PluginDownloadStats[];
+}
+/** Admin list; `q` matches email or watermark; `shared` = only downloads used by other accounts (leaks). */
+export function listPluginDownloadsAdmin(q = "", shared = false, limit = 200): PluginDownloadStats[] {
+  const like = `%${q.trim().toLowerCase()}%`;
+  return getDb()
+    .prepare(
+      `SELECT * FROM (${DOWNLOAD_STATS}) x WHERE (? = '' OR lower(x.email) LIKE ? OR lower(x.wm) LIKE ? OR x.id = ?) AND (? = 0 OR x.other_accounts > 0) ORDER BY x.created_at DESC LIMIT ?`,
+    )
+    .all(q.trim(), like, like, q.trim(), shared ? 1 : 0, limit) as unknown as PluginDownloadStats[];
+}
+export function pluginUsageFor(lid: string): { user_id: string; email: string | null; first_seen: string; last_seen: string; last_version: string | null; requests: number }[] {
+  return getDb()
+    .prepare("SELECT u.*, us.email FROM plugin_usage u LEFT JOIN users us ON us.id = u.user_id WHERE u.lid = ? ORDER BY u.last_seen DESC")
+    .all(lid) as never;
+}
+export function activePluginBan(scope: "download" | "user", target: string): PluginBanRow | undefined {
+  return getDb()
+    .prepare("SELECT * FROM plugin_bans WHERE scope = ? AND target = ? AND lifted_at IS NULL ORDER BY created_at DESC LIMIT 1")
+    .get(scope, target) as PluginBanRow | undefined;
+}
+export function createPluginBan(scope: "download" | "user", target: string, reason: string | null, by: string): PluginBanRow {
+  const row: PluginBanRow = { id: randomUUID(), scope, target, reason, created_by: by, created_at: now(), lifted_at: null, lifted_by: null };
+  getDb()
+    .prepare("INSERT INTO plugin_bans (id, scope, target, reason, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(row.id, row.scope, row.target, row.reason, row.created_by, row.created_at);
+  return row;
+}
+export function liftPluginBan(id: string, by: string): boolean {
+  return getDb().prepare("UPDATE plugin_bans SET lifted_at = ?, lifted_by = ? WHERE id = ? AND lifted_at IS NULL").run(now(), by, id).changes > 0;
+}
+export function listPluginBans(includeLifted = false): (PluginBanRow & { target_label: string | null })[] {
+  return getDb()
+    .prepare(
+      `SELECT b.*, CASE b.scope WHEN 'user' THEN (SELECT email FROM users WHERE id = b.target)
+                                ELSE (SELECT wm || ' · ' || email FROM plugin_downloads WHERE id = b.target) END AS target_label
+       FROM plugin_bans b ${includeLifted ? "" : "WHERE b.lifted_at IS NULL"} ORDER BY b.created_at DESC LIMIT 200`,
+    )
+    .all() as never;
 }

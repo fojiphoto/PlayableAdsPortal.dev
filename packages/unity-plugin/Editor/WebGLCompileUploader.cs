@@ -128,15 +128,16 @@ namespace FactorialAdLab.Editor
                 if (!string.IsNullOrEmpty(cfg.androidUrl)) form.Add(new MultipartFormDataSection("androidUrl", cfg.androidUrl));
 
                 UnityWebRequest req = UnityWebRequest.Post($"{apiBase}/api/concepts/{conceptId}/compile", form);
-                req.SetRequestHeader("Authorization", "Bearer " + authToken);
+                PluginHttp.Apply(req, authToken);
                 req.SendWebRequest().completed += _ =>
                 {
                     bool ok = req.result == UnityWebRequest.Result.Success;
                     string txt = req.downloadHandler.text;
+                    string serverError = ok ? null : PluginHttp.ServerError(req);
                     req.Dispose();
                     if (!ok)
                     {
-                        Stop("Upload failed: " + CaptureUploader.Trunc(txt));
+                        Stop("Upload failed: " + (serverError ?? CaptureUploader.Trunc(txt)));
                         return;
                     }
                     JobStart js = null;
@@ -230,7 +231,7 @@ namespace FactorialAdLab.Editor
             nextPollAt = now + 1.5;
 
             var req = UnityWebRequest.Get($"{apiBase}/api/jobs/{jobId}");
-            req.SetRequestHeader("Authorization", "Bearer " + authToken);
+            PluginHttp.Apply(req, authToken);
             req.SendWebRequest().completed += _ =>
             {
                 string txt = req.result == UnityWebRequest.Result.Success ? req.downloadHandler.text : null;

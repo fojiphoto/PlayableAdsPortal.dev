@@ -1629,3 +1629,191 @@ describe("preloader kits (templates, per-app/concept kits, server preview)", () 
     expect((await kits(token)).kits).toHaveLength(1);
   });
 });
+
+describe("unity plugin distribution (download, version, licence, bans)", () => {
+  const pluginDir = join(here, "..", "..", "unity-plugin");
+  const makeAdmin = async (email: string) => {
+    const t = await signup(email);
+    setAdmin(getUserByEmail(email)!.id, true);
+    return t;
+  };
+  /** Download the plugin and unpack it: pathname → { bytes, meta, guid }. */
+  async function download(token: string) {
+    const r = await app.inject({ method: "GET", url: "/api/plugin/download", headers: bearer(token) });
+    expect(r.statusCode).toBe(200);
+    const { gunzipSync } = await import("node:zlib");
+    const { untar } = await import("../src/plugin/unitypackage.js");
+    const entries = untar(gunzipSync(r.rawPayload));
+    const byGuid = new Map<string, Record<string, Uint8Array>>();
+    for (const e of entries) {
+      const [g, f] = e.name.split("/");
+      if (!f) continue;
+      byGuid.set(g!, { ...(byGuid.get(g!) ?? {}), [f]: e.bytes });
+    }
+    const files = new Map<string, { guid: string; bytes?: Uint8Array; meta: string }>();
+    for (const [guid, parts] of byGuid) {
+      const path = new TextDecoder().decode(parts.pathname!);
+      files.set(path, { guid, bytes: parts.asset, meta: new TextDecoder().decode(parts["asset.meta"]!) });
+    }
+    const text = (p: string) => new TextDecoder().decode(files.get(p)!.bytes!);
+    return { r, files, text, wm: r.headers["x-adlab-licence"] as string };
+  }
+  const licenseOf = (text: (p: string) => string) => {
+    const lic = JSON.parse(text("Assets/FactorialAdLab/Editor/FactorialAdLabLicense.json"));
+    return { ...lic, compact: `${lic.payload}.${lic.sig}` };
+  };
+  const pluginGet = (url: string, opts: { token?: string; license?: string; version?: string } = {}) =>
+    app.inject({
+      method: "GET",
+      url,
+      headers: {
+        ...(opts.token ? bearer(opts.token) : {}),
+        "x-adlab-plugin": opts.version ?? "0.2.0",
+        ...(opts.license ? { "x-adlab-license": opts.license } : {}),
+      },
+    });
+
+  it("version: matches package.json, the C# build constant and the changelog; tells a plugin when it's behind", async () => {
+    const { readFileSync } = await import("node:fs");
+    const pkg = JSON.parse(readFileSync(join(pluginDir, "package.json"), "utf8"));
+    const cs = readFileSync(join(pluginDir, "Editor", "AdLabBuildInfo.cs"), "utf8");
+    expect(cs).toContain(`Version = "${pkg.version}"`);
+    expect(cs).toContain('Watermark = ""');
+
+    const v = (await app.inject({ method: "GET", url: "/api/plugin/version" })).json();
+    expect(v).toMatchObject({ version: pkg.version, unity: "6000.0", downloadUrl: "/api/plugin/download", installed: null, updateAvailable: null });
+    expect(v.notes.length).toBeGreaterThan(0);
+    expect(v.releasedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect((await pluginGet("/api/plugin/version", { version: "0.1.0" })).json()).toMatchObject({ installed: "0.1.0", updateAvailable: true, supported: true });
+    expect((await pluginGet("/api/plugin/version", { version: pkg.version })).json().updateAvailable).toBe(false);
+  });
+
+  it("download: a .unitypackage of the plugin under Assets/FactorialAdLab with a signed, watermarked licence", async () => {
+    expect((await app.inject({ method: "GET", url: "/api/plugin/download" })).statusCode).toBe(401);
+    const token = await signup("plugin-dl@factorialstudio.com");
+    const { r, files, text, wm } = await download(token);
+    expect(r.headers["content-disposition"]).toMatch(/FactorialAdLab-\d+\.\d+\.\d+\.unitypackage/);
+    expect(wm).toMatch(/^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/);
+
+    const paths = [...files.keys()];
+    for (const p of [
+      "Assets/FactorialAdLab",
+      "Assets/FactorialAdLab/Editor",
+      "Assets/FactorialAdLab/Editor/PluginUpdater.cs",
+      "Assets/FactorialAdLab/Editor/FactorialAdLab.Editor.asmdef",
+      "Assets/FactorialAdLab/Runtime/Playable.cs",
+      "Assets/FactorialAdLab/Runtime/Plugins/WebGL/FactorialAdLab.jslib",
+      "Assets/FactorialAdLab/Editor/FactorialAdLabLicense.json",
+      "Assets/FactorialAdLab/Editor/FactorialAdLabRelease.json",
+    ])
+      expect(paths).toContain(p);
+    expect(paths.some((p) => p.endsWith("package.json"))).toBe(false);
+    // folders carry a folder meta and no asset; GUIDs are stable per path (updates overwrite in place)
+    const { guidFor } = await import("../src/plugin/unitypackage.js");
+    expect(files.get("Assets/FactorialAdLab/Editor")).toMatchObject({ bytes: undefined, guid: guidFor("Assets/FactorialAdLab/Editor") });
+    expect(files.get("Assets/FactorialAdLab/Editor")!.meta).toContain("folderAsset: yes");
+    expect(files.get("Assets/FactorialAdLab/Runtime/Plugins/WebGL/FactorialAdLab.jslib")!.meta).toMatch(/WebGL: WebGL\n    second:\n      enabled: 1/);
+    expect(files.get("Assets/FactorialAdLab/Editor/PluginUpdater.cs")!.meta).toContain(`guid: ${guidFor("Assets/FactorialAdLab/Editor/PluginUpdater.cs")}`);
+
+    // the watermark is stamped into the C# build constant and matches the licence
+    expect(text("Assets/FactorialAdLab/Editor/AdLabBuildInfo.cs")).toContain(`Watermark = "${wm}"`);
+    const lic = licenseOf(text);
+    expect(lic).toMatchObject({ wm, licensee: "plugin-dl@factorialstudio.com", workspace: "plugin-dl's workspace" });
+    const { verifyLicense } = await import("../src/plugin/license.js");
+    expect(verifyLicense(lic.compact)).toMatchObject({ wm, email: "plugin-dl@factorialstudio.com" });
+
+    // the release file's public key (what the C# side imports) verifies the signature too
+    const rel = JSON.parse(text("Assets/FactorialAdLab/Editor/FactorialAdLabRelease.json"));
+    expect(rel).toMatchObject({ version: expect.any(String), kid: lic.kid, api: expect.stringMatching(/^https?:\/\//) });
+    const { createPublicKey, verify } = await import("node:crypto");
+    const pub = createPublicKey({ key: { kty: "RSA", n: Buffer.from(rel.modulus, "base64").toString("base64url"), e: Buffer.from(rel.exponent, "base64").toString("base64url") }, format: "jwk" });
+    expect(verify("sha256", Buffer.from(lic.payload), pub, Buffer.from(lic.sig, "base64"))).toBe(true);
+
+    // each download is its own licence; the user sees their downloads
+    const second = await download(token);
+    expect(second.wm).not.toBe(wm);
+    const mine = (await app.inject({ method: "GET", url: "/api/plugin/downloads", headers: bearer(token) })).json();
+    expect(mine.map((d: { wm: string }) => d.wm)).toEqual([second.wm, wm]);
+  });
+
+  it("guard: plugin requests are licence-checked, recorded, and held to the minimum version", async () => {
+    const token = await signup("plugin-guard@factorialstudio.com");
+    const { text } = await download(token);
+    const lic = licenseOf(text);
+    expect((await pluginGet("/api/apps", { token, license: lic.compact })).statusCode).toBe(200);
+    expect((await pluginGet("/api/apps", { token })).statusCode).toBe(200); // installed from source: no licence, allowed
+    const forged = lic.compact.replace(/^./, (c: string) => (c === "e" ? "f" : "e"));
+    const bad = await pluginGet("/api/apps", { token, license: forged });
+    expect(bad.statusCode).toBe(403);
+    expect(bad.json().code).toBe("plugin-license-invalid");
+
+    const { config: cfg } = await import("../src/config.js");
+    cfg.pluginMinVersion = "0.2.0";
+    cfg.pluginRequireLicense = true;
+    try {
+      const old = await pluginGet("/api/apps", { token, license: lic.compact, version: "0.1.9" });
+      expect(old.statusCode).toBe(426);
+      expect(old.json()).toMatchObject({ code: "plugin-outdated", minVersion: "0.2.0" });
+      // the version check itself stays open so an outdated plugin can find the update
+      expect((await pluginGet("/api/plugin/version", { version: "0.1.9" })).json()).toMatchObject({ supported: false, updateAvailable: true });
+      expect((await pluginGet("/api/apps", { token })).json().code).toBe("plugin-license-required");
+      expect((await pluginGet("/api/apps", { token, license: lic.compact })).statusCode).toBe(200);
+      // the website (no plugin header) is never affected
+      expect((await app.inject({ method: "GET", url: "/api/apps", headers: bearer(token) })).statusCode).toBe(200);
+    } finally {
+      cfg.pluginMinVersion = "";
+      cfg.pluginRequireLicense = false;
+    }
+  });
+
+  it("bans: a leaked download is traced to its owner, banned and lifted; a banned user can't use or download the plugin", async () => {
+    const admin = await makeAdmin("plugin-admin@factorialstudio.com");
+    const owner = await signup("plugin-owner@factorialstudio.com");
+    const other = await signup("plugin-borrower@factorialstudio.com");
+    const { text, wm } = await download(owner);
+    const lic = licenseOf(text);
+    await pluginGet("/api/apps", { token: owner, license: lic.compact });
+    await pluginGet("/api/apps", { token: other, license: lic.compact }); // someone else is using the owner's copy
+
+    expect((await app.inject({ method: "GET", url: "/api/admin/plugin/downloads", headers: bearer(owner) })).statusCode).toBe(403);
+    const leaks = (await app.inject({ method: "GET", url: "/api/admin/plugin/downloads?shared=1", headers: bearer(admin) })).json();
+    expect(leaks).toEqual([expect.objectContaining({ wm, email: "plugin-owner@factorialstudio.com", accounts: 2, otherAccounts: 1, requests: 2, banned: false })]);
+    const detail = (await app.inject({ method: "GET", url: `/api/admin/plugin/downloads/${wm}`, headers: bearer(admin) })).json();
+    expect(detail.usage.map((u: { email: string }) => u.email).sort()).toEqual(["plugin-borrower@factorialstudio.com", "plugin-owner@factorialstudio.com"]);
+
+    // ban the download by its watermark code
+    const ban = await app.inject({ method: "POST", url: "/api/plugin/bans", headers: bearer(admin), payload: { scope: "download", target: wm.toLowerCase(), reason: "posted on a forum" } });
+    expect(ban.statusCode).toBe(201);
+    expect((await app.inject({ method: "POST", url: "/api/plugin/bans", headers: bearer(admin), payload: { scope: "download", target: wm } })).statusCode).toBe(409);
+    const refused = await pluginGet("/api/apps", { token: other, license: lic.compact });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().code).toBe("plugin-banned");
+    expect((await app.inject({ method: "GET", url: "/api/apps", headers: bearer(other) })).statusCode).toBe(200); // website unaffected
+    expect((await pluginGet("/api/plugin/version", { license: lic.compact })).statusCode).toBe(200);
+    const bans = (await app.inject({ method: "GET", url: "/api/plugin/bans", headers: bearer(admin) })).json();
+    expect(bans).toEqual([expect.objectContaining({ scope: "download", targetLabel: `${wm} · plugin-owner@factorialstudio.com`, reason: "posted on a forum" })]);
+    expect((await app.inject({ method: "POST", url: `/api/plugin/bans/${ban.json().id}/lift`, headers: bearer(admin) })).json()).toEqual({ lifted: true });
+    expect((await pluginGet("/api/apps", { token: other, license: lic.compact })).statusCode).toBe(200);
+
+    // ban a user by email: their plugin requests (any copy) and downloads are refused
+    expect((await app.inject({ method: "POST", url: "/api/plugin/bans", headers: bearer(admin), payload: { scope: "user", target: "plugin-admin@factorialstudio.com" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: "/api/plugin/bans", headers: bearer(admin), payload: { scope: "user", target: "nobody@x.io" } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/api/plugin/bans", headers: bearer(admin), payload: { scope: "user", target: "plugin-borrower@factorialstudio.com" } })).statusCode).toBe(201);
+    expect((await pluginGet("/api/apps", { token: other })).json().code).toBe("plugin-banned");
+    expect((await app.inject({ method: "GET", url: "/api/plugin/download", headers: bearer(other) })).statusCode).toBe(403);
+    expect((await pluginGet("/api/apps", { token: owner, license: lic.compact })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: "/api/plugin/bans", headers: bearer(owner), payload: { scope: "user", target: "plugin-borrower@factorialstudio.com" } })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: "/api/admin/overview", headers: bearer(admin) })).json()).toMatchObject({ pluginDownloads30d: 1, pluginBans: 1 });
+  });
+
+  it("the signing key is generated once and persisted, so licences survive a restart", async () => {
+    const token = await signup("plugin-key@factorialstudio.com");
+    const { text } = await download(token);
+    const lic = licenseOf(text);
+    const { resetLicenseKeyCache, verifyLicense } = await import("../src/plugin/license.js");
+    resetLicenseKeyCache(); // as after a restart
+    expect(verifyLicense(lic.compact)).not.toBeNull();
+    const { getSetting } = await import("../src/repo.js");
+    expect(getSetting("plugin_signing_key")).toMatch(/BEGIN PRIVATE KEY/);
+  });
+});

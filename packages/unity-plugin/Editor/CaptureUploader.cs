@@ -178,13 +178,13 @@ namespace FactorialAdLab.Editor
                 }
 
                 UnityWebRequest req = UnityWebRequest.Post($"{apiBase}/api/concepts/{conceptId}/capture", form);
-                req.SetRequestHeader("Authorization", "Bearer " + authToken);
+                PluginHttp.Apply(req, authToken);
                 req.SendWebRequest().completed += _ =>
                 {
                     bool ok = req.result == UnityWebRequest.Result.Success;
                     string msg = ok
                         ? $"Uploaded {frames.Count} frames. Open your dashboard to export to every network."
-                        : "Upload failed: " + req.error + " (" + Trunc(req.downloadHandler.text) + ")";
+                        : "Upload failed: " + (PluginHttp.ServerError(req) ?? req.error + " (" + Trunc(req.downloadHandler.text) + ")");
                     req.Dispose();
                     Stop(msg);
                 };
@@ -221,10 +221,11 @@ namespace FactorialAdLab.Editor
                 downloadHandler = new DownloadHandlerBuffer(),
             };
             req.SetRequestHeader("Content-Type", "application/json");
-            req.SetRequestHeader("Authorization", "Bearer " + token);
+            PluginHttp.Apply(req, token);
             req.SendWebRequest().completed += _ =>
             {
                 string txt = req.result == UnityWebRequest.Result.Success ? req.downloadHandler.text : null;
+                if (txt == null) PluginHttp.ServerError(req); // remembers outdated / banned for the window
                 req.Dispose();
                 cb(txt);
             };

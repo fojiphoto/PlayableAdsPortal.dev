@@ -7,8 +7,8 @@ using UnityEngine.SceneManagement;
 namespace FactorialAdLab.Editor
 {
     /// <summary>
-    /// Phase 2.0 skeleton: signs in to the Factorial AdLab API and will (2.1) capture the active
-    /// scene via the Recorder, build a lightweight HTML5 playable, and upload it to the pipeline.
+    /// The plugin window: sign in, compile or capture the game into a playable and upload it, and keep
+    /// the plugin itself up to date (version, licence, self-update).
     /// </summary>
     public class FactorialAdLabWindow : EditorWindow
     {
@@ -19,7 +19,8 @@ namespace FactorialAdLab.Editor
         const string CfgKey = "FactorialAdLab.capture";
         const string CompileCfgKey = "FactorialAdLab.compile";
 
-        string api = "https://app.factorialstudio.dev";
+        string api = PluginUpdater.DefaultApi;
+        bool showPlugin = true;
         string email = "";
         string password = "";
         string token = "";
@@ -32,7 +33,8 @@ namespace FactorialAdLab.Editor
 
         void OnEnable()
         {
-            api = EditorPrefs.GetString(ApiKey, api);
+            PluginUpdater.Changed += Repaint;
+            api = EditorPrefs.GetString(ApiKey, PluginLicense.DefaultApi ?? api);
             token = EditorPrefs.GetString(TokenKey, "");
             email = EditorPrefs.GetString(EmailKey, "");
             string json = EditorPrefs.GetString(CfgKey, "");
@@ -41,6 +43,44 @@ namespace FactorialAdLab.Editor
             if (!string.IsNullOrEmpty(cjson)) { try { compileCfg = JsonUtility.FromJson<CompileSettings>(cjson) ?? compileCfg; } catch { } }
             if (string.IsNullOrEmpty(cfg.productName) || cfg.productName == "My Game")
                 cfg.productName = Application.productName;
+        }
+
+        void OnDisable() => PluginUpdater.Changed -= Repaint;
+
+        /// <summary>Version, licence and updates.</summary>
+        void DrawPluginSection()
+        {
+            showPlugin = EditorGUILayout.Foldout(showPlugin, "Plugin " + AdLabBuildInfo.Version, true);
+            if (!showPlugin) return;
+            EditorGUI.indentLevel++;
+            var lic = PluginLicense.Status;
+            EditorGUILayout.HelpBox(PluginLicense.Describe(), lic == PluginLicense.State.Invalid ? MessageType.Warning : MessageType.None);
+            if (!string.IsNullOrEmpty(PluginUpdater.BlockedMessage))
+                EditorGUILayout.HelpBox(PluginUpdater.BlockedMessage, MessageType.Error);
+            if (PluginUpdater.UpdateAvailable || PluginUpdater.Unsupported)
+            {
+                string notes = PluginUpdater.Notes != null && PluginUpdater.Notes.Length > 0 ? "\n• " + string.Join("\n• ", PluginUpdater.Notes) : "";
+                EditorGUILayout.HelpBox(
+                    (PluginUpdater.Unsupported ? "This plugin version is no longer supported — update to keep uploading. " : "") +
+                    "Version " + PluginUpdater.Latest + " is available." + notes,
+                    PluginUpdater.Unsupported ? MessageType.Error : MessageType.Info);
+                using (new EditorGUI.DisabledScope(PluginUpdater.Updating || string.IsNullOrEmpty(token)))
+                {
+                    if (GUILayout.Button(PluginUpdater.Updating ? "Updating…" : "Update to " + PluginUpdater.Latest))
+                        PluginUpdater.Update(api, token, s => { status = s; Repaint(); });
+                }
+                if (string.IsNullOrEmpty(token)) GUILayout.Label("Sign in to update (the download is licensed to you).", EditorStyles.miniLabel);
+            }
+            else if (!string.IsNullOrEmpty(PluginUpdater.Latest))
+                GUILayout.Label("Up to date.", EditorStyles.miniLabel);
+            if (!string.IsNullOrEmpty(PluginUpdater.LastError)) GUILayout.Label(PluginUpdater.LastError, EditorStyles.miniLabel);
+            using (new EditorGUI.DisabledScope(PluginUpdater.Checking))
+            {
+                if (GUILayout.Button(PluginUpdater.Checking ? "Checking…" : "Check for updates", GUILayout.Width(160)))
+                    PluginUpdater.Check(api);
+            }
+            EditorGUI.indentLevel--;
+            GUILayout.Space(6);
         }
 
         void SaveCfg()
@@ -59,6 +99,8 @@ namespace FactorialAdLab.Editor
             GUILayout.Space(4);
 
             api = EditorGUILayout.TextField("API", api);
+            GUILayout.Space(4);
+            DrawPluginSection();
 
             if (string.IsNullOrEmpty(token))
             {
@@ -168,6 +210,7 @@ namespace FactorialAdLab.Editor
                 downloadHandler = new DownloadHandlerBuffer(),
             };
             req.SetRequestHeader("Content-Type", "application/json");
+            PluginHttp.Apply(req, null);
             var op = req.SendWebRequest();
             op.completed += _ =>
             {
@@ -187,7 +230,7 @@ namespace FactorialAdLab.Editor
                 }
                 else
                 {
-                    status = "Sign in failed: " + req.error + " (" + req.downloadHandler.text + ")";
+                    status = "Sign in failed: " + (PluginHttp.ServerError(req) ?? req.error + " (" + req.downloadHandler.text + ")");
                 }
                 req.Dispose();
                 Repaint();

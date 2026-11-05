@@ -21,6 +21,7 @@ import { trackRoutes } from "./routes/track.js";
 import { compileRoutes } from "./routes/compile.js";
 import { supportRoutes } from "./routes/support.js";
 import { adminRoutes } from "./routes/admin.js";
+import { pluginGuard, pluginRoutes } from "./routes/plugin.js";
 
 /** Build the Fastify app (exported separately so tests can drive it via inject()). */
 export async function buildApp(): Promise<FastifyInstance> {
@@ -32,6 +33,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(multipart, { limits: { fileSize: config.maxUploadBytes } });
 
   app.get("/api/health", async () => ({ ok: true, service: "forge-server" }));
+
+  // requests from the Unity plugin: minimum version, licence and ban checks (no-op for the website)
+  app.addHook("onRequest", pluginGuard);
 
   await app.register(networkRoutes);
   await app.register(authRoutes);
@@ -48,6 +52,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(compileRoutes);
   await app.register(supportRoutes);
   await app.register(adminRoutes);
+  await app.register(pluginRoutes);
 
   // Serve the built web SPA from the same origin (no CORS/proxy needed in prod).
   if (existsSync(config.webDist)) {

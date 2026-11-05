@@ -9,10 +9,27 @@ Build playable ads from your Unity game and upload them to **Factorial AdLab**
 > [../../docs/PHASE2.md](../../docs/PHASE2.md) for the full design and why we use a **capture-based**
 > builder (not a full Unity→WebGL compile).
 
-## Install (local)
+## Install
 
-Package Manager → **Add package from disk…** → select `packages/unity-plugin/package.json`.
-(Or copy this folder into your project's `Packages/`.)
+**From your dashboard (recommended):** Settings ▸ **Unity plugin** ▸ *Download .unitypackage*, then in Unity
+**Assets ▸ Import Package ▸ Custom Package…**. It installs under `Assets/FactorialAdLab/` and carries a
+licence issued to you (`Editor/FactorialAdLabLicense.json`, shown as a code like `4EDE-A6CF-A617` in the
+window). The plugin checks for updates once per editor session; **Update to x.y.z** in the window downloads
+a fresh licensed package and imports it over the old one (asset GUIDs are stable, so files are replaced in
+place).
+
+**From source (development):** Package Manager → **Add package from disk…** → select
+`packages/unity-plugin/package.json`. A source install has no licence and updates through git; don't install
+both ways in one project (the types would be defined twice).
+
+**Releasing a new version:** bump `version` in `package.json` **and** `Editor/AdLabBuildInfo.cs`, add a
+`## [x.y.z] - date` entry to `CHANGELOG.md` (its bullets are the release notes), and deploy. The server
+packages the plugin from this folder per download. `PLUGIN_MIN_VERSION` makes the server refuse older
+plugins with an "update" message; `PLUGIN_REQUIRE_LICENSE=1` refuses unlicensed (source) copies.
+
+Every request the plugin makes carries `X-AdLab-Plugin: <version>` and, when licensed,
+`X-AdLab-License`. Admins can see which accounts use each download (a copy used by other accounts is a
+shared or leaked one) and revoke a download or ban a user from the plugin in Admin ▸ Plugin.
 
 ## Two ways to make a playable
 

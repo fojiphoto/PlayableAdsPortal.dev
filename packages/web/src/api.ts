@@ -18,6 +18,10 @@ import type {
   SupportThread,
   SupportThreadDetail,
   AdminOverview,
+  AdminPluginDownload,
+  PluginBan,
+  PluginDownload,
+  PluginRelease,
   AdminUser,
   AdminThread,
   AdminBug,
@@ -316,3 +320,27 @@ export const adminJobs = (status?: string) => getJson<AdminJob[]>(`/admin/jobs${
 export const adminReminders = () => getJson<{ kinds: string[]; candidates: Record<string, { id: string; email: string }[]> }>("/admin/reminders");
 export const adminRunReminders = (dryRun: boolean) =>
   postJson<{ dryRun: boolean; sent: Record<string, number>; candidates: Record<string, string[]> }>("/admin/reminders/run", { dryRun });
+
+// ── Unity plugin ──
+export const getPluginRelease = () => getJson<PluginRelease>("/plugin/version");
+export const myPluginDownloads = () => getJson<PluginDownload[]>("/plugin/downloads");
+/** Fetch a freshly licensed .unitypackage and hand it to the browser as a download; returns its licence code. */
+export async function downloadPlugin(): Promise<string | null> {
+  const res = await fetch(`${base}/plugin/download`, { headers: authHeaders() });
+  if (!res.ok) return toError(res);
+  const name = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "FactorialAdLab.unitypackage";
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  return res.headers.get("x-adlab-licence");
+}
+export const adminPluginDownloads = (q = "", shared = false) =>
+  getJson<AdminPluginDownload[]>(`/admin/plugin/downloads?q=${encodeURIComponent(q)}${shared ? "&shared=1" : ""}`);
+export const adminPluginBans = (all = false) => getJson<PluginBan[]>(`/plugin/bans${all ? "?all=1" : ""}`);
+export const adminBanPlugin = (scope: "download" | "user", target: string, reason?: string) => postJson<PluginBan>("/plugin/bans", { scope, target, reason });
+export const adminLiftPluginBan = (id: string) => postJson<{ lifted: true }>(`/plugin/bans/${id}/lift`, {});

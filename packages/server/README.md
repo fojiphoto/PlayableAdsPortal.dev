@@ -36,6 +36,10 @@ npm run test -w @forge/server
 | POST | `/api/contact` | public contact form (honeypot `website`, 5/h per IP; admins: `GET /api/admin/contact`, `POST /api/contact/:id/handled`) |
 | GET / PATCH / DELETE | `/api/admin/overview`, `/api/admin/users[/:id]`, `/api/admin/support/threads`, `/api/admin/jobs` | platform admin console (`users.is_admin`; `ADMIN_EMAILS` bootstrap) |
 | GET / POST | `/api/admin/reminders`, `…/logins`, `…/run` (`dryRun`), `…/send` | reminder emails |
+| GET | `/api/plugin/version` | latest Unity plugin release + notes; with `X-AdLab-Plugin: <ver>` says whether that copy is behind / supported (public) |
+| GET | `/api/plugin/download`, `/api/plugin/downloads` | a freshly licensed `.unitypackage` / the caller's downloads |
+| GET | `/api/admin/plugin/downloads[?q=&shared=1]`, `/api/admin/plugin/downloads/:id` | every download with the accounts using it (admin) |
+| GET / POST | `/api/plugin/bans`, `/api/plugin/bans/:id/lift` | ban a download (licence id or code) or a user (id or email) from the plugin / lift (admin) |
 | GET | `/api/kit/templates` | preloader template library (public) |
 | GET / POST | `/api/kits` (alias `POST /api/kit/create`) | the workspace's preloader kits + default + app/concept assignments / create a kit (admin; JSON `name, template, bg, accent, text, showPercent, logoDataUri`) |
 | PATCH / DELETE / POST | `/api/kits/:id`, `/api/kits/:id/duplicate` | edit (`logoDataUri: null` removes the image) / delete / copy a kit (admin) |
