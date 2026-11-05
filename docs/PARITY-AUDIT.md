@@ -157,7 +157,7 @@ Legend: **DONE** / **PARTIAL** / **MISSING**. Evidence is `file:line` or route.
 
 ### 1.15 Support / Ops / Admin — DONE. Workspace support threads with replies, unread counters and email both ways (`/api/support/thread|threads|threads/:id|reply|close|unread`); bug reports (`/api/feedback/bug|bugs|bugs/:id/handled`); public contact form with honeypot + rate limit replacing every `mailto:` (`/api/contact`, `/api/contact/:id/handled`); reminders (never-exported after 3 days, dormant exporters after 14) with dry run, send-once log and optional daily auto-run (`/api/admin/reminders|logins|run|send`); platform admin role (`users.is_admin`, bootstrapped from `ADMIN_EMAILS`) with an Admin console: overview, users (search, promote, plan override, delete), support inbox, bugs, contact, jobs, reminders. Plugin bans and licence watermarks shipped with gap #13 (Admin ▸ Plugin).
 
-### 1.16 Infrastructure (Blueprint §8) — Postgres, Redis/BullMQ, S3/R2 object storage: MISSING (SQLite + BLOBs). URL routing/deep links: MISSING (page is React state).
+### 1.16 Infrastructure (Blueprint §8) — Postgres, Redis/BullMQ, S3/R2 object storage: MISSING (SQLite + BLOBs). URL routing/deep links: DONE 2026-11-05 — every dashboard screen has a path (`web/src/router.ts`, no dependency): `/apps/:app/concepts/:concept/creatives/:creative`, `/support/:thread`, `/admin/:tab`, `/admin/support/:thread`, `/settings` etc.; reload, back/forward, bookmarks and shared links work; header/sidebar items are real links; signed-out deep links go to sign-in then back; stale ids fall back with a message; old `?support=`/`?admin=` email links redirect, and new emails use paths.
 
 ---
 
@@ -207,5 +207,5 @@ landing; two extra networks; a capture-based Unity path that ships *something* w
 | 12 | ~~Preloader kit templates, per-concept kit, server preview~~ **DONE 2026-11-03** — six templates, a kit library per workspace, server-rendered preview, app/concept overrides with inheritance (see 1.9) | Template library | done |
 | 13 | ~~Plugin distribution (download/version/self-update, licensing)~~ **DONE 2026-11-05** — per-download signed, watermarked `.unitypackage`, version/self-update, minimum-version and licence guard, leak tracing and download/user bans (see 1.13) | No way to ship/revoke the plugin | done |
 | 14 | ~~Support/feedback/contact/reminders~~ **DONE 2026-11-03** — support threads, bug reports, contact form, reminders and a platform admin role + console (see 1.15) | Ops tooling (17 endpoints) | done |
-| 15 | ~~MRAID stub in preview~~ **DONE 2026-11-05** (simulated host per network + sandboxed previews, see above); URL routing; Turnstile | UX/robustness | S each |
+| 15 | ~~MRAID stub in preview~~ **DONE 2026-11-05** (simulated host per network + sandboxed previews, see above); ~~URL routing~~ **DONE 2026-11-05** (see 1.16); Turnstile | UX/robustness | S each |
 | 16 | Infra: Postgres, object storage, shared rate-limit store | SQLite BLOB storage won't hold a studio's exports | L |

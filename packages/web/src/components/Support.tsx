@@ -3,7 +3,16 @@ import { listThreads, openThread, getThreadDetail, replyThread, closeThread, rep
 import type { SupportThread, SupportThreadDetail } from "../types";
 
 /** Support page: the workspace's tickets with replies from the team, plus a bug-report form. */
-export function Support({ initialThreadId, onUnreadChange }: { initialThreadId?: string | null; onUnreadChange?: () => void }) {
+export function Support({
+  initialThreadId,
+  onUnreadChange,
+  onOpenThread,
+}: {
+  initialThreadId?: string | null;
+  onUnreadChange?: () => void;
+  /** a ticket was opened (or null: the list / a form) — the page puts it in the URL */
+  onOpenThread?: (id: string | null) => void;
+}) {
   const [threads, setThreads] = useState<SupportThread[]>([]);
   const [active, setActive] = useState<SupportThreadDetail | null>(null);
   const [mode, setMode] = useState<"list" | "new" | "bug">("list");
@@ -21,6 +30,7 @@ export function Support({ initialThreadId, onUnreadChange }: { initialThreadId?:
     try {
       setActive(await getThreadDetail(id));
       setMode("list");
+      onOpenThread?.(id);
       void refresh();
       onUnreadChange?.();
     } catch (e) {
@@ -31,6 +41,7 @@ export function Support({ initialThreadId, onUnreadChange }: { initialThreadId?:
   useEffect(() => {
     void refresh();
     if (initialThreadId) void open(initialThreadId);
+    else setActive(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialThreadId]);
 
@@ -39,10 +50,10 @@ export function Support({ initialThreadId, onUnreadChange }: { initialThreadId?:
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold text-slate-100">Support</h1>
         <div className="flex gap-2 text-sm">
-          <button onClick={() => { setMode("new"); setActive(null); }} className="rounded-lg bg-amber-600 px-3 py-1.5 font-medium text-white hover:bg-amber-500">
+          <button onClick={() => { setMode("new"); setActive(null); onOpenThread?.(null); }} className="rounded-lg bg-amber-600 px-3 py-1.5 font-medium text-white hover:bg-amber-500">
             New ticket
           </button>
-          <button onClick={() => { setMode("bug"); setActive(null); }} className="rounded-lg border border-[#1f6b4a] px-3 py-1.5 text-slate-200 hover:border-[#7cb342]">
+          <button onClick={() => { setMode("bug"); setActive(null); onOpenThread?.(null); }} className="rounded-lg border border-[#1f6b4a] px-3 py-1.5 text-slate-200 hover:border-[#7cb342]">
             Report a bug
           </button>
         </div>
@@ -75,6 +86,7 @@ export function Support({ initialThreadId, onUnreadChange }: { initialThreadId?:
               onCreated={(t) => {
                 setActive(t);
                 setMode("list");
+                onOpenThread?.(t.id);
                 void refresh();
               }}
             />

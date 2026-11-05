@@ -79,7 +79,7 @@ export async function supportRoutes(app: FastifyInstance): Promise<void> {
     const ws = currentOrgFor(req.user!.id);
     const t = createThread(ws.org.id, req.user!.id, subject);
     addMessage(t.id, req.user!.id, false, message);
-    void notifySupport(`[Support] ${subject}`, `${req.user!.email} (${ws.org.name}) opened a ticket:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/?admin=support&thread=${t.id}`);
+    void notifySupport(`[Support] ${subject}`, `${req.user!.email} (${ws.org.name}) opened a ticket:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/admin/support/${t.id}`);
     return reply.code(201).send({ ...threadView(getThread(t.id)!), messages: listMessages(t.id).map((m) => messageView(m, req.user!.email)) });
   });
 
@@ -120,14 +120,14 @@ export async function supportRoutes(app: FastifyInstance): Promise<void> {
           await sendMail({
             to: user.email,
             subject: `Re: ${t.subject} — Factorial AdLab support`,
-            html: template("Support replied", escapeHtml(message).replace(/\n/g, "<br>"), "Open the conversation", `${siteUrl(req)}/?support=${t.id}`, "Reply from the Support page in your dashboard."),
+            html: template("Support replied", escapeHtml(message).replace(/\n/g, "<br>"), "Open the conversation", `${siteUrl(req)}/support/${t.id}`, "Reply from the Support page in your dashboard."),
           });
         } catch {
           /* ignore */
         }
       }
     } else {
-      void notifySupport(`[Support] Re: ${t.subject}`, `${req.user!.email} replied:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/?admin=support&thread=${t.id}`);
+      void notifySupport(`[Support] Re: ${t.subject}`, `${req.user!.email} replied:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/admin/support/${t.id}`);
     }
     return { ...threadView(getThread(t.id)!, isAdmin), messages: listMessages(t.id).map((m) => messageView(m, getUserById(m.author_user_id)?.email)) };
   });
@@ -150,7 +150,7 @@ export async function supportRoutes(app: FastifyInstance): Promise<void> {
     if (!rateLimit(`bug:${req.user!.id}`, 20, 60 * 60_000)) return reply.code(429).send({ error: "Too many reports this hour." });
     const ws = currentOrgFor(req.user!.id);
     const b = createBug(ws.org.id, req.user!.id, title, body, clean(req.body?.page, 200) || null);
-    void notifySupport(`[Bug] ${title}`, `${req.user!.email} (${ws.org.name})${b.page ? ` on ${escapeHtml(b.page)}` : ""}:<br><br>${escapeHtml(body).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/?admin=bugs`);
+    void notifySupport(`[Bug] ${title}`, `${req.user!.email} (${ws.org.name})${b.page ? ` on ${escapeHtml(b.page)}` : ""}:<br><br>${escapeHtml(body).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/admin/bugs`);
     return reply.code(201).send({ id: b.id, title: b.title, createdAt: b.created_at });
   });
 
@@ -165,7 +165,7 @@ export async function supportRoutes(app: FastifyInstance): Promise<void> {
     if (!name || !message || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return reply.code(400).send({ error: "name, a valid email and a message are required" });
     if (!rateLimit(`contact:${req.ip}`, 5, 60 * 60_000)) return reply.code(429).send({ error: "Too many messages — try again later." });
     const c = createContact(name, email, company, message);
-    void notifySupport(`[Contact] ${name}${company ? ` · ${company}` : ""}`, `${escapeHtml(name)} &lt;${escapeHtml(email)}&gt;${company ? ` (${escapeHtml(company)})` : ""}:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/?admin=contact`);
+    void notifySupport(`[Contact] ${name}${company ? ` · ${company}` : ""}`, `${escapeHtml(name)} &lt;${escapeHtml(email)}&gt;${company ? ` (${escapeHtml(company)})` : ""}:<br><br>${escapeHtml(message).replace(/\n/g, "<br>")}`, `${siteUrl(req)}/admin/contact`);
     return reply.code(201).send({ ok: true, id: c.id });
   });
 }

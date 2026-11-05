@@ -11,12 +11,18 @@ export function Workspace({
   networks,
   onExported,
   readOnly = false,
+  creativeId = null,
+  onCreativeChange,
 }: {
   conceptId: string;
   networks: Network[];
   onExported?: () => void;
   /** viewer role: preview/download only — no upload, no export */
   readOnly?: boolean;
+  /** the creative named in the URL (null = first creative, or the upload form) */
+  creativeId?: string | null;
+  /** selection changed: put it in the URL (`replace` for automatic picks, push for the user's) */
+  onCreativeChange?: (id: string | null, replace: boolean) => void;
 }) {
   const [creatives, setCreatives] = useState<CreativeRef[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -52,7 +58,9 @@ export function Workspace({
         setCreatives(c.creatives);
         setKitId(c.kitId ?? null);
         setEffective(c.preloader ?? null);
-        if (c.creatives[0]) void selectCreative(c.creatives[0]);
+        // the creative from the URL if it's here, else the newest one (recorded without a new history entry)
+        const pick = c.creatives.find((x) => x.id === creativeId) ?? c.creatives[0];
+        if (pick) void selectCreative(pick, true);
       })
       .catch((e) => setErr((e as Error).message));
     getKits()
@@ -73,7 +81,20 @@ export function Workspace({
   }
   const sourceLabel = { concept: "this concept", app: "the app", workspace: "workspace default" } as const;
 
-  async function selectCreative(ref: CreativeRef) {
+  // back/forward between creatives (or to the upload form) of this concept
+  useEffect(() => {
+    if (creativeId && creativeId !== activeId) {
+      const ref = creatives.find((c) => c.id === creativeId);
+      if (ref) void selectCreative(ref, true);
+    } else if (!creativeId && activeId && creatives.length && !readOnly) {
+      setUploading(true);
+      setActiveId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creativeId]);
+
+  async function selectCreative(ref: CreativeRef, auto = false) {
+    onCreativeChange?.(ref.id, auto);
     setActiveId(ref.id);
     setActiveName(ref.name);
     setUploading(false);
@@ -93,6 +114,7 @@ export function Workspace({
   }
 
   function onUploaded(summary: { id: string; name: string }) {
+    onCreativeChange?.(summary.id, false);
     setCreatives((cs) => [{ id: summary.id, name: summary.name, entry: "", createdAt: "" }, ...cs]);
     setActiveId(summary.id);
     setActiveName(summary.name);
@@ -153,6 +175,7 @@ export function Workspace({
             onClick={() => {
               setUploading(true);
               setActiveId(null);
+              onCreativeChange?.(null, false);
             }}
             className="rounded-lg border border-dashed border-[#1f6b4a] px-3 py-1.5 text-sm text-slate-400 hover:border-[#7cb342]"
           >

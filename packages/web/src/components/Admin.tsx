@@ -19,12 +19,25 @@ import type { AdminOverview, AdminUser, AdminThread, AdminBug, AdminContact, Adm
 import { ThreadView } from "./Support";
 import { AdminPlugin } from "./AdminPlugin";
 
-type Tab = "overview" | "users" | "support" | "bugs" | "contact" | "jobs" | "reminders" | "plugin";
+export type Tab = "overview" | "users" | "support" | "bugs" | "contact" | "jobs" | "reminders" | "plugin";
 const TABS: Tab[] = ["overview", "users", "support", "bugs", "contact", "jobs", "reminders", "plugin"];
 
 /** Platform admin console (users, support inbox, bug reports, contact form, jobs, reminders). */
-export function Admin({ initialTab, initialThreadId, me }: { initialTab?: string | null; initialThreadId?: string | null; me: string }) {
-  const [tab, setTab] = useState<Tab>(TABS.includes(initialTab as Tab) ? (initialTab as Tab) : "overview");
+export function Admin({
+  tab: tabParam,
+  threadId,
+  onNavigate,
+  me,
+}: {
+  /** the tab from the URL (/admin/:tab) */
+  tab?: string | null;
+  /** the support thread from the URL (/admin/support/:threadId) */
+  threadId?: string | null;
+  onNavigate: (tab: Tab, threadId?: string | null) => void;
+  me: string;
+}) {
+  const tab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : "overview";
+  const setTab = (t: Tab) => onNavigate(t);
   const [ov, setOv] = useState<AdminOverview | null>(null);
   useEffect(() => {
     adminOverview().then(setOv).catch(() => {});
@@ -47,7 +60,7 @@ export function Admin({ initialTab, initialThreadId, me }: { initialTab?: string
       </div>
       {tab === "overview" && <Overview ov={ov} />}
       {tab === "users" && <Users me={me} />}
-      {tab === "support" && <Inbox initialThreadId={initialThreadId} />}
+      {tab === "support" && <Inbox initialThreadId={threadId} onOpen={(id) => onNavigate("support", id)} />}
       {tab === "bugs" && <Bugs />}
       {tab === "contact" && <Contacts />}
       {tab === "jobs" && <Jobs />}
@@ -190,7 +203,7 @@ function Users({ me }: { me: string }) {
   );
 }
 
-function Inbox({ initialThreadId }: { initialThreadId?: string | null }) {
+function Inbox({ initialThreadId, onOpen }: { initialThreadId?: string | null; onOpen?: (id: string) => void }) {
   const [status, setStatus] = useState<"open" | "closed" | "all">("open");
   const [rows, setRows] = useState<AdminThread[]>([]);
   const [active, setActive] = useState<SupportThreadDetail | null>(null);
@@ -203,8 +216,10 @@ function Inbox({ initialThreadId }: { initialThreadId?: string | null }) {
   }, [status]);
   useEffect(() => {
     if (initialThreadId) getThreadDetail(initialThreadId, true).then(setActive).catch(() => {});
+    else setActive(null);
   }, [initialThreadId]);
   async function open(id: string) {
+    onOpen?.(id);
     setActive(await getThreadDetail(id, true));
     void load();
   }

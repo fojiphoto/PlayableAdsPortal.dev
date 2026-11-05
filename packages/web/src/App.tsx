@@ -13,6 +13,7 @@ import { Settings } from "./components/Settings";
 import { Analytics } from "./components/Analytics";
 import { Preloader } from "./components/Preloader";
 import { Domain } from "./components/Domain";
+import { legacyRoute, linkClick, routePath, titleFor, useRoute, type Route } from "./router";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -21,16 +22,21 @@ export default function App() {
   const [apps, setApps] = useState<AppT[]>([]);
   const [activeApp, setActiveApp] = useState<AppT | null>(null);
   const [concepts, setConcepts] = useState<Concept[]>([]);
-  const [activeConcept, setActiveConcept] = useState<Concept | null>(null);
+  // which app `concepts` belong to (so a stale concept id in the URL can be told apart from "loading")
+  const [loadedAppId, setLoadedAppId] = useState<string | null>(null);
   const [newApp, setNewApp] = useState("");
   const [newConcept, setNewConcept] = useState("");
   const [err, setErr] = useState<string | null>(null);
-  const [view, setView] = useState<"landing" | "auth">("landing");
+  // a signed-out visit to a deep link (e.g. a shared /apps/… URL) goes straight to sign-in, then back there
+  const [view, setView] = useState<"landing" | "auth">(() => (window.location.pathname !== "/" ? "auth" : "landing"));
   const [status, setStatus] = useState<PlanStatus | null>(null);
-  const [page, setPage] = useState<"app" | "plans" | "settings" | "analytics" | "preloader" | "domain" | "support" | "admin">("app");
+  // the screen comes from the URL (see router.ts): reload, back/forward and shared links work
+  const [route, navigate] = useRoute();
+  const page = route.page;
+  /** props for an <a> that navigates in-app (and still opens in a new tab on ctrl/middle click) */
+  const nav = (r: Route) => ({ href: routePath(r), onClick: linkClick(() => navigate(r)) });
+  const activeConcept = concepts.find((c) => c.id === route.conceptId) ?? null;
   const [unread, setUnread] = useState(0);
-  const [deepThread, setDeepThread] = useState<string | null>(null);
-  const [adminTab, setAdminTab] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceRef | null>(null);
@@ -45,19 +51,10 @@ export default function App() {
     const verify = q.get("verify");
     const billing = q.get("billing");
     const invite = q.get("invite");
-    const support = q.get("support");
-    const adminQ = q.get("admin");
-    const threadQ = q.get("thread");
-    if (support) {
-      setDeepThread(support);
-      setPage("support");
-    }
-    if (adminQ) {
-      setAdminTab(adminQ);
-      setDeepThread(threadQ);
-      setPage("admin");
-    }
-    if (reset || verify || billing || invite || support || adminQ) {
+    // older emails link to ?support=<id> / ?admin=<tab>&thread=<id>: redirect them to their paths
+    const legacy = legacyRoute(window.location.search);
+    if (legacy) navigate(legacy, { replace: true });
+    if (reset || verify || billing || invite) {
       window.history.replaceState({}, "", window.location.pathname);
     }
     if (invite) setInviteToken(invite);
@@ -115,17 +112,67 @@ export default function App() {
     acceptInvite(token)
       .then((r) => {
         setNotice(`You joined ${r.workspace.name} as ${r.workspace.role}.`);
+        navigate({ page: "app" });
         return refreshWorkspace();
       })
       .catch((e) => setNotice((e as Error).message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inviteToken, user, checking]);
 
-  /** Re-read everything that depends on the current workspace. */
+  // the app (and its concepts) named in the URL; anything not in this workspace falls back to home
+  useEffect(() => {
+    if (!user) return;
+    const id = route.appId;
+    if (!id) {
+      setActiveApp(null);
+      setConcepts([]);
+      setLoadedAppId(null);
+      return;
+    }
+    let live = true;
+    getApp(id)
+      .then((full) => {
+        if (!live) return;
+        setActiveApp(full);
+        setConcepts(full.concepts);
+        setLoadedAppId(id);
+      })
+      .catch(() => {
+        if (!live) return;
+        navigate({ page: "app" }, { replace: true });
+        setErr("That app isn't in your current workspace (switch workspace, or ask for access).");
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.appId, workspace?.id, user?.id]);
+
+  // a concept id that isn't in the loaded app (deleted, or a mistyped link) → back to the app
+  useEffect(() => {
+    if (!route.conceptId || !route.appId || loadedAppId !== route.appId) return;
+    if (!concepts.some((c) => c.id === route.conceptId)) {
+      navigate({ page: "app", appId: route.appId }, { replace: true });
+      setErr("That concept doesn't exist any more.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.conceptId, route.appId, loadedAppId, concepts]);
+
+  // /admin is only a screen for platform admins
+  useEffect(() => {
+    if (user && page === "admin" && !user.isAdmin) navigate({ page: "app" }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, page]);
+
+  // tab title follows the screen
+  useEffect(() => {
+    if (!user) return;
+    document.title =
+      page === "app" && activeApp ? `${activeConcept ? `${activeConcept.name} · ` : ""}${activeApp.name} · Factorial AdLab` : titleFor(route);
+  }, [user, route, page, activeApp, activeConcept]);
+
+  /** Re-read everything that depends on the current workspace (the selection lives in the URL). */
   async function refreshWorkspace() {
-    setActiveApp(null);
-    setActiveConcept(null);
-    setConcepts([]);
     try {
       const r = await me();
       setWorkspace(r.workspace);
@@ -154,19 +201,8 @@ export default function App() {
       } else if (value !== workspace?.id) {
         await switchWorkspace(value);
       } else return;
-      setPage("app");
+      navigate({ page: "app" }); // the old workspace's app/concept ids mean nothing here
       await refreshWorkspace();
-    } catch (e) {
-      setErr((e as Error).message);
-    }
-  }
-
-  async function openApp(a: AppT) {
-    setActiveApp(a);
-    setActiveConcept(null);
-    try {
-      const full = await getApp(a.id);
-      setConcepts(full.concepts);
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -189,7 +225,6 @@ export default function App() {
     try {
       const updated = await renameConcept(c.id, name);
       setConcepts((xs) => xs.map((x) => (x.id === c.id ? { ...x, name: updated.name } : x)));
-      setActiveConcept((cur) => (cur && cur.id === c.id ? { ...cur, name: updated.name } : cur));
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -210,7 +245,7 @@ export default function App() {
       const a = await createApp(name);
       setNewApp("");
       setApps((xs) => [a, ...xs]);
-      await openApp(a);
+      navigate({ page: "app", appId: a.id });
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -224,7 +259,7 @@ export default function App() {
       const c = await createConcept(activeApp.id, name);
       setNewConcept("");
       setConcepts((xs) => [c, ...xs]);
-      setActiveConcept(c);
+      navigate({ page: "app", appId: activeApp.id, conceptId: c.id });
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -236,7 +271,9 @@ export default function App() {
     setApps([]);
     setActiveApp(null);
     setConcepts([]);
-    setActiveConcept(null);
+    setLoadedAppId(null);
+    navigate({ page: "app" }, { replace: true });
+    document.title = "Factorial AdLab — one build, every ad network";
   }
 
   if (checking) return null;
@@ -254,60 +291,60 @@ export default function App() {
     <div className="min-h-full">
       <header className="border-b border-[#1b5540]">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 py-3">
-          <button onClick={() => setPage("app")} className="flex shrink-0 items-center gap-2">
+          <a {...nav({ page: "app" })} className="flex shrink-0 items-center gap-2">
             <img src="/logo.png" alt="Factorial" className="h-7 w-7 rounded-lg object-contain" />
             <span className="whitespace-nowrap font-semibold text-slate-100">Factorial AdLab</span>
             <span className="rounded bg-[#123f2d] px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">Packager</span>
-          </button>
+          </a>
           <div className="flex flex-wrap items-center justify-end gap-2 text-sm text-slate-400">
             {status && (
-              <button
-                onClick={() => setPage("plans")}
+              <a
+                {...nav({ page: "plans" })}
                 className={`rounded-lg border px-3 py-1.5 ${page === "plans" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-200 hover:border-[#7cb342]"}`}
               >
                 {status.planName}
                 {status.limit != null && <span className="text-slate-400"> · {status.used}/{status.limit}</span>}
-              </button>
+              </a>
             )}
-            <button
-              onClick={() => setPage("analytics")}
+            <a
+              {...nav({ page: "analytics" })}
               className={`rounded-lg border px-3 py-1.5 ${page === "analytics" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
             >
               Analytics
-            </button>
-            <button
-              onClick={() => setPage("preloader")}
+            </a>
+            <a
+              {...nav({ page: "preloader" })}
               className={`rounded-lg border px-3 py-1.5 ${page === "preloader" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
             >
               Preloader
-            </button>
-            <button
-              onClick={() => setPage("domain")}
+            </a>
+            <a
+              {...nav({ page: "domain" })}
               className={`rounded-lg border px-3 py-1.5 ${page === "domain" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
             >
               Domain
-            </button>
-            <button
-              onClick={() => setPage("support")}
+            </a>
+            <a
+              {...nav({ page: "support" })}
               className={`relative rounded-lg border px-3 py-1.5 ${page === "support" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
             >
               Support
               {unread > 0 && <span className="absolute -right-1.5 -top-1.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-black">{unread}</span>}
-            </button>
+            </a>
             {user.isAdmin && (
-              <button
-                onClick={() => setPage("admin")}
+              <a
+                {...nav({ page: "admin" })}
                 className={`rounded-lg border px-3 py-1.5 ${page === "admin" ? "border-amber-500 text-amber-200" : "border-amber-700/50 text-amber-300 hover:border-amber-500"}`}
               >
                 Admin
-              </button>
+              </a>
             )}
-            <button
-              onClick={() => setPage("settings")}
+            <a
+              {...nav({ page: "settings" })}
               className={`rounded-lg border px-3 py-1.5 ${page === "settings" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
             >
               Settings
-            </button>
+            </a>
             {workspace && (
               <select
                 value={workspace.id}
@@ -349,11 +386,16 @@ export default function App() {
         </main>
       ) : page === "support" ? (
         <main className="min-w-0 flex-1 p-6">
-          <Support initialThreadId={deepThread} onUnreadChange={refreshUnread} />
+          <Support initialThreadId={route.threadId ?? null} onUnreadChange={refreshUnread} onOpenThread={(id) => navigate({ page: "support", threadId: id ?? undefined })} />
         </main>
       ) : page === "admin" && user.isAdmin ? (
         <main className="min-w-0 flex-1 p-6">
-          <Admin initialTab={adminTab} initialThreadId={deepThread} me={user.email} />
+          <Admin
+            tab={route.tab ?? null}
+            threadId={route.threadId ?? null}
+            onNavigate={(tab, threadId) => navigate({ page: "admin", tab, threadId: threadId ?? undefined })}
+            me={user.email}
+          />
         </main>
       ) : page === "domain" ? (
         <main className="min-w-0 flex-1 p-6">
@@ -367,15 +409,15 @@ export default function App() {
           <div className="mb-2 grid gap-1">
             {apps.map((a) => (
               <div key={a.id} className="flex items-center gap-1">
-                <button
-                  onClick={() => void openApp(a)}
+                <a
+                  {...nav({ page: "app", appId: a.id })}
                   className={`flex min-w-0 flex-1 items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm ${
                     activeApp?.id === a.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
                   }`}
                 >
                   <span className="truncate">{a.name}</span>
                   {a.conceptCount ? <span className="text-xs text-slate-400">{a.conceptCount}</span> : null}
-                </button>
+                </a>
                 {activeApp?.id === a.id && (
                   <button
                     title="Rename app"
@@ -400,14 +442,14 @@ export default function App() {
               <div className="mb-2 grid gap-1">
                 {concepts.map((c) => (
                   <div key={c.id} className="flex items-center gap-1">
-                    <button
-                      onClick={() => setActiveConcept(c)}
-                      className={`min-w-0 flex-1 truncate rounded-md px-2.5 py-1.5 text-left text-sm ${
+                    <a
+                      {...nav({ page: "app", appId: activeApp.id, conceptId: c.id })}
+                      className={`block min-w-0 flex-1 truncate rounded-md px-2.5 py-1.5 text-left text-sm ${
                         activeConcept?.id === c.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
                       }`}
                     >
                       {c.name}
-                    </button>
+                    </a>
                     {activeConcept?.id === c.id && (
                       <button
                         title="Rename concept"
@@ -447,6 +489,10 @@ export default function App() {
             <Workspace
               key={activeConcept.id}
               conceptId={activeConcept.id}
+              creativeId={route.creativeId ?? null}
+              onCreativeChange={(creativeId, replace) =>
+                navigate({ page: "app", appId: route.appId, conceptId: activeConcept.id, creativeId: creativeId ?? undefined }, { replace })
+              }
               networks={networks}
               readOnly={!canEdit}
               onExported={() => getBillingStatus().then(setStatus).catch(() => {})}

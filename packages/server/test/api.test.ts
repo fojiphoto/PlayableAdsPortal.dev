@@ -1868,3 +1868,30 @@ describe("device preview: simulated network host + sandbox", () => {
     expect(dl.body).toBe(raw.body);
   });
 });
+
+describe("SPA deep links", () => {
+  it("serves the dashboard for every screen path; unknown /api paths stay JSON 404s", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { config: cfg } = await import("../src/config.js");
+    const dist = mkdtempSync(join(tmpdir(), "spa-"));
+    writeFileSync(join(dist, "index.html"), "<!doctype html><div id=root></div>");
+    const prev = cfg.webDist;
+    cfg.webDist = dist;
+    const spa = await buildApp();
+    try {
+      for (const path of ["/", "/apps/a1/concepts/c1/creatives/k1", "/support/t1", "/admin/plugin", "/settings"]) {
+        const r = await spa.inject({ method: "GET", url: path });
+        expect(r.statusCode, path).toBe(200);
+        expect(r.body).toContain('<div id=root>');
+      }
+      const api = await spa.inject({ method: "GET", url: "/api/nope" });
+      expect(api.statusCode).toBe(404);
+      expect(api.json()).toEqual({ error: "not found" });
+    } finally {
+      await spa.close();
+      cfg.webDist = prev;
+      rmSync(dist, { recursive: true, force: true });
+    }
+  });
+});
