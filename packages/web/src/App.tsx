@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getToken, setToken, me, getNetworks, listApps, createApp, getApp, createConcept, getBillingStatus } from "./api";
 import { renameApp, renameConcept, verifyEmail, resendVerification } from "./api";
 import { listWorkspaces, switchWorkspace, createWorkspace, getInvite, acceptInvite, supportUnread } from "./api";
@@ -552,20 +552,40 @@ function CreateRow({
   onAdd: () => void;
   placeholder: string;
 }) {
+  const box = useRef<HTMLInputElement>(null);
+  const [hint, setHint] = useState(false);
+  // "+" with an empty box used to do nothing at all: point at the name field instead
+  function add() {
+    if (!value.trim()) {
+      setHint(true);
+      box.current?.focus();
+      return;
+    }
+    setHint(false);
+    onAdd();
+  }
   return (
-    <div className="flex gap-1">
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onAdd();
-        }}
-        placeholder={placeholder}
-        className="min-w-0 flex-1 rounded-md border border-[#1f6b4a] bg-[#0a3a28] px-2 py-1 text-sm text-slate-100 outline-none focus:border-amber-500"
-      />
-      <button onClick={onAdd} className="rounded-md bg-[#123f2d] px-2.5 text-slate-200 hover:bg-[#1a5a40]">
-        +
-      </button>
+    <div>
+      <div className="flex gap-1">
+        <input
+          ref={box}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            if (e.target.value.trim()) setHint(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") add();
+          }}
+          placeholder={placeholder}
+          aria-invalid={hint}
+          className={`min-w-0 flex-1 rounded-md border bg-[#0a3a28] px-2 py-1 text-sm text-slate-100 outline-none focus:border-amber-500 ${hint ? "border-amber-500" : "border-[#1f6b4a]"}`}
+        />
+        <button onClick={add} title="Add" className="rounded-md bg-[#123f2d] px-2.5 text-slate-200 hover:bg-[#1a5a40]">
+          +
+        </button>
+      </div>
+      {hint && <div className="mt-1 text-[11px] text-amber-300">Type a name first, then press + (or Enter).</div>}
     </div>
   );
 }
