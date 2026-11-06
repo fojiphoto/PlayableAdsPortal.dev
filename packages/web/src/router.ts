@@ -6,11 +6,11 @@ import { useCallback, useEffect, useState, type MouseEvent } from "react";
  *
  *   /                                              apps (nothing selected)
  *   /apps/:appId[/concepts/:conceptId[/creatives/:creativeId]]
- *   /plans  /settings  /analytics  /preloader  /domain
+ *   /start  /plans  /settings  /analytics  /preloader  /domain
  *   /support[/:threadId]
  *   /admin[/:tab]   /admin/support/:threadId
  */
-export type Page = "app" | "plans" | "settings" | "analytics" | "preloader" | "domain" | "support" | "admin";
+export type Page = "app" | "start" | "plans" | "settings" | "analytics" | "preloader" | "domain" | "support" | "admin";
 
 export interface Route {
   page: Page;
@@ -21,7 +21,7 @@ export interface Route {
   tab?: string;
 }
 
-const SIMPLE: Page[] = ["plans", "settings", "analytics", "preloader", "domain"];
+const SIMPLE: Page[] = ["start", "plans", "settings", "analytics", "preloader", "domain"];
 const seg = /^[A-Za-z0-9_-]{1,80}$/; // ids are UUIDs; anything else isn't a route
 
 export function parseRoute(pathname: string): Route | null {
@@ -81,6 +81,7 @@ export function legacyRoute(search: string): Route | null {
 
 const TITLES: Record<Page, string> = {
   app: "Studio",
+  start: "Start here",
   plans: "Plans",
   settings: "Settings",
   analytics: "Analytics",

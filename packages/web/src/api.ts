@@ -22,6 +22,7 @@ import type {
   PluginBan,
   PluginDownload,
   PluginRelease,
+  Onboarding,
   AdminUser,
   AdminThread,
   AdminBug,
@@ -349,3 +350,6 @@ export const adminPluginDownloads = (q = "", shared = false) =>
 export const adminPluginBans = (all = false) => getJson<PluginBan[]>(`/plugin/bans${all ? "?all=1" : ""}`);
 export const adminBanPlugin = (scope: "download" | "user", target: string, reason?: string) => postJson<PluginBan>("/plugin/bans", { scope, target, reason });
 export const adminLiftPluginBan = (id: string) => postJson<{ lifted: true }>(`/plugin/bans/${id}/lift`, {});
+
+/** "Start here" checklist status. */
+export const getOnboarding = () => getJson<Onboarding>("/onboarding");

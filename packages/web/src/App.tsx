@@ -13,6 +13,7 @@ import { Settings } from "./components/Settings";
 import { Analytics } from "./components/Analytics";
 import { Preloader } from "./components/Preloader";
 import { Domain } from "./components/Domain";
+import { Start } from "./components/Start";
 import { legacyRoute, linkClick, routePath, titleFor, useRoute, type Route } from "./router";
 
 export default function App() {
@@ -316,6 +317,12 @@ export default function App() {
               </a>
             )}
             <a
+              {...nav({ page: "start" })}
+              className={`rounded-lg border px-3 py-1.5 ${page === "start" ? "border-amber-500 text-amber-200" : "border-amber-700/60 text-amber-300 hover:border-amber-500"}`}
+            >
+              Start here
+            </a>
+            <a
               {...nav({ page: "analytics" })}
               className={`rounded-lg border px-3 py-1.5 ${page === "analytics" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
             >
@@ -389,6 +396,10 @@ export default function App() {
               Set up two-factor authentication
             </a>
           </div>
+        </main>
+      ) : page === "start" ? (
+        <main className="min-w-0 flex-1 p-6">
+          <Start go={(r) => navigate(r)} onDataChanged={() => listApps().then(setApps).catch(() => {})} canEdit={canEdit} />
         </main>
       ) : page === "plans" ? (
         <main className="min-w-0 flex-1 p-6">
@@ -520,15 +531,14 @@ export default function App() {
               onExported={() => getBillingStatus().then(setStatus).catch(() => {})}
             />
           ) : (
-            <div className="flex h-full min-h-[50vh] items-center justify-center text-center text-slate-400">
-              {apps.length === 0
-                ? canEdit
-                  ? "Create your first app on the left to get started."
-                  : "This workspace has no apps yet."
-                : activeApp
-                  ? "Pick or create a concept."
-                  : "Pick an app on the left."}
-            </div>
+            !activeApp ? (
+              // home: the step-by-step checklist (also at /start)
+              <Start go={(r) => navigate(r)} onDataChanged={() => listApps().then(setApps).catch(() => {})} canEdit={canEdit} />
+            ) : (
+              <div className="flex h-full min-h-[50vh] items-center justify-center text-center text-slate-400">
+                {concepts.length ? "Pick a concept on the left." : canEdit ? "Create a concept on the left (an ad idea for this app)." : "This app has no concepts yet."}
+              </div>
+            )
           )}
         </main>
       </div>

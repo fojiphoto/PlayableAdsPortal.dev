@@ -353,6 +353,18 @@ export interface AdminOverview {
 }
 
 // ── Unity plugin distribution ──
+/** GET /api/onboarding — the "Start here" checklist status for the current workspace. */
+export interface Onboarding {
+  workspace: { id: string; name: string; role: OrgRole; isOwner: boolean };
+  emailVerified: boolean;
+  domain: { name: string | null; verified: boolean };
+  plan: { id: string; name: string; networks: "all" | string[] };
+  counts: { apps: number; concepts: number; creatives: number; exports: number };
+  firstAppId: string | null;
+  firstConcept: { id: string; appId: string } | null;
+  plugin: { version: string; downloaded: boolean; connectedAt: string | null };
+}
+
 export interface PluginRelease {
   version: string;
   unity: string;

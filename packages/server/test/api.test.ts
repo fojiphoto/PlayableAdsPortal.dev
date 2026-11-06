@@ -2066,3 +2066,40 @@ describe("per-workspace two-factor policy", () => {
     expect((await call("GET", "/api/apps", member)).statusCode).toBe(200);
   });
 });
+
+describe("Start here checklist", () => {
+  it("reports each getting-started step for the current workspace", async () => {
+    const token = await signup("start@factorialstudio.com");
+    const get = async () => (await app.inject({ method: "GET", url: "/api/onboarding", headers: bearer(token) })).json();
+    let s = await get();
+    expect(s).toMatchObject({
+      emailVerified: false,
+      domain: { verified: false },
+      plan: { id: "free", networks: ["unityads"] },
+      counts: { apps: 0, concepts: 0, creatives: 0, exports: 0 },
+      firstAppId: null,
+      firstConcept: null,
+      plugin: { downloaded: false, connectedAt: null },
+      workspace: { role: "owner", isOwner: true },
+    });
+    expect(s.plugin.version).toMatch(/^\d+\.\d+\.\d+$/);
+
+    await verifyDomain("start@factorialstudio.com");
+    const appId = (await app.inject({ method: "POST", url: "/api/apps", headers: bearer(token), payload: { name: "A" } })).json().id;
+    const conceptId = (await app.inject({ method: "POST", url: `/api/apps/${appId}/concepts`, headers: bearer(token), payload: { name: "C" } })).json().id;
+    const form = new FormData();
+    form.append("file", await fixtureZip(), { filename: "s.zip", contentType: "application/zip" });
+    const cid = (await app.inject({ method: "POST", url: `/api/concepts/${conceptId}/creatives`, headers: { ...bearer(token), ...form.getHeaders() }, payload: form.getBuffer() })).json().id;
+    await app.inject({ method: "POST", url: `/api/creatives/${cid}/export`, headers: bearer(token), payload: { networks: ["unityads"] } });
+    await app.inject({ method: "GET", url: "/api/plugin/download", headers: bearer(token) });
+    s = await get();
+    expect(s).toMatchObject({
+      domain: { verified: true },
+      counts: { apps: 1, concepts: 1, creatives: 1, exports: 1 },
+      firstAppId: appId,
+      firstConcept: { id: conceptId, appId },
+      plugin: { downloaded: true },
+    });
+    expect((await app.inject({ method: "GET", url: "/api/onboarding" })).statusCode).toBe(401);
+  });
+});

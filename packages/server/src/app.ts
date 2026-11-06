@@ -22,6 +22,7 @@ import { compileRoutes } from "./routes/compile.js";
 import { supportRoutes } from "./routes/support.js";
 import { adminRoutes } from "./routes/admin.js";
 import { pluginGuard, pluginRoutes } from "./routes/plugin.js";
+import { onboardingRoutes } from "./routes/onboarding.js";
 import { turnstileEnabled } from "./turnstile.js";
 
 /** Build the Fastify app (exported separately so tests can drive it via inject()). */
@@ -56,6 +57,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(supportRoutes);
   await app.register(adminRoutes);
   await app.register(pluginRoutes);
+  await app.register(onboardingRoutes);
 
   // Serve the built web SPA from the same origin (no CORS/proxy needed in prod).
   if (existsSync(config.webDist)) {

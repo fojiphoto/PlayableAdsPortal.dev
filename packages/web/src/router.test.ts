@@ -12,6 +12,7 @@ describe("router", () => {
       [{ page: "app", appId: A }, `/apps/${A}`],
       [{ page: "app", appId: A, conceptId: C }, `/apps/${A}/concepts/${C}`],
       [{ page: "app", appId: A, conceptId: C, creativeId: CR }, `/apps/${A}/concepts/${C}/creatives/${CR}`],
+      [{ page: "start" }, "/start"],
       [{ page: "plans" }, "/plans"],
       [{ page: "settings" }, "/settings"],
       [{ page: "analytics" }, "/analytics"],
