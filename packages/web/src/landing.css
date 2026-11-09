@@ -424,6 +424,9 @@
 }
 .fan-chip {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
@@ -436,6 +439,16 @@
   transform: translateX(-8px);
   animation: fan-in 0.5s ease forwards;
   animation-delay: calc(var(--i) * 90ms + 0.15s);
+}
+.fan-chip {
+  padding-left: 6px;
+}
+.fan-ico {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 .fan-chip:nth-child(odd) {
   margin-left: 22px;

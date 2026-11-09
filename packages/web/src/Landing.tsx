@@ -48,7 +48,7 @@ const NETWORKS: { name: string; abbr: string; color: string }[] = [
 const NET_COUNT = NETWORKS.length;
 const ROW_1 = NETWORKS.slice(0, 15);
 const ROW_2 = NETWORKS.slice(15);
-const FAN = ["AppLovin", "Meta", "Mintegral", "Google", "TikTok", "Unity"];
+const FAN = ["AppLovin", "Meta", "Mintegral", "Google", "TikTok", "Unity"] as const;
 
 /** Factorial Studio's own live games (public/art/gamezone). */
 const GAMES: { file: string; name: string }[] = [
@@ -284,6 +284,64 @@ function CubeMark() {
   );
 }
 
+/** Small round network marks for the hero fan chips (simplified, drawn here so nothing loads). */
+function FanIcon({ name }: { name: (typeof FAN)[number] }) {
+  const tile = (bg: string, children: ReactNode) => (
+    <svg className="fan-ico" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="12" fill={bg} />
+      {children}
+    </svg>
+  );
+  switch (name) {
+    case "AppLovin":
+      return tile("#1f6bff", <path d="M12 5.5 18 17.5h-3.2L12 11.7l-2.8 5.8H6Z" fill="#fff" />);
+    case "Meta":
+      return tile(
+        "#0866ff",
+        <path
+          d="M5.2 14.6c0-3 1.5-5.4 3.2-5.4 1.5 0 2.4 1.4 3.6 3.6 1.2 2.2 2.1 3.6 3.4 3.6 1.1 0 1.8-1 1.8-2.6 0-2.1-1-4.6-2.6-4.6-1.2 0-2.1 1.3-3 2.9M5.2 14.6c0 1.2.6 2.2 1.6 2.2 1.3 0 2.3-1.6 3.5-3.9"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+        />,
+      );
+    case "Mintegral":
+      return tile("#00b2a9", <path d="M6.5 16.5V8l5.5 5.5L17.5 8v8.5" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />);
+    case "Google":
+      return tile(
+        "#fff",
+        <>
+          <path d="M18.6 12.2c0-.5 0-.9-.1-1.3H12v2.5h3.7a3.2 3.2 0 0 1-1.4 2.1v1.7h2.3a6.9 6.9 0 0 0 2-5Z" fill="#4285f4" />
+          <path d="M12 19c1.9 0 3.4-.6 4.6-1.7l-2.3-1.8c-.6.4-1.4.7-2.3.7-1.8 0-3.3-1.2-3.8-2.8H5.8v1.8A7 7 0 0 0 12 19Z" fill="#34a853" />
+          <path d="M8.2 13.4a4.2 4.2 0 0 1 0-2.8V8.8H5.8a7 7 0 0 0 0 6.4Z" fill="#fbbc05" />
+          <path d="M12 7.8c1 0 1.9.4 2.6 1l2-2A7 7 0 0 0 5.8 8.8l2.4 1.8C8.7 9 10.2 7.8 12 7.8Z" fill="#ea4335" />
+        </>,
+      );
+    case "TikTok":
+      return tile(
+        "#111",
+        <>
+          <path d="M13.4 5.6v8.6a2.6 2.6 0 1 1-2.6-2.6" fill="none" stroke="#25f4ee" strokeWidth="2" strokeLinecap="round" transform="translate(-.6 -.4)" />
+          <path d="M13.4 5.6c.3 1.9 1.6 3.1 3.6 3.3" fill="none" stroke="#25f4ee" strokeWidth="2" strokeLinecap="round" transform="translate(-.6 -.4)" />
+          <path d="M13.4 5.6v8.6a2.6 2.6 0 1 1-2.6-2.6" fill="none" stroke="#fe2c55" strokeWidth="2" strokeLinecap="round" transform="translate(.6 .4)" />
+          <path d="M13.4 5.6c.3 1.9 1.6 3.1 3.6 3.3" fill="none" stroke="#fe2c55" strokeWidth="2" strokeLinecap="round" transform="translate(.6 .4)" />
+          <path d="M13.4 5.6v8.6a2.6 2.6 0 1 1-2.6-2.6M13.4 5.6c.3 1.9 1.6 3.1 3.6 3.3" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+        </>,
+      );
+    case "Unity":
+      return tile(
+        "#fff",
+        <>
+          <path d="M12 5.2 18 8.6v6.8L12 18.8 6 15.4V8.6Z" fill="none" stroke="#111" strokeWidth="1.8" strokeLinejoin="round" />
+          <path d="M12 12v6.8M12 12l6-3.4M12 12 6 8.6" stroke="#111" strokeWidth="1.8" strokeLinecap="round" />
+        </>,
+      );
+    default:
+      return null;
+  }
+}
+
 function NetMark({ net }: { net: (typeof NETWORKS)[number] }) {
   return (
     <span className="lp-mark" style={{ background: net.color }} aria-hidden="true">
@@ -494,6 +552,7 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
           <div className="fan-out" aria-hidden="true">
             {FAN.map((n, i) => (
               <span key={n} className="fan-chip" style={{ ["--i" as string]: i }}>
+                <FanIcon name={n} />
                 {n}
               </span>
             ))}
