@@ -81,12 +81,12 @@ export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
       <section className="fx-section cream" id="how">
         <div className="wrap">
           <div className="fx-eyebrow">How it works</div>
-          <h2 className="disp">From one playable to <em>every network</em> in three steps</h2>
-          <p className="fx-lead">No per-network re-exporting. Upload once, export clean.</p>
+          <h2 className="disp">From your Unity project to <em>every network</em> in three steps</h2>
+          <p className="fx-lead">Sign up, verify your company domain (instant with a work email), then:</p>
           <div className="fx-steps">
-            <div className="fx-step"><span className="n">1</span><div><h4>Upload your playable</h4><p>Drop a single HTML5 playable (a <b>.zip</b> or one <b>.html</b>) — or build straight from your engine.</p></div></div>
-            <div className="fx-step"><span className="n">2</span><div><h4>Pick the networks</h4><p>Choose from 20+ networks. AdLab wires the CTA, injects MRAID where needed, and checks every file against that network's cap.</p></div></div>
-            <div className="fx-step"><span className="n">3</span><div><h4>Preview &amp; export</h4><p>Preview on a device frame, then download one correct, validated package per network — or grab them all as a zip.</p></div></div>
+            <div className="fx-step"><span className="n">1</span><div><h4>Add the plugin to Unity</h4><p>Download the Factorial AdLab package from your dashboard and import it into the project you already have. Nothing to rewrite.</p></div></div>
+            <div className="fx-step"><span className="n">2</span><div><h4>Build your playable</h4><p>Point the install button at <b>Playable.InstallFullGame()</b>, pick the scene, then build or capture and upload — right from the editor.</p></div></div>
+            <div className="fx-step"><span className="n">3</span><div><h4>Export every network</h4><p>Tick the networks, preview on a phone frame, and download one checked, correctly wrapped file per network. HTML5 builds work too — just upload the zip.</p></div></div>
           </div>
         </div>
       </section>

@@ -5,6 +5,7 @@ import { isIP } from "node:net";
 import { authed } from "../auth.js";
 import { getUserById, setDomainVerified, setUserDomain } from "../repo.js";
 import { billingOwnerId, needs } from "../orgs.js";
+import { companyDomainOf } from "../email-domain.js";
 
 const VERIFY_FILE = "factorialadlab-verify.txt";
 
@@ -76,8 +77,11 @@ export async function domainRoutes(app: FastifyInstance): Promise<void> {
     if (!d) return reply.code(400).send({ error: "Enter a valid domain, e.g. factorialstudio.dev" });
     const u = await getUserById(await billingOwnerId(req.user!.id));
     const token = u?.domain === d && u?.domain_token ? u.domain_token : `fav-${randomBytes(16).toString("hex")}`;
-    await setUserDomain(await billingOwnerId(req.user!.id), d, token);
-    return await domainView(await billingOwnerId(req.user!.id));
+    const ownerId = await billingOwnerId(req.user!.id);
+    await setUserDomain(ownerId, d, token);
+    // the owner already proved a mailbox at this company domain: no file check needed
+    if (u?.email_verified && companyDomainOf(u.email) === d) await setDomainVerified(ownerId, 1);
+    return await domainView(ownerId);
   });
 
   app.post("/api/domain/check", needs("admin"), async (req, reply) => {

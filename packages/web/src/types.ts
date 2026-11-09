@@ -357,6 +357,8 @@ export interface AdminOverview {
 export interface Onboarding {
   workspace: { id: string; name: string; role: OrgRole; isOwner: boolean };
   emailVerified: boolean;
+  /** company domain of the sign-up email; null for free providers */
+  companyDomain: string | null;
   domain: { name: string | null; verified: boolean };
   plan: { id: string; name: string; networks: "all" | string[] };
   counts: { apps: number; concepts: number; creatives: number; exports: number };

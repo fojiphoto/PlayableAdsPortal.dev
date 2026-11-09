@@ -4,6 +4,7 @@ import { db } from "../db.js";
 import { currentOrgFor, getUserById } from "../repo.js";
 import { getPlan } from "../plans.js";
 import { currentRelease } from "../plugin/release.js";
+import { companyDomainOf } from "../email-domain.js";
 
 /**
  * "Start here" checklist (GET /api/onboarding): which getting-started steps are done for the caller's
@@ -41,6 +42,8 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
     return {
       workspace: { id: org, name: ws.org.name, role: ws.role, isOwner: ws.org.owner_user_id === uid },
       emailVerified: !!me?.email_verified,
+      /** the company domain of the sign-up email (null for Gmail & co.): verifying the email verifies it */
+      companyDomain: me ? companyDomainOf(me.email) : null,
       domain: { name: owner?.domain ?? null, verified: !!owner?.domain_verified },
       plan: { id: plan.id, name: plan.name, networks: plan.networks },
       counts: { apps, concepts, creatives, exports },

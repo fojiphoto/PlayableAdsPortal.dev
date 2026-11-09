@@ -2103,3 +2103,35 @@ describe("Start here checklist", () => {
     expect((await app.inject({ method: "GET", url: "/api/onboarding" })).statusCode).toBe(401);
   });
 });
+
+describe("company-email domain verification", () => {
+  it("verifying a work email verifies its domain; free mail never does; the Domain page confirms it instantly", async () => {
+    const { companyDomainOf } = await import("../src/email-domain.js");
+    expect(companyDomainOf("ali@YourStudio.com")).toBe("yourstudio.com");
+    expect(companyDomainOf("x@gmail.com")).toBeNull();
+    expect(companyDomainOf("x@yahoo.co.uk")).toBeNull();
+    expect(companyDomainOf("x@hotmail.fr")).toBeNull();
+    expect(companyDomainOf("not-an-email")).toBeNull();
+
+    const work = await signup("lead@acme-games.io");
+    expect((await app.inject({ method: "GET", url: "/api/onboarding", headers: bearer(work) })).json()).toMatchObject({ companyDomain: "acme-games.io", domain: { verified: false } });
+    const v = (await app.inject({ method: "POST", url: "/api/signup/verify", payload: { token: tokenFromMail("verify", "lead@acme-games.io") } })).json();
+    expect(v).toEqual({ verified: true, email: "lead@acme-games.io", domainVerified: "acme-games.io" });
+    expect((await app.inject({ method: "GET", url: "/api/domain", headers: bearer(work) })).json()).toMatchObject({ domain: "acme-games.io", verified: true });
+
+    const free = await signup("someone@gmail.com");
+    const fv = (await app.inject({ method: "POST", url: "/api/signup/verify", payload: { token: tokenFromMail("verify", "someone@gmail.com") } })).json();
+    expect(fv.domainVerified).toBeNull();
+    expect((await app.inject({ method: "GET", url: "/api/domain", headers: bearer(free) })).json().verified).toBe(false);
+
+    // a work address verified before this feature: entering its own domain on the Domain page is instant
+    const late = await signup("dev@late-studio.com");
+    await app.inject({ method: "POST", url: "/api/signup/verify", payload: { token: tokenFromMail("verify", "dev@late-studio.com") } });
+    const { getUserByEmail: byEmail, setDomainVerified: setVerified } = await import("../src/repo.js");
+    await setVerified((await byEmail("dev@late-studio.com"))!.id, 0);
+    const d = (await app.inject({ method: "POST", url: "/api/domain", headers: bearer(late), payload: { domain: "late-studio.com" } })).json();
+    expect(d).toMatchObject({ domain: "late-studio.com", verified: true });
+    const other = (await app.inject({ method: "POST", url: "/api/domain", headers: bearer(late), payload: { domain: "someone-else.com" } })).json();
+    expect(other.verified).toBe(false); // a different domain still needs the file check
+  });
+});

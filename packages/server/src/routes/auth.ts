@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import {
+  setDomainVerified,
+  setUserDomain,
   consumeReset,
   createPasswordReset,
   createUser,
@@ -23,6 +25,8 @@ import { rateLimit, clearRateLimit } from "../rate-limit.js";
 import { sendMail, template } from "../mail.js";
 import { config } from "../config.js";
 import { requireHuman } from "../turnstile.js";
+import { companyDomainOf } from "../email-domain.js";
+import { randomBytes } from "node:crypto";
 
 interface Credentials {
   email?: string;
@@ -133,7 +137,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     if (!raw) return reply.code(400).send({ error: "token required" });
     const u = await verifyEmailByHash(hashOpaqueToken(raw));
     if (!u) return reply.code(400).send({ error: "This verification link is invalid or has expired." });
-    return { verified: true, email: u.email };
+    // a confirmed mailbox at a company domain verifies that domain for the user's workspace
+    let domainVerified: string | null = null;
+    const company = companyDomainOf(u.email);
+    if (company && !u.domain_verified) {
+      await setUserDomain(u.id, company, u.domain === company && u.domain_token ? u.domain_token : `fav-${randomBytes(16).toString("hex")}`);
+      await setDomainVerified(u.id, 1);
+      domainVerified = company;
+    }
+    return { verified: true, email: u.email, domainVerified };
   });
 
   app.post("/api/signup/resend", authed, async (req, reply) => {
