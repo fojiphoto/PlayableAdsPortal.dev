@@ -5,13 +5,26 @@ import { Icon } from "./icons";
 
 type LinkProps = { href: string; onClick: (e: MouseEvent) => void };
 
-const TILE_COLORS = ["#6c25d8", "#e13ddc", "#0d9488", "#3b82f6", "#a26bea", "#f59e0b", "#37404f", "#ef4444"];
+/** Factorial palette for app tiles: [background, initials colour]. Gold and leaf tiles take dark text. */
+const TILE_COLORS: [string, string][] = [
+  ["var(--brand)", "var(--cream)"],
+  ["var(--gold)", "var(--gold-ink)"],
+  ["var(--brand-700)", "var(--cream)"],
+  ["var(--leaf)", "var(--ink-900)"],
+  ["var(--orange)", "var(--ink-900)"],
+  ["var(--ink-500)", "var(--cream)"],
+  ["var(--gold-600)", "var(--gold-ink)"],
+  ["var(--ink-800)", "var(--gold)"],
+];
 
-/** Stable color for an app's initial tile. */
-export function tileColor(seed: string) {
+function tileIndex(seed: string) {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
-  return TILE_COLORS[Math.abs(h) % TILE_COLORS.length]!;
+  return Math.abs(h) % TILE_COLORS.length;
+}
+/** Stable color for an app's initial tile. */
+export function tileColor(seed: string) {
+  return TILE_COLORS[tileIndex(seed)]![0];
 }
 export function appInitials(name: string) {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -20,7 +33,7 @@ export function appInitials(name: string) {
 }
 export function AppTile({ app, size }: { app: Pick<AppT, "id" | "name">; size?: "lg" | "xl" }) {
   return (
-    <span className={`sh-lib-ico${size ? ` ${size}` : ""}`} style={{ background: tileColor(app.id) }} aria-hidden="true">
+    <span className={`sh-lib-ico${size ? ` ${size}` : ""}`} style={{ background: tileColor(app.id), color: TILE_COLORS[tileIndex(app.id)]![1] }} aria-hidden="true">
       {appInitials(app.name)}
     </span>
   );
@@ -61,6 +74,8 @@ export function Platforms({ platform }: { platform: string | null | undefined })
   );
 }
 
+const STRIP = ["golf-orbit", "hero-adventure", "letter-quest", "block-blast-color-puzzle-game", "chicken-orbit", "nest-align", "super-sucker", "thief-puzzle"];
+
 /** Playable Ads home: every app in the workspace. */
 export function Library({
   apps,
@@ -99,8 +114,12 @@ export function Library({
         </div>
       ) : apps.length === 0 ? (
         <div className="sh-lib-empty">
-          <div className="sh-lib-empty-ico">
-            <Icon.Layers />
+          <div className="sh-lib-empty-art" aria-hidden="true">
+            <img src="/art/gamezone/fortress-merge.jpg" alt="" />
+            <img src="/art/gamezone/turbo-race.jpg" alt="" />
+            <img src="/art/logo.webp" alt="" className="mascot" />
+            <img src="/art/gamezone/kitchen-life.jpg" alt="" />
+            <img src="/art/gamezone/zombie-invasion.jpg" alt="" />
           </div>
           <h3>No apps yet</h3>
           <p>{canEdit ? "Create your first app, then add the playables you want to export." : "Nobody has added an app to this workspace yet."}</p>
@@ -165,6 +184,11 @@ export function Library({
       {loaded && (
         <div className="sh-lib-card" style={{ marginTop: 18 }}>
           <div className="sh-lib-card-head">Getting started</div>
+          <div className="sh-samples-strip" aria-hidden="true">
+            {STRIP.map((g) => (
+              <img key={g} src={`/art/gamezone/${g}.jpg`} alt="" loading="lazy" />
+            ))}
+          </div>
           <p className="sh-samples-sub">
             New here? Setup walks you through the Unity plugin and your first export; Docs covers builds, the install button and every network.
           </p>

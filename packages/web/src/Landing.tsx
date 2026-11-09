@@ -52,6 +52,35 @@ const ROW_1 = NETWORKS.slice(0, 15);
 const ROW_2 = NETWORKS.slice(15);
 const FAN = ["AppLovin", "Meta", "Mintegral", "Google", "TikTok", "Unity"];
 
+/** Factorial Studio's own live games (public/art/gamezone). */
+const GAMES: { file: string; name: string }[] = [
+  { file: "fortress-merge", name: "Fortress Merge" },
+  { file: "golf-orbit", name: "Golf Orbit" },
+  { file: "zombie-invasion", name: "Zombie Invasion" },
+  { file: "turbo-race", name: "Turbo Race" },
+  { file: "hero-adventure", name: "Hero Adventure" },
+  { file: "letter-quest", name: "Letter Quest" },
+  { file: "kitchen-life", name: "Kitchen Life" },
+  { file: "thief-puzzle", name: "Thief Puzzle" },
+  { file: "block-blast-color-puzzle-game", name: "Block Blast" },
+  { file: "super-sucker", name: "Super Sucker" },
+  { file: "nest-align", name: "Nest Align" },
+  { file: "chicken-orbit", name: "Chicken Orbit" },
+];
+
+/** Studios Factorial Studio (the company behind AdLab) has worked with: not AdLab customers. */
+const CLIENTS: { file: string; name: string }[] = [
+  { file: "tapnation", name: "TapNation" },
+  { file: "feral", name: "Feral Interactive" },
+  { file: "torliga", name: "Torliga Champions" },
+  { file: "megacat", name: "Mega Cat Studios" },
+  { file: "meicon", name: "MEICON" },
+  { file: "youngwilliams", name: "YoungWilliams" },
+  { file: "turtlejuice", name: "Turtle Juice" },
+  { file: "easternleather", name: "Eastern Leather Company" },
+  { file: "genesis", name: "Genesis" },
+];
+
 type PaidPlan = "starter" | "studio";
 interface PlanCard {
   id: "free" | PaidPlan | "enterprise";
@@ -271,7 +300,7 @@ function Brand() {
   return (
     <>
       <span className="lp-brand-mark">
-        <img src="/logo.png" alt="" />
+        <img src="/art/logo.webp" alt="" />
       </span>
       <span className="lp-brand-name">
         Factorial <b>AdLab</b>
@@ -363,6 +392,8 @@ export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
 
       <main>
         <Hero onGetStarted={onGetStarted} />
+        <Games />
+        <Clients />
         <How />
         <Networks />
         <Pricing onChoose={choosePlan} />
@@ -371,7 +402,9 @@ export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
         <Faq />
         <Contact />
         <section className="lp-cta-band">
-          <h2 className="lp-h2">Ship your next playable to every network today</h2>
+          <h2 className="lp-h2">
+            Ship your next playable to <em>every network</em> today
+          </h2>
           <p className="lp-sub">Start on the free plan. No card needed to try the whole tool.</p>
           <button className="lp-btn lp-btn-white lp-btn-lg" onClick={onGetStarted}>
             Get started free
@@ -471,6 +504,42 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
   );
 }
 
+/** A wall of the studio's own game art, right under the hero (as in Factorial's GameZone). */
+function Games() {
+  return (
+    <section className="lp-games" aria-label="Games by Factorial Studio">
+      <p className="lp-games-lab">
+        Built by the studio behind <b>26+ live games</b>
+      </p>
+      <ul className="lp-games-wall">
+        {GAMES.map((g, i) => (
+          <li key={g.file} className="lp-games-tile" style={{ ["--d" as string]: `${(i * 0.14).toFixed(2)}s` }}>
+            <img src={`/art/gamezone/${g.file}.jpg`} alt={g.name} loading="lazy" width={160} height={160} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Logo marquee of teams Factorial Studio has worked with (never presented as AdLab customers). */
+function Clients() {
+  return (
+    <section className="lp-clients" aria-label="Teams Factorial Studio has worked with">
+      <p className="lp-clients-lab">Teams Factorial Studio has worked with</p>
+      <div className="lp-clients-vp">
+        <ul className="lp-clients-track">
+          {[...CLIENTS, ...CLIENTS].map((c, i) => (
+            <li key={i} className={`lp-clients-tile${i >= CLIENTS.length ? " dup" : ""}`} aria-hidden={i >= CLIENTS.length || undefined}>
+              <img src={`/art/clients/${c.file}.webp`} alt={i >= CLIENTS.length ? "" : c.name} loading="lazy" />
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  );
+}
+
 function SectionHead({ title, sub, left }: { title: ReactNode; sub: ReactNode; left?: boolean }) {
   return (
     <div className={`lp-section-head${left ? " left" : ""}`}>
@@ -484,19 +553,28 @@ function How() {
   const [ref, shown] = useReveal<HTMLElement>();
   return (
     <section id="how" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
-      <SectionHead title="From Unity build to a shippable ad in three steps" sub="No re-exporting by hand and no guessing what each network wants." />
+      <SectionHead
+        title={
+          <>
+            From Unity build to a shippable ad <em>in three steps</em>
+          </>
+        }
+        sub="No re-exporting by hand and no guessing what each network wants." />
       <ol className="lp-steps">
         <li className="lp-step">
+          <img className="lp-step-art" src="/art/stages/build.webp" alt="" loading="lazy" />
           <div className="lp-step-n">1</div>
           <h3>Add the plugin</h3>
           <p>Import the AdLab package into the Unity project you already have. Nothing in your game needs rewriting.</p>
         </li>
         <li className="lp-step">
+          <img className="lp-step-art" src="/art/stages/concept.webp" alt="" loading="lazy" />
           <div className="lp-step-n">2</div>
           <h3>Mark the playable</h3>
           <p>Choose the scene, the install button and the end card, check it in a phone frame, then build and upload from the editor.</p>
         </li>
         <li className="lp-step">
+          <img className="lp-step-art" src="/art/stages/port.webp" alt="" loading="lazy" />
           <div className="lp-step-n">3</div>
           <h3>Export from the dashboard</h3>
           <p>Tick the networks you want and download one correctly wrapped, size-checked and named file for each.</p>
@@ -539,7 +617,13 @@ function Networks() {
   const [ref, shown] = useReveal<HTMLElement>();
   return (
     <section id="networks" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
-      <SectionHead title={`One export button. ${NET_COUNT} destinations.`} sub="Every major playable ad network, packaged the way each one expects." />
+      <SectionHead
+        title={
+          <>
+            One export button. <em>{NET_COUNT} destinations.</em>
+          </>
+        }
+        sub="Every major playable ad network, packaged the way each one expects." />
       <div className="lp-marquee">
         <MarqueeRow nets={ROW_1} />
         <MarqueeRow nets={ROW_2} reverse />
@@ -553,7 +637,11 @@ function Pricing({ onChoose }: { onChoose: (id: PlanCard["id"]) => void }) {
   return (
     <section id="pricing" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
       <SectionHead
-        title="Plans that scale with your export volume"
+        title={
+          <>
+            Plans that scale with <em>your export volume</em>
+          </>
+        }
         sub="Each export counts one network. Free includes unlimited Unity Ads exports, and paid quotas reset every 30 days. Billed monthly."
       />
       <div className="lp-plan-grid">
@@ -587,7 +675,13 @@ function Compare() {
   const [ref, shown] = useReveal<HTMLElement>();
   return (
     <section id="compare" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
-      <SectionHead title="Why choose Factorial AdLab" sub="A side-by-side look at AdLab and the usual export routes." />
+      <SectionHead
+        title={
+          <>
+            Why choose <em>Factorial AdLab</em>
+          </>
+        }
+        sub="A side-by-side look at AdLab and the usual export routes." />
       <div className="lp-cmp-table" role="table" aria-label="Feature comparison">
         <div className="lp-cmp-head" role="row">
           <div className="lp-cmp-feat" role="columnheader">
@@ -595,7 +689,7 @@ function Compare() {
           </div>
           <div className="lp-cmp-col lp-cmp-us" role="columnheader">
             <span className="lp-cmp-brand">
-              <img src="/logo.png" alt="" />
+              <img src="/art/logo.webp" alt="" />
               <span>
                 Factorial <b>AdLab</b>
               </span>
@@ -643,7 +737,11 @@ function Savings({ onGetStarted }: { onGetStarted: () => void }) {
   return (
     <section id="savings" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
       <SectionHead
-        title="Cut costs. Do more with less."
+        title={
+          <>
+            Cut costs. <em>Do more with less.</em>
+          </>
+        }
         sub={`Illustrative: about an hour ($${MANUAL_COST_PER_EXPORT}) to package and test each export by hand.`}
       />
       <div className="lp-cost-wrap">
@@ -670,7 +768,7 @@ function Savings({ onGetStarted }: { onGetStarted: () => void }) {
         </div>
         <div className="lp-cost-card" key={plan} role="tabpanel">
           <span className="lp-cost-card-mark" aria-hidden="true">
-            <img src="/logo.png" alt="" />
+            <img src="/art/logo.webp" alt="" />
           </span>
           <div className="lp-cost-headline">{NET_COUNT} Networks</div>
           <div className="lp-cost-builds">
@@ -700,7 +798,13 @@ function Faq() {
   const [open, setOpen] = useState<number | null>(0);
   return (
     <section id="faq" ref={ref} className={`lp-section lp-faq lp-reveal${shown ? " in" : ""}`}>
-      <SectionHead title="Questions & Answers" sub="Everything you need to know before you start." />
+      <SectionHead
+        title={
+          <>
+            Questions &amp; <em>Answers</em>
+          </>
+        }
+        sub="Everything you need to know before you start." />
       <div className="lp-faq-list">
         {FAQ.map((f, i) => {
           const isOpen = open === i;
@@ -769,7 +873,14 @@ function Contact() {
 
   return (
     <section id="contact" className="lp-section">
-      <SectionHead left title="Talk to us" sub="Enterprise plans, volume pricing or just a question: send us a note and we'll get back to you." />
+      <SectionHead
+        left
+        title={
+          <>
+            Talk to <em>us</em>
+          </>
+        }
+        sub="Enterprise plans, volume pricing or just a question: send us a note and we'll get back to you." />
       <div className="lp-contact-wrap">
         {sentTo ? (
           <div className="lp-contact-done" role="status">

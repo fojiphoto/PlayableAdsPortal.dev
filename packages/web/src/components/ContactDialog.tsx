@@ -32,18 +32,18 @@ export function ContactDialog({ onClose, defaultEmail = "", topic = "" }: { onCl
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label="Contact us">
-      <div className="w-full max-w-md rounded-2xl border border-[#1f6b4a] bg-[#0a3a28] p-6 text-left shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-900/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label="Contact us">
+      <div className="w-full max-w-md rounded-[22px] border border-ink-500 bg-ink-800 p-6 text-left shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-100">Talk to us</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white" aria-label="Close">
+          <h2 className="font-display text-lg uppercase text-text-inv">Talk to us</h2>
+          <button onClick={onClose} className="text-text-inv-2 hover:text-text-inv" aria-label="Close">
             ✕
           </button>
         </div>
         {done ? (
-          <div className="text-sm text-slate-300">
-            <p className="text-[#a3d977]">Thanks — your message is in. We usually reply within one business day.</p>
-            <button onClick={onClose} className="mt-4 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500">
+          <div className="text-sm text-text-inv-2">
+            <p className="text-brand-300">Thanks — your message is in. We usually reply within one business day.</p>
+            <button onClick={onClose} className="mt-4 rounded-full bg-gold px-5 py-2 text-sm font-semibold text-gold-ink shadow-[0_6px_16px_rgba(245,158,11,0.28)] hover:bg-gold-600">
               Close
             </button>
           </div>
@@ -57,10 +57,10 @@ export function ContactDialog({ onClose, defaultEmail = "", topic = "" }: { onCl
             <input tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: -9999, width: 1, height: 1 }} value={website} onChange={(e) => setWebsite(e.target.value)} />
             {siteKey && <Turnstile siteKey={siteKey} action="contact" onToken={setCaptcha} resetSignal={captchaRun} />}
             {err && <div className="text-sm text-red-400">{err}</div>}
-            <button type="submit" disabled={busy || (!!siteKey && !captcha)} className="rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:opacity-40">
+            <button type="submit" disabled={busy || (!!siteKey && !captcha)} className="rounded-full bg-gold px-5 py-2.5 font-semibold text-gold-ink shadow-[0_6px_16px_rgba(245,158,11,0.28)] hover:bg-gold-600 disabled:opacity-40">
               {busy ? "Sending…" : "Send message"}
             </button>
-            <p className="text-xs text-slate-500">Or email contact@factorialstudio.com</p>
+            <p className="text-xs text-text-inv-2">Or email contact@factorialstudio.com</p>
           </form>
         )}
       </div>
@@ -68,4 +68,4 @@ export function ContactDialog({ onClose, defaultEmail = "", topic = "" }: { onCl
   );
 }
 
-const input = "w-full rounded-lg border border-[#1f6b4a] bg-[#06281c] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500";
+const input = "w-full rounded-xl border border-ink-500 bg-ink-900 px-3 py-2 text-sm text-text-inv outline-none placeholder:text-text-inv-2/70 focus:border-gold";

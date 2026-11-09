@@ -1,14 +1,21 @@
-/* Floating chat button, greeting popup and panel. Self-contained (cb- prefix) so it can sit on any page. */
+/* Floating chat button, greeting popup and panel. Self-contained (cb- prefix) so it can sit on any page.
+   Factorial Studio look: gold FAB with a dark icon, cream panel with a deep-green header. */
 .cb {
-  --cb-brand: #6c25d8;
-  --cb-brand-600: #5a1db8;
-  --cb-text: #101319;
-  --cb-text-2: #4a5361;
-  --cb-text-3: #7b8494;
-  --cb-line: #e7eaef;
-  --cb-line-strong: #d5dae2;
-  --cb-canvas: #f7f8fa;
-  font-family: "Inter", system-ui, sans-serif;
+  --cb-gold: #fbbf24;
+  --cb-gold-600: #f59e0b;
+  --cb-gold-ink: #3a2a06;
+  --cb-green: #064e3b;
+  --cb-ink: #06281c;
+  --cb-leaf: #7cb342;
+  --cb-leaf-2: #a3d977;
+  --cb-text: #123a2a;
+  --cb-text-2: #3d5c4c;
+  --cb-text-3: #5f7d6c;
+  --cb-line: #e7e2cf;
+  --cb-line-strong: #e2ddc8;
+  --cb-canvas: #f6f3e7;
+  --cb-paper: #fffdf6;
+  font-family: "Fredoka", system-ui, sans-serif;
   color: var(--cb-text);
   font-size: 13.5px;
   line-height: 1.45;
@@ -23,7 +30,7 @@
   cursor: pointer;
 }
 .cb :focus-visible {
-  outline: 2px solid var(--cb-brand);
+  outline: 2px solid var(--cb-leaf);
   outline-offset: 2px;
 }
 .cb-fab {
@@ -38,14 +45,14 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: var(--cb-brand);
-  color: #fff;
-  box-shadow: 0 10px 24px -8px rgba(6, 18, 50, 0.45);
-  transition: transform 0.15s ease, background 0.15s ease;
+  background: linear-gradient(180deg, var(--cb-gold) 0%, var(--cb-gold-600) 100%);
+  color: var(--cb-gold-ink);
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.32), 0 10px 24px -8px rgba(3, 30, 20, 0.5);
+  transition: transform 0.2s ease, box-shadow 0.25s ease;
 }
 .cb-fab:hover {
-  background: var(--cb-brand-600);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(245, 158, 11, 0.42), 0 10px 24px -8px rgba(3, 30, 20, 0.5);
 }
 .cb-fab svg {
   width: 22px;
@@ -59,8 +66,9 @@
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: #dc2626;
+  background: #ff7043;
   color: #fff;
+  box-shadow: 0 0 0 2px var(--cb-paper);
   font-size: 11px;
   font-weight: 700;
   display: grid;
@@ -72,9 +80,9 @@
   right: 20px;
   bottom: 84px;
   z-index: 56;
-  background: #fff;
-  border: 1px solid var(--cb-line);
-  border-radius: 14px;
+  background: var(--cb-paper);
+  border: 2px solid var(--cb-line);
+  border-radius: 20px;
   animation: cb-pop 0.25s ease-out;
 }
 .cb-greet {
@@ -84,10 +92,11 @@
   gap: 6px;
   padding: 14px 16px;
   font-size: 13px;
-  box-shadow: 0 18px 44px -12px rgba(6, 18, 50, 0.4);
+  box-shadow: 0 18px 44px rgba(3, 30, 20, 0.35);
 }
 .cb-greet b {
   font-size: 14px;
+  color: var(--cb-green);
   padding-right: 20px;
 }
 .cb-greet p {
@@ -101,7 +110,7 @@
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: 50%;
   background: none;
   color: var(--cb-text-3);
 }
@@ -126,13 +135,18 @@
   height: 34px;
   padding: 0 13px;
   border: 0;
-  border-radius: 9px;
-  background: linear-gradient(160deg, #6c25d8 0%, #5a1db8 100%);
-  color: #fff;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--cb-gold) 0%, var(--cb-gold-600) 100%);
+  color: var(--cb-gold-ink);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
-  box-shadow: 0 8px 24px rgba(108, 37, 216, 0.3);
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.28);
+  transition: transform 0.2s ease, box-shadow 0.25s ease;
+}
+.cb-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(245, 158, 11, 0.38);
 }
 .cb-btn:disabled {
   opacity: 0.55;
@@ -149,17 +163,31 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  box-shadow: 0 24px 60px -12px rgba(6, 18, 50, 0.4);
+  box-shadow: 0 24px 60px -12px rgba(3, 30, 20, 0.5);
 }
 .cb-head {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 2px 8px;
-  padding: 12px 12px 10px 14px;
-  border-bottom: 1px solid var(--cb-line);
+  padding: 13px 12px 12px 16px;
+  background: radial-gradient(120% 140% at 80% -10%, #0c5a3f 0%, var(--cb-green) 45%, var(--cb-ink) 100%);
+  border-bottom: 2px solid rgba(124, 179, 66, 0.3);
+  color: #eaf5ee;
 }
 .cb-head b {
-  font-size: 15px;
+  font-family: "Bungee", "Fredoka", system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #fff;
+}
+.cb-head .cb-x {
+  color: #a9c6b5;
+}
+.cb-head .cb-x:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
 }
 .cb-head .cb-x {
   grid-row: 1 / span 2;
@@ -171,13 +199,13 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--cb-text-3);
+  color: #a9c6b5;
 }
 .cb-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #9aa3af;
+  background: var(--cb-leaf-2);
 }
 .cb-body {
   flex: 1;
@@ -200,8 +228,8 @@
 .cb-form textarea {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--cb-line-strong);
-  border-radius: 8px;
+  border: 2px solid var(--cb-line-strong);
+  border-radius: 12px;
   background: #fff;
   color: var(--cb-text);
   font: inherit;
@@ -211,10 +239,14 @@
   min-height: 84px;
   resize: vertical;
 }
+.cb-form input::placeholder,
+.cb-form textarea::placeholder {
+  color: #8aa194;
+}
 .cb-form input:focus,
 .cb-form textarea:focus {
   outline: none;
-  border-color: var(--cb-brand);
+  border-color: var(--cb-leaf);
 }
 .cb-form .cb-btn {
   align-self: flex-end;
@@ -222,7 +254,7 @@
 .cb-err {
   margin: 0;
   font-size: 12.5px;
-  color: #b42318;
+  color: #c2410c;
 }
 .cb-hp {
   position: absolute;
@@ -246,12 +278,15 @@
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: #0d9488;
-  color: #fff;
+  background: var(--cb-leaf);
+  color: #0f2e09;
 }
 .cb-done-ico svg {
   width: 18px;
   height: 18px;
+}
+.cb-done b {
+  color: var(--cb-green);
 }
 .cb-done span {
   color: var(--cb-text-2);
@@ -262,7 +297,8 @@
   padding: 8px 11px;
   border-radius: 12px;
   border-bottom-left-radius: 4px;
-  background: var(--cb-canvas);
+  background: #eef6e4;
+  border: 1px solid #dcefc8;
   color: var(--cb-text);
 }
 @keyframes cb-pop {

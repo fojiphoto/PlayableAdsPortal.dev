@@ -256,7 +256,7 @@ export function Start({ go, onDataChanged, canEdit }: { go: (r: Route) => void; 
           <span>
             {doneCount} of {tracked.length} done
           </span>
-          {nextTitle ? <span>Next: {nextTitle}</span> : <span style={{ color: "#0f7a3d" }}>All set. You're shipping playables.</span>}
+          {nextTitle ? <span>Next: {nextTitle}</span> : <span style={{ color: "var(--brand)" }}>All set. You're shipping playables.</span>}
         </div>
         <div className="pg-bar" role="progressbar" aria-valuenow={doneCount} aria-valuemin={0} aria-valuemax={tracked.length}>
           <i style={{ width: `${(doneCount / tracked.length) * 100}%` }} />
@@ -321,7 +321,7 @@ export function Start({ go, onDataChanged, canEdit }: { go: (r: Route) => void; 
                 ) : s.partial ? (
                   <span className="pg-tag warn">{s.partial}</span>
                 ) : nextKey === s.key ? (
-                  <span className="pg-tag brand">Next</span>
+                  <span className="pg-tag gold">Next</span>
                 ) : null}
               </div>
               <p className="setup-step-d">{s.body}</p>
@@ -650,7 +650,7 @@ function ShotExport() {
           </div>
           <div className="shot-row">
             <span className="shot-btn hot">Export</span>
-            <span className="shot-btn" style={{ borderColor: "#c9ccd3" }}>
+            <span className="shot-btn" style={{ borderColor: "var(--line-strong)" }}>
               Preview
             </span>
           </div>

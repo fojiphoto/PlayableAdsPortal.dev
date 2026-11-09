@@ -5,6 +5,9 @@ import { getNetworks } from "../api";
 const FORMATS = ["MRAID", "HTML5", "ZIP bundle", "index.html", "Inline base64"];
 const CYCLE_MS = 1900;
 
+/** Factorial Studio game thumbnails that peek out from behind the demo phone. */
+const TILES = ["fortress-merge", "turbo-race", "golf-orbit", "zombie-invasion"];
+
 /** How many networks we export to; fetched once and shared by every mount. */
 let networkCount: Promise<number | null> | null = null;
 function useNetworkCount(): number | null {
@@ -93,24 +96,35 @@ export function AuthShowcase({
         aria-label="Factorial AdLab home"
       >
         <span className="au-brand-tile">
-          <img src="/logo.png" alt="" />
+          <img src="/art/logo.webp" alt="" />
         </span>
-        <span className="au-brand-name">Factorial AdLab</span>
+        <span className="au-brand-name">
+          Factorial <em>AdLab</em>
+        </span>
       </button>
 
       <div className="au-body">
         <div className="au-stage">
-          <div className="au-device">
-            <div className="au-notch" />
-            <div className="au-screen">
-              <iframe
-                src="/adlab-demo.html"
-                title="Sample playable made with Factorial AdLab"
-                sandbox="allow-scripts"
-                loading="lazy"
-                tabIndex={-1}
-              />
-              <div className="au-shield" />
+          <div className="au-device-wrap">
+            <div className="au-tiles" aria-hidden="true">
+              {TILES.map((name, i) => (
+                <span key={name} className={`au-tile au-tile-${i + 1}`}>
+                  <img src={`/art/gamezone/${name}.jpg`} alt="" loading="lazy" />
+                </span>
+              ))}
+            </div>
+            <div className="au-device">
+              <div className="au-notch" />
+              <div className="au-screen">
+                <iframe
+                  src="/adlab-demo.html"
+                  title="Sample playable made with Factorial AdLab"
+                  sandbox="allow-scripts"
+                  loading="lazy"
+                  tabIndex={-1}
+                />
+                <div className="au-shield" />
+              </div>
             </div>
           </div>
           <FormatStrip />
@@ -120,7 +134,7 @@ export function AuthShowcase({
           <h1 className="au-h">
             {copy.h[0]}
             <br />
-            {copy.h[1]}
+            <em>{copy.h[1]}</em>
           </h1>
           <p className="au-p">{copy.p}</p>
           <dl className="au-stats">

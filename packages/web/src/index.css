@@ -1,91 +1,108 @@
 @import "tailwindcss";
 
 /*
- * Factorial AdLab design tokens: light canvas, dark sidebar, purple brand, Inter.
+ * Factorial AdLab design tokens: factorialstudio.com palette (deep green, gold, cream) and type
+ * (Bungee headings, Fredoka body) on the reference layout.
  * Every screen uses these, either as CSS variables (var(--brand)) or as Tailwind utilities generated
  * from the @theme block below (bg-canvas, text-text-2, border-line, bg-brand, text-brand-700, bg-ink-900,
  * shadow-card, rounded-card…). Don't hard-code hex values in components.
  */
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Fredoka", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Bungee", "Fredoka", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* ink: dark surfaces (sidebar, footer, toast, phone bezel) */
-  --color-ink-900: #0e1116;
-  --color-ink-800: #151922;
-  --color-ink-700: #1c212c;
-  --color-ink-600: #262d3a;
-  --color-ink-500: #37404f;
+  /* ink: Factorial's deep greens (sidebar, footer, toast, phone bezel, dark landing) */
+  --color-ink-900: #06281c;
+  --color-ink-800: #0a3a28;
+  --color-ink-700: #0f4a33;
+  --color-ink-600: #1b5540;
+  --color-ink-500: #1f6b4a;
 
-  /* surfaces */
-  --color-canvas: #f7f8fa;
-  --color-paper: #ffffff;
-  --color-paper-2: #fbfcfd;
+  /* surfaces: Factorial cream */
+  --color-canvas: #f6f3e7;
+  --color-paper: #fffdf6;
+  --color-paper-2: #fbf8ee;
 
   /* lines */
-  --color-line: #e7eaef;
-  --color-line-strong: #d5dae2;
+  --color-line: #e6dfca;
+  --color-line-strong: #d4cbb0;
 
   /* text */
-  --color-text: #101319;
-  --color-text-2: #4a5361;
-  --color-text-3: #7b8494;
-  --color-text-4: #9aa3af;
-  --color-text-inv: #eef1f6;
-  --color-text-inv-2: #9aa4b4;
+  --color-text: #123a2a;
+  --color-text-2: #3d5c4c;
+  --color-text-3: #5f7d6c;
+  --color-text-4: #8aa194;
+  --color-text-inv: #eaf5ee;
+  --color-text-inv-2: #a9c6b5;
 
-  /* brand purple */
-  --color-brand-50: #f6f0fe;
-  --color-brand-100: #ebddfd;
-  --color-brand-300: #c9a6f5;
-  --color-brand-400: #a26bea;
-  --color-brand: #6c25d8;
-  --color-brand-600: #5a1db8;
-  --color-brand-700: #4a1796;
-  --color-brand-ink: #2e0f5e;
-  --color-brand-pink: #e13ddc;
+  /* brand green (links, active states, focus on light surfaces) */
+  --color-brand-50: #eef6e4;
+  --color-brand-100: #dcefc8;
+  --color-brand-300: #a3d977;
+  --color-brand-400: #7cb342;
+  --color-brand: #11704f;
+  --color-brand-600: #0a5a42;
+  --color-brand-700: #064e3b;
+  --color-brand-ink: #06281c;
+  --color-brand-pink: #ff7043;
 
-  /* signal teal (success, check marks) */
-  --color-signal: #0d9488;
-  --color-signal-ink: #042f2b;
-  --color-signal-50: #f0fdfa;
+  /* gold: Factorial's call-to-action colour, always with gold-ink text */
+  --color-gold: #fbbf24;
+  --color-gold-600: #f59e0b;
+  --color-gold-50: #fff6dc;
+  --color-gold-ink: #3a2a06;
+  --color-leaf: #7cb342;
+  --color-orange: #ff7043;
+
+  /* signal (success, check marks) */
+  --color-signal: #4f9a2a;
+  --color-signal-ink: #1f3d0f;
+  --color-signal-50: #eef8e6;
 
   /* status */
-  --color-danger: #ff5d5d;
-  --color-danger-50: #ffe9e9;
+  --color-danger: #e5484d;
+  --color-danger-50: #fdecec;
   --color-danger-ink: #7a1616;
-  --color-warn: #ffb020;
+  --color-warn: #f59e0b;
   --color-warn-50: #fff4de;
 
-  --radius-card: 14px;
+  --radius-card: 18px;
 
-  --shadow-card: 0 1px 2px rgba(16, 19, 25, 0.04), 0 1px 3px rgba(16, 19, 25, 0.06);
-  --shadow-raised: 0 4px 12px rgba(16, 19, 25, 0.06), 0 2px 4px rgba(16, 19, 25, 0.04);
-  --shadow-float: 0 18px 48px rgba(16, 19, 25, 0.14), 0 6px 16px rgba(16, 19, 25, 0.08);
-  --shadow-violet: 0 8px 24px rgba(108, 37, 216, 0.3);
+  --shadow-card: 0 1px 2px rgba(6, 40, 28, 0.05), 0 2px 6px rgba(6, 40, 28, 0.06);
+  --shadow-raised: 0 6px 16px rgba(6, 40, 28, 0.08), 0 2px 4px rgba(6, 40, 28, 0.05);
+  --shadow-float: 0 18px 44px rgba(3, 30, 20, 0.35);
+  --shadow-violet: 0 6px 16px rgba(245, 158, 11, 0.28);
 }
 
 :root {
   color-scheme: light;
   /* the same tokens as plain variables, for hand-written CSS */
-  --ink-900: #0e1116; --ink-800: #151922; --ink-700: #1c212c; --ink-600: #262d3a; --ink-500: #37404f;
-  --canvas: #f7f8fa; --paper: #ffffff; --paper-2: #fbfcfd;
-  --line: #e7eaef; --line-strong: #d5dae2;
-  --text: #101319; --text-2: #4a5361; --text-3: #7b8494; --text-4: #9aa3af; --text-inv: #eef1f6; --text-inv-2: #9aa4b4;
-  --brand-050: #f6f0fe; --brand-100: #ebddfd; --brand-300: #c9a6f5; --brand-400: #a26bea;
-  --brand: #6c25d8; --brand-600: #5a1db8; --brand-700: #4a1796; --brand-ink: #2e0f5e; --brand-pink: #e13ddc;
-  --signal: #0d9488; --signal-ink: #042f2b; --signal-050: #f0fdfa;
-  --danger: #ff5d5d; --danger-050: #ffe9e9; --danger-ink: #7a1616; --warn: #ffb020; --warn-050: #fff4de;
-  --grad-brand: linear-gradient(135deg, #e13ddc 0%, #a230da 50%, #6c25d8 100%);
-  --grad-brand-soft: linear-gradient(135deg, #e13ddc 0%, #6c25d8 100%);
-  --grad-panel: linear-gradient(150deg, #2e0f5e 0%, #6c25d8 48%, #a230da 80%, #e13ddc 118%);
-  --grad-button: linear-gradient(160deg, #6c25d8 0%, #5a1db8 100%);
-  --shadow-1: 0 1px 2px rgba(16, 19, 25, 0.04), 0 1px 3px rgba(16, 19, 25, 0.06);
-  --shadow-2: 0 4px 12px rgba(16, 19, 25, 0.06), 0 2px 4px rgba(16, 19, 25, 0.04);
-  --shadow-3: 0 18px 48px rgba(16, 19, 25, 0.14), 0 6px 16px rgba(16, 19, 25, 0.08);
-  --shadow-violet: 0 8px 24px rgba(108, 37, 216, 0.3);
-  --r-sm: 8px; --r-md: 12px; --r-lg: 18px; --r-xl: 24px;
-  --font-display: "Inter", system-ui, sans-serif;
+  --ink-900: #06281c; --ink-800: #0a3a28; --ink-700: #0f4a33; --ink-600: #1b5540; --ink-500: #1f6b4a;
+  --canvas: #f6f3e7; --paper: #fffdf6; --paper-2: #fbf8ee;
+  --line: #e6dfca; --line-strong: #d4cbb0;
+  --text: #123a2a; --text-2: #3d5c4c; --text-3: #5f7d6c; --text-4: #8aa194; --text-inv: #eaf5ee; --text-inv-2: #a9c6b5;
+  --brand-050: #eef6e4; --brand-100: #dcefc8; --brand-300: #a3d977; --brand-400: #7cb342;
+  --brand: #11704f; --brand-600: #0a5a42; --brand-700: #064e3b; --brand-ink: #06281c; --brand-pink: #ff7043;
+  --gold: #fbbf24; --gold-600: #f59e0b; --gold-050: #fff6dc; --gold-ink: #3a2a06;
+  --leaf: #7cb342; --leaf-2: #a3d977; --orange: #ff7043; --cream: #f6f3e7; --cream-2: #fffdf6;
+  --signal: #4f9a2a; --signal-ink: #1f3d0f; --signal-050: #eef8e6;
+  --danger: #e5484d; --danger-050: #fdecec; --danger-ink: #7a1616; --warn: #f59e0b; --warn-050: #fff4de;
+  /* gold headline gradient (the highlighted words in headings, step badges) */
+  --grad-brand: linear-gradient(135deg, #fde68a 0%, #fbbf24 45%, #f59e0b 100%);
+  --grad-brand-soft: linear-gradient(135deg, #0c5a3f 0%, #064e3b 55%, #06281c 100%);
+  /* the dark green hero / auth panel / CTA band background, as on factorialstudio.com */
+  --grad-panel: radial-gradient(120% 100% at 80% -10%, #0c5a3f 0%, #064e3b 45%, #06281c 100%);
+  /* primary buttons: gold pill, dark text */
+  --grad-button: linear-gradient(180deg, #fbbf24 0%, #f59e0b 100%);
+  --shadow-1: 0 1px 2px rgba(6, 40, 28, 0.05), 0 2px 6px rgba(6, 40, 28, 0.06);
+  --shadow-2: 0 6px 16px rgba(6, 40, 28, 0.08), 0 2px 4px rgba(6, 40, 28, 0.05);
+  --shadow-3: 0 18px 44px rgba(3, 30, 20, 0.35);
+  --shadow-violet: 0 6px 16px rgba(245, 158, 11, 0.28);
+  --shadow-gold: 0 6px 16px rgba(245, 158, 11, 0.28);
+  --r-sm: 10px; --r-md: 14px; --r-lg: 22px; --r-xl: 30px;
+  --font-display: "Fredoka", system-ui, sans-serif;
+  --font-heading: "Bungee", "Fredoka", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 html,

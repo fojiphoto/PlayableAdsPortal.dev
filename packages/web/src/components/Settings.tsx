@@ -104,7 +104,7 @@ export function Settings({ user, status, onWorkspaceChanged }: { user: AuthUser;
             <div>
               <dt>Plan</dt>
               <dd>
-                <span className="pg-tag brand">{status?.planName ?? "—"}</span>
+                <span className="pg-tag gold">{status?.planName ?? "—"}</span>
               </dd>
             </div>
             {user.isAdmin && (

@@ -79,10 +79,12 @@ export function Sidebar({
         className="sh-brand"
       >
         <span className="sh-brand-mark">
-          <img src="/logo.png" alt="" />
+          <img src="/art/logo.webp" alt="" />
         </span>
         <span>
-          <div className="sh-brand-name">Factorial AdLab</div>
+          <div className="sh-brand-name">
+            Factorial <em>AdLab</em>
+          </div>
           <div className="sh-brand-sub">Playable Ads</div>
         </span>
       </a>

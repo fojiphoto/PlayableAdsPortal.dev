@@ -240,7 +240,7 @@ function CompileSummary({ r, onOpen, onAgain }: { r: CompileJobResult; onOpen: (
   const parts: { label: string; n: number; color: string }[] = [
     { label: "Code (.wasm)", n: r.breakdown.wasm, color: "var(--brand)" },
     { label: "Assets (.data)", n: r.breakdown.data, color: "var(--signal)" },
-    { label: "Framework", n: r.breakdown.framework, color: "var(--brand-pink)" },
+    { label: "Framework", n: r.breakdown.framework, color: "var(--orange)" },
     { label: "Loader", n: r.breakdown.loader, color: "var(--warn)" },
     ...(r.breakdown.streamingAssets ? [{ label: "StreamingAssets", n: r.breakdown.streamingAssets, color: "var(--brand-300)" }] : []),
   ];
