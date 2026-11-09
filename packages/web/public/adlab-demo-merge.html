@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merge Castles: AdLab demo playable</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a6dcc4; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Matching castles merge into bigger ones and coins fly to the counter" role="img"></canvas>
+<script>
+(function () {
+  "use strict";
+  // A self-contained merge demo: pairs of identical buildings merge (hut, tower, castle, palace) on a
+  // 4x4 lawn, coins fly to the counter, a big LEVEL UP bursts out, INSTALL pops in, then it restarts.
+  // Everything is drawn from the clock (render(t)), so there is no state to reset between loops.
+  var LOOP = 11, CTA_AT = 7.4, DRAG = 0.45, CS = 54;
+  var G0 = [1, 2, 0, 1, 2, 0, 1, 2, 1, 1, 2, 0, 0, 1, 1, 2];   // levels, row by row (0 = empty)
+  var MV = [   // drag cell "f" onto cell "to" (both level lv) at time "at"; n coins fly out
+    { f: 8, to: 9, lv: 1, at: 0.95, n: 3 },
+    { f: 13, to: 14, lv: 1, at: 2.1, n: 3 },
+    { f: 9, to: 10, lv: 2, at: 3.25, n: 5 },
+    { f: 14, to: 15, lv: 2, at: 4.4, n: 5 },
+    { f: 15, to: 10, lv: 3, at: 5.55, n: 10 }
+  ];
+  MV.forEach(function (m) { m.hit = m.at + DRAG; m.spawn = m.hit + 0.4; });
+  var LU = MV[4].hit + 0.15;   // level-up moment
+
+  var cv = document.getElementById("c");
+  var ctx = cv.getContext("2d");
+  var W = 0, H = 0, dpr = 1;
+  var reduce = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  var FONT = "px system-ui, -apple-system, Segoe UI, sans-serif";
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!running) render(STILL);
+  }
+
+  // ── helpers ──
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function ease(x) { x = clamp(x, 0, 1); return 1 - Math.pow(1 - x, 3); }
+  function inout(x) { x = clamp(x, 0, 1); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+  function back(x) { x = clamp(x, 0, 1); var c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); }
+  function rnd(i) { var x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+  function rr(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function box(x, y, w, h, r, fill) { ctx.fillStyle = fill; rr(x, y, w, h, r); ctx.fill(); }
+  function poly(pts, fill) {
+    ctx.beginPath(); ctx.moveTo(pts[0], pts[1]);
+    for (var i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+    ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+  }
+  function circle(x, y, r, fill) { ctx.fillStyle = fill; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); }
+  function star(x, y, r) {
+    ctx.beginPath();
+    ctx.moveTo(x, y - r * 2); ctx.lineTo(x + r * 0.5, y - r * 0.5); ctx.lineTo(x + r * 2, y); ctx.lineTo(x + r * 0.5, y + r * 0.5);
+    ctx.lineTo(x, y + r * 2); ctx.lineTo(x - r * 0.5, y + r * 0.5); ctx.lineTo(x - r * 2, y); ctx.lineTo(x - r * 0.5, y - r * 0.5);
+    ctx.closePath(); ctx.fill();
+  }
+  function text(str, x, y, size, fill, stroke, lw) {
+    ctx.font = "900 " + Math.round(size) + FONT; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+    if (stroke) { ctx.lineWidth = lw; ctx.strokeStyle = stroke; ctx.strokeText(str, x, y); }
+    ctx.fillStyle = fill; ctx.fillText(str, x, y);
+  }
+  function coin(x, y, r, flip) {
+    var w = Math.max(0.15, Math.abs(flip));
+    ctx.save(); ctx.translate(x, y); ctx.scale(w, 1);
+    circle(0, 0, r, "#d97706"); circle(0, -r * 0.08, r * 0.92, "#fbbf24");
+    ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = r * 0.16; ctx.beginPath(); ctx.arc(0, -r * 0.08, r * 0.6, 0, 7); ctx.stroke();
+    circle(-r * 0.32, -r * 0.4, r * 0.2, "rgba(255,255,255,.75)");
+    ctx.restore();
+  }
+
+  // ── buildings, drawn in world units around (0,0), roughly 44 tall ──
+  var STONE = "#efe4c8", SHADE = "#d9c8a0", DOOR = "#7c3f12";
+  function cone(x, y, w, h, a, b) { poly([x - w, y, x, y - h, x + w, y], a); poly([x, y - h, x + w, y, x, y], b); }
+  function building(lv, x, y, k) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(s * k, s * k);
+    ctx.fillStyle = "rgba(30,70,20,.25)"; ctx.beginPath(); ctx.ellipse(0, 16, 12 + lv * 3, 4, 0, 0, 7); ctx.fill();
+    if (lv === 1) {           // hut
+      box(-11, -2, 22, 18, 3, STONE); box(3, -2, 8, 18, 2, SHADE);
+      cone(0, 1, 15, 16, "#fb923c", "#ea580c");
+      box(-3.5, 6, 7, 10, 3.5, DOOR);
+    } else if (lv === 2) {    // tower
+      box(-9, -10, 18, 26, 3, STONE); box(2, -10, 7, 26, 2, SHADE);
+      [-9, -2.5, 4].forEach(function (bx2) { box(bx2, -15, 5, 6, 1.5, STONE); });
+      ctx.fillStyle = "#7c4a1e"; ctx.fillRect(-0.8, -27, 1.6, 13);
+      poly([0.8, -27, 11, -24, 0.8, -21], "#7cb342");
+      box(-3, -5, 6, 8, 3, "#3f2a12"); box(-4, 7, 8, 9, 4, DOOR);
+    } else if (lv === 3) {    // castle
+      box(-14, -2, 28, 18, 2, STONE); box(4, -2, 10, 18, 2, SHADE);
+      [-12, -5, 2, 9].forEach(function (bx2) { box(bx2, -6, 4, 5, 1, STONE); });
+      [-16, 16].forEach(function (tx) {
+        box(tx - 5.5, -10, 11, 26, 2, STONE); box(tx + 1, -10, 4.5, 26, 1.5, SHADE);
+        cone(tx, -9, 7.5, 15, "#10b981", "#047857");
+        box(tx - 1.8, -3, 3.6, 5, 1.8, "#3f2a12");
+      });
+      ctx.fillStyle = "#7c4a1e"; ctx.fillRect(-0.8, -20, 1.6, 15);
+      poly([0.8, -20, 10, -17, 0.8, -14], "#fbbf24");
+      box(-5, 4, 10, 12, 5, DOOR);
+    } else {                  // golden palace
+      box(-19, 0, 38, 17, 3, "#fff6dc"); box(6, 0, 13, 17, 2, "#f3e2b3");
+      box(-19, -1, 38, 3.5, 1.5, "#fbbf24");
+      [-21, 21].forEach(function (tx) {
+        box(tx - 5.5, -8, 11, 25, 2, "#fff6dc"); box(tx + 1, -8, 4.5, 25, 1.5, "#f3e2b3");
+        cone(tx, -7, 7.5, 14, "#fbbf24", "#d97706");
+      });
+      box(-8, -14, 16, 31, 3, "#fff6dc"); box(2, -14, 6, 31, 2, "#f3e2b3");
+      ctx.fillStyle = "#fbbf24"; ctx.beginPath(); ctx.arc(0, -14, 9.5, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = "#d97706"; ctx.beginPath(); ctx.arc(0, -14, 9.5, -Math.PI / 2, 0); ctx.lineTo(0, -14); ctx.fill();
+      poly([0, -31, 3.5, -26, 0, -21, -3.5, -26], "#34d399"); poly([0, -31, 3.5, -26, 0, -26], "#d1fae5");
+      box(-4.5, 5, 9, 12, 4.5, DOOR);
+      box(-2, -8, 4, 6, 2, "#3f2a12");
+    }
+    // level badge
+    circle(15, 14, 6.5, "#06281c");
+    ctx.strokeStyle = "#7cb342"; ctx.lineWidth = 1.3; ctx.stroke();
+    ctx.fillStyle = "#fbbf24"; ctx.font = "900 9" + FONT; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(String(lv), 15, 14.6);
+    ctx.restore();
+  }
+
+  // ── layout ──
+  var s, bx, by, cz, barY;
+  function layout() {
+    s = Math.min(W / 270, H / 470);
+    var extra = Math.max(0, H / s - 470);
+    cz = CS * s; bx = W / 2 - 2 * cz; by = (100 + extra * 0.3) * s;
+    barY = by + 4 * cz + (36 + extra * 0.12) * s;
+  }
+  function cellC(i) { return [bx + (i % 4 + 0.5) * cz, by + (Math.floor(i / 4) + 0.5) * cz]; }
+  function counterPos() { return [34 * s, 33 * s]; }
+
+  function gridAt(t) {
+    var g = G0.slice();
+    MV.forEach(function (m) { if (t >= m.hit) { g[m.f] = 0; g[m.to] = m.lv + 1; } if (t >= m.spawn) g[m.f] = 1; });
+    return g;
+  }
+
+  function background(t) {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#9ed9c0"); g.addColorStop(0.62, "#e6f5dc"); g.addColorStop(1, "#fff6dc");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    cloud(((t * 8) % (W + 160)) - 80, by - 30 * s, s * 0.8);
+    cloud(((t * 5 + W * 0.6) % (W + 160)) - 80, barY + 30 * s, s * 0.6);
+  }
+  function cloud(x, y, k) {
+    ctx.fillStyle = "rgba(255,255,255,.8)";
+    ctx.beginPath();
+    ctx.arc(x, y, 16 * k, 0, 7); ctx.arc(x + 18 * k, y - 8 * k, 20 * k, 0, 7); ctx.arc(x + 40 * k, y, 15 * k, 0, 7);
+    ctx.fill(); rr(x - 4 * k, y - 2 * k, 50 * k, 16 * k, 8 * k); ctx.fill();
+  }
+
+  function board(t) {
+    var bw = cz * 4, pad = 9 * s;
+    box(bx - pad, by - pad + 6 * s, bw + pad * 2, bw + pad * 2, 18 * s, "rgba(6,40,28,.22)");
+    var g = ctx.createLinearGradient(0, by, 0, by + bw);
+    g.addColorStop(0, "#0e4a33"); g.addColorStop(1, "#06281c");
+    ctx.fillStyle = g; rr(bx - pad, by - pad, bw + pad * 2, bw + pad * 2, 18 * s); ctx.fill();
+    ctx.strokeStyle = "rgba(124,179,66,.75)"; ctx.lineWidth = 2 * s; ctx.stroke();
+    for (var i = 0; i < 16; i++) {
+      var x = bx + (i % 4) * cz + 2 * s, y = by + Math.floor(i / 4) * cz + 2 * s, w = cz - 4 * s;
+      box(x, y, w, w, 9 * s, (i % 4 + Math.floor(i / 4)) % 2 ? "#9ccc65" : "#aed581");
+      box(x, y, w, w * 0.18, 9 * s, "rgba(255,255,255,.18)");
+      ctx.fillStyle = "rgba(85,139,47,.35)";
+      for (var k = 0; k < 2; k++) { var gx = x + (0.2 + rnd(i * 2 + k) * 0.6) * w, gy = y + (0.3 + rnd(i * 2 + k + 9) * 0.5) * w; poly([gx - 2 * s, gy, gx, gy - 4 * s, gx + 2 * s, gy], "rgba(85,139,47,.35)"); }
+    }
+    // highlight the next pair just before it merges
+    MV.forEach(function (m) {
+      var d = t - (m.at - 0.4);
+      if (d < 0 || t > m.hit) return;
+      var a = Math.min(1, d / 0.15) * (0.55 + 0.35 * Math.sin(d * 18));
+      [m.f, m.to].forEach(function (c) {
+        var p = cellC(c);
+        ctx.strokeStyle = "rgba(251,191,36," + a + ")"; ctx.lineWidth = 3 * s;
+        rr(p[0] - cz / 2 + 3 * s, p[1] - cz / 2 + 3 * s, cz - 6 * s, cz - 6 * s, 9 * s); ctx.stroke();
+      });
+    });
+    // rays behind the palace once it exists
+    if (t > LU - 0.1) {
+      var c = cellC(MV[4].to), q = ease((t - LU + 0.1) / 0.5);
+      ctx.save(); ctx.translate(c[0], c[1]); ctx.rotate(t * 0.6);
+      ctx.fillStyle = "rgba(253,230,138," + 0.55 * q + ")";
+      for (k = 0; k < 10; k++) { ctx.rotate(Math.PI / 5); poly([0, 0, -6 * s, -cz * 0.95 * q, 6 * s, -cz * 0.95 * q], "rgba(253,230,138," + 0.5 * q + ")"); }
+      ctx.restore();
+    }
+    var gr = gridAt(t);
+    for (i = 0; i < 16; i++) {
+      if (!gr[i]) continue;
+      var p = cellC(i), sc = 1 + 0.025 * Math.sin(t * 3 + i * 1.7), lv = gr[i], wh = 0, dy = 0, skip = false;
+      MV.forEach(function (m) {
+        if (i === m.f && t >= m.at - 0.001 && t < m.hit) skip = true;
+        if (i === m.to && t >= m.hit && t < m.hit + 0.45) {
+          var d = t - m.hit;
+          if (d < 0.1) { lv = m.lv; sc = 1 - 0.4 * (d / 0.1); wh = d / 0.1; }
+          else { sc = back((d - 0.1) / 0.35); wh = 1 - (d - 0.1) / 0.2; }
+        }
+        if (i === m.f && t >= m.spawn && t < m.spawn + 0.45) { var e = (t - m.spawn) / 0.45; sc = back(e); dy = -(1 - ease(e)) * 22 * s; }
+      });
+      if (skip || sc <= 0) continue;
+      if (lv === 4) sc *= 1.18;
+      building(lv, p[0], p[1] + dy, sc);
+      if (wh > 0) { ctx.fillStyle = "rgba(255,255,255," + clamp(wh, 0, 1) * 0.8 + ")"; ctx.beginPath(); ctx.arc(p[0], p[1], cz * 0.42 * sc, 0, 7); ctx.fill(); }
+    }
+  }
+
+  function dragged(t) {
+    MV.forEach(function (m) {
+      var q = (t - m.at) / DRAG;
+      if (q < 0 || q >= 1) return;
+      var a = cellC(m.f), b = cellC(m.to), e = inout(q);
+      var x = a[0] + (b[0] - a[0]) * e, y = a[1] + (b[1] - a[1]) * e - Math.sin(e * Math.PI) * 16 * s;
+      ctx.fillStyle = "rgba(6,40,28,.2)"; ctx.beginPath(); ctx.ellipse(x, y + 22 * s, 14 * s, 4 * s, 0, 0, 7); ctx.fill();
+      building(m.lv, x, y - 4 * s, 1.12);
+    });
+  }
+
+  function handAt(fx, fy, k, a) {
+    if (a <= 0) return;
+    ctx.globalAlpha = clamp(a, 0, 1);
+    ctx.save(); ctx.translate(fx + 8.6 * s * k, fy + 20.3 * s * k); ctx.scale(s * k, s * k); ctx.rotate(-0.4);
+    ctx.fillStyle = "#fff"; ctx.strokeStyle = "#123a2a"; ctx.lineWidth = 2;
+    rr(-5, -22, 10, 26, 5); ctx.fill(); ctx.stroke();
+    rr(-11, -2, 22, 20, 8); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+  function hint(t) {   // the hand shows the first merge
+    var m = MV[0], d = t - m.at, a = cellC(m.f), b = cellC(m.to);
+    if (d < -0.6 || d > DRAG + 0.35) return;
+    if (d < 0) { var e = ease((d + 0.6) / 0.45); handAt(a[0] + 6 * s + (1 - e) * 30 * s, a[1] + 10 * s + (1 - e) * 40 * s, d > -0.12 ? 0.9 : 1, e * 1.2); }
+    else if (d < DRAG) { var q = inout(d / DRAG); handAt(a[0] + (b[0] - a[0]) * q + 6 * s, a[1] + 10 * s - Math.sin(q * Math.PI) * 16 * s, 0.9, 1); }
+    else handAt(b[0] + 6 * s + (d - DRAG) * 50 * s, b[1] + 10 * s + (d - DRAG) * 70 * s, 1, 1 - (d - DRAG) / 0.35);
+  }
+
+  function coinTimes(m, j) { var l = m.hit + 0.12 + j * 0.05; return [l, l + 0.7]; }
+  function effects(t) {
+    var cp = counterPos();
+    MV.forEach(function (m, mi) {
+      var d = t - m.hit, c = cellC(m.to);
+      if (d < 0 || d > 2) return;
+      if (d < 0.4) {   // pop ring + sparkles
+        ctx.strokeStyle = "rgba(255,255,255," + (1 - d / 0.4) + ")"; ctx.lineWidth = 3 * s;
+        ctx.beginPath(); ctx.arc(c[0], c[1], (12 + d * 110) * s, 0, 7); ctx.stroke();
+        ctx.fillStyle = "rgba(253,230,138," + (1 - d / 0.4) + ")";
+        for (var k = 0; k < 7; k++) { var an = k * 0.9 + mi; star(c[0] + Math.cos(an) * (14 + d * 80) * s, c[1] + Math.sin(an) * (14 + d * 80) * s, 2 * s); }
+      }
+      var dp = (d - 0.1) / 0.9;   // "+15"
+      if (dp > 0 && dp < 1) {
+        ctx.globalAlpha = 1 - ease(dp);
+        text("+" + m.n * 5, c[0] + 8 * s, c[1] - (26 + 34 * ease(dp)) * s, 19 * s * (dp < 0.15 ? back(dp / 0.15) : 1), "#fff", "#064e3b", 4 * s);
+        ctx.globalAlpha = 1;
+      }
+      for (var j = 0; j < m.n; j++) {   // coins burst out, then fly to the counter
+        var ct = coinTimes(m, j), q = (t - ct[0]) / 0.7;
+        if (q < 0 || q >= 1) continue;
+        var an2 = -Math.PI / 2 + (j - (m.n - 1) / 2) * (m.n > 5 ? 0.45 : 0.7), r = 26 * s;
+        var ox = c[0] + Math.cos(an2) * r, oy = c[1] + Math.sin(an2) * r, x, y;
+        if (q < 0.25) { var e = ease(q / 0.25); x = c[0] + (ox - c[0]) * e; y = c[1] + (oy - c[1]) * e; }
+        else {
+          var f = inout((q - 0.25) / 0.75), mx = (ox + cp[0]) / 2 + 30 * s, my = Math.min(oy, cp[1]) - 30 * s;
+          x = (1 - f) * (1 - f) * ox + 2 * (1 - f) * f * mx + f * f * cp[0];
+          y = (1 - f) * (1 - f) * oy + 2 * (1 - f) * f * my + f * f * cp[1];
+        }
+        coin(x, y, (7 - 2 * Math.max(0, q - 0.25)) * s, Math.cos(t * 12 + j));
+      }
+    });
+    // LEVEL UP burst
+    var dl = t - LU;
+    if (dl >= 0 && dl < 2.2) {
+      var pc = cellC(MV[4].to);
+      for (var i = 0; i < 34; i++) {
+        var a3 = rnd(i) * 6.28, sp = 90 + rnd(i + 3) * 120, life = 1 - dl / (1.4 + rnd(i + 5) * 0.8);
+        if (life <= 0) continue;
+        ctx.globalAlpha = life;
+        ctx.save(); ctx.translate(pc[0] + Math.cos(a3) * sp * dl * s, pc[1] + (Math.sin(a3) * sp * dl + 160 * dl * dl) * s); ctx.rotate(dl * 8 + i);
+        ctx.fillStyle = ["#fbbf24", "#8bc34a", "#2dd4bf", "#fb923c", "#fff"][i % 5]; ctx.fillRect(-3 * s, -1.6 * s, 6 * s, 3.2 * s);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+      if (dl < 0.5) { ctx.fillStyle = "rgba(255,255,255," + 0.7 * (1 - dl / 0.5) + ")"; ctx.beginPath(); ctx.arc(pc[0], pc[1], (20 + dl * 260) * s, 0, 7); ctx.fill(); }
+      var dt = dl / 1.9;
+      if (dt < 1) {
+        ctx.globalAlpha = dt > 0.8 ? (1 - dt) / 0.2 : 1;
+        ctx.save(); ctx.translate(W / 2, by + cz * 1.05 - ease(dt) * 8 * s); ctx.rotate(-0.06);
+        var sc = back(dt / 0.15) * (1 + 0.03 * Math.sin(dl * 9)); ctx.scale(sc, sc);
+        var gr = ctx.createLinearGradient(0, -16 * s, 0, 16 * s);
+        gr.addColorStop(0, "#fef3c7"); gr.addColorStop(0.5, "#fbbf24"); gr.addColorStop(1, "#f59e0b");
+        text("LEVEL UP!", 0, 0, 34 * s, gr, "#06281c", 7 * s);
+        ctx.restore(); ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  function levelBar(t) {
+    var w = 196 * s, h = 16 * s, x = W / 2 - w / 2 + 12 * s, y = barY - h / 2, f = 0, lvl = 1;
+    MV.forEach(function (m) { f += ease((t - m.hit - 0.15) / 0.4) / 5; });
+    if (t > LU + 0.6) { lvl = 2; f = 0.08 * ease((t - LU - 0.6) / 0.4); }
+    box(x, y, w, h, h / 2, "rgba(6,40,28,.88)");
+    if (f > 0.01) {
+      var g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, "#c5e1a5"); g.addColorStop(1, "#7cb342");
+      box(x + 2 * s, y + 2 * s, Math.max(h - 4 * s, (w - 4 * s) * f), h - 4 * s, (h - 4 * s) / 2, g);
+      box(x + 5 * s, y + 3.5 * s, Math.max(0, (w - 10 * s) * f - 4 * s), 3 * s, 1.5 * s, "rgba(255,255,255,.4)");
+    }
+    var full = t > LU - 0.1 && t < LU + 0.6;
+    if (full) { ctx.fillStyle = "rgba(255,255,255," + 0.6 * Math.abs(Math.sin((t - LU) * 12)) + ")"; rr(x, y, w, h, h / 2); ctx.fill(); }
+    text(lvl === 1 ? "BUILD YOUR KINGDOM" : "KINGDOM LEVEL 2", W / 2 + 12 * s, barY + 0.5 * s, 7.5 * s, "#fff", "#06281c", 2.5 * s);
+    // round badge with the level number
+    var bp = t > LU + 0.6 && t < LU + 1 ? 1 + 0.3 * Math.sin((t - LU - 0.6) / 0.4 * Math.PI) : 1;
+    ctx.save(); ctx.translate(x - 2 * s, barY); ctx.scale(bp, bp);
+    circle(0, 1.5 * s, 12 * s, "rgba(180,110,10,.35)"); circle(0, 0, 12 * s, "#06281c"); circle(0, 0, 10 * s, "#f59e0b"); circle(0, -0.8 * s, 9 * s, "#fbbf24");
+    text(String(lvl), 0, 0.5 * s, 12 * s, "#3a2a06");
+    ctx.restore();
+  }
+
+  function hud(t) {
+    var got = 0, last = -9;
+    MV.forEach(function (m) { for (var j = 0; j < m.n; j++) { var l = coinTimes(m, j)[1]; if (t >= l) { got += 5; last = Math.max(last, l); } } });
+    var pop = t - last < 0.2 ? 1 + 0.16 * Math.sin((t - last) / 0.2 * Math.PI) : 1;
+    var x = 18 * s, y = 18 * s, w = 74 * s, h = 30 * s;
+    ctx.save();
+    ctx.translate(x + w / 2, y + h / 2); ctx.scale(pop, pop); ctx.translate(-(x + w / 2), -(y + h / 2));
+    ctx.fillStyle = "rgba(6,40,28,.88)"; rr(x, y, w, h, h / 2); ctx.fill();
+    ctx.strokeStyle = "rgba(163,217,119,.55)"; ctx.lineWidth = 1.5 * s; ctx.stroke();
+    coin(x + 16 * s, y + h / 2, 8.5 * s, 1);
+    ctx.fillStyle = "#fbbf24";
+    ctx.font = "800 " + Math.round(16 * s) + FONT;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(String(got), x + 31 * s, y + h / 2 + 1 * s);
+    ctx.restore();
+    ctx.fillStyle = "rgba(18,58,42,.6)";
+    ctx.font = "700 " + Math.round(7.5 * s) + FONT;
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = (1.6 * s) + "px";
+    ctx.fillText("MADE WITH ADLAB", W / 2 + 0.8 * s, y + 52 * s);
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = "0px";
+    if (t >= CTA_AT) {
+      var sc = back((t - CTA_AT) / 0.45) * (1 + 0.035 * Math.sin((t - CTA_AT) * 6));
+      var bw = 150 * s, bh = 46 * s;
+      ctx.save(); ctx.translate(W / 2, H - 64 * s); ctx.scale(sc, sc);
+      ctx.fillStyle = "rgba(180,110,10,.35)"; rr(-bw / 2, -bh / 2 + 5 * s, bw, bh, bh / 2); ctx.fill();
+      var g = ctx.createLinearGradient(0, -bh / 2, 0, bh / 2);
+      g.addColorStop(0, "#fbbf24"); g.addColorStop(1, "#f59e0b");
+      ctx.fillStyle = g; rr(-bw / 2, -bh / 2, bw, bh, bh / 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.32)"; rr(-bw / 2 + 10 * s, -bh / 2 + 5 * s, bw - 20 * s, bh * 0.32, bh * 0.16); ctx.fill();
+      ctx.fillStyle = "#3a2a06";
+      ctx.font = "900 " + Math.round(18 * s) + FONT;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      if (ctx.letterSpacing !== undefined) ctx.letterSpacing = (1.5 * s) + "px";
+      ctx.fillText("INSTALL", 0.75 * s, 1 * s);
+      if (ctx.letterSpacing !== undefined) ctx.letterSpacing = "0px";
+      ctx.restore();
+    }
+  }
+
+  function render(t) {
+    layout();
+    background(t);
+    board(t);
+    levelBar(t);
+    dragged(t);
+    effects(t);
+    hint(t);
+    hud(t);
+    var fade = t > LOOP - 0.45 ? (t - (LOOP - 0.45)) / 0.45 : t < 0.25 ? 1 - t / 0.25 : 0;
+    if (fade > 0) { ctx.fillStyle = "rgba(255,253,246," + fade * 0.9 + ")"; ctx.fillRect(0, 0, W, H); }
+  }
+
+  // ── loop ──
+  var STILL = 8.4;     // the frame shown when motion is reduced: palace built, INSTALL showing
+  var running = false, start = 0, raf = 0;
+  function frame(now) {
+    if (!start) start = now;
+    render(((now - start) / 1000) % LOOP);
+    raf = requestAnimationFrame(frame);
+  }
+  function apply() {
+    var pin = /[#&]t=([\d.]+)/.exec(location.hash);   // #t=6.1 freezes one frame (handy for screenshots)
+    if (pin) STILL = parseFloat(pin[1]) % LOOP;
+    var still = !!pin || (reduce && reduce.matches);
+    if (still && running) { cancelAnimationFrame(raf); running = false; }
+    if (!still && !running) { running = true; start = 0; raf = requestAnimationFrame(frame); }
+    if (still) render(STILL);
+  }
+  window.addEventListener("resize", resize);
+  if (reduce) {
+    if (reduce.addEventListener) reduce.addEventListener("change", apply);
+    else if (reduce.addListener) reduce.addListener(apply);
+  }
+  resize();
+  apply();
+})();
+</script>
+</body>
+</html>

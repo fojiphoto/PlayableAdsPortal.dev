@@ -475,6 +475,16 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
         </ul>
       </div>
 
+      {/* wide screens: more of our playables in the empty gutters beside the hero */}
+      <div className="lp-side lp-side-left" aria-hidden="true">
+        <SidePhone src="/adlab-demo-blocks.html" title="Block puzzle demo playable" className="a" />
+        <SidePhone src="/adlab-demo-merge.html" title="Merge demo playable" className="b" />
+      </div>
+      <div className="lp-side lp-side-right" aria-hidden="true">
+        <SidePhone src="/adlab-demo-snake.html" title="Snake demo playable" className="a" />
+        <SidePhone src="/adlab-demo-runner.html" title="Runner demo playable" className="b" />
+      </div>
+
       <div className="lp-hero-art">
         <div className="fan">
           <div className="fan-source" aria-hidden="true">
@@ -497,6 +507,18 @@ function Hero({ onGetStarted }: { onGetStarted: () => void }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** A decorative phone playing one of our demo playables (hidden below wide-screen widths, so it never loads there). */
+function SidePhone({ src, title, className }: { src: string; title: string; className: string }) {
+  return (
+    <div className={`lp-sp ${className}`}>
+      <span className="fan-phone-notch" />
+      <div className="fan-phone-screen">
+        <iframe src={src} title={title} loading="lazy" sandbox="allow-scripts" tabIndex={-1} />
+      </div>
+    </div>
   );
 }
 

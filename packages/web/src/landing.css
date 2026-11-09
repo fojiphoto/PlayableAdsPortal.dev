@@ -487,6 +487,102 @@
   background: #05271a;
 }
 
+/* ── side phones: extra demo playables in the empty gutters of wide screens ── */
+.lp-hero > .lp-side {
+  position: absolute;
+  top: 50%;
+  width: 360px;
+  height: 470px;
+  margin-top: -235px;
+  display: none;
+  pointer-events: none;
+}
+.lp-side-left {
+  right: calc(100% + 8px);
+}
+.lp-side-right {
+  left: calc(100% + 8px);
+}
+.lp-sp {
+  position: absolute;
+  width: 176px;
+  height: 356px;
+  padding: 8px;
+  border-radius: 28px;
+  background: #04231a;
+  border: 2px solid rgba(163, 217, 119, 0.3);
+  box-shadow: var(--shadow-3), 0 0 0 6px rgba(124, 179, 66, 0.06);
+  animation: lp-sp-float 7s ease-in-out infinite alternate;
+}
+.lp-sp .fan-phone-notch {
+  top: 13px;
+  width: 40px;
+}
+.lp-sp .fan-phone-screen {
+  border-radius: 20px;
+}
+/* "a" sits next to the hero, upright-ish; "b" further out, lower, smaller and tilted */
+.lp-side-left .lp-sp.a {
+  right: 0;
+  top: 18px;
+  --tilt: -4deg;
+}
+.lp-side-left .lp-sp.b {
+  right: 168px;
+  top: 96px;
+  --tilt: -9deg;
+  animation-delay: -3.5s;
+}
+.lp-side-right .lp-sp.a {
+  left: 0;
+  top: 18px;
+  --tilt: 4deg;
+  animation-delay: -1.8s;
+}
+.lp-side-right .lp-sp.b {
+  left: 168px;
+  top: 96px;
+  --tilt: 9deg;
+  animation-delay: -5.2s;
+}
+.lp-sp.b {
+  width: 156px;
+  height: 316px;
+  z-index: 0;
+  opacity: 0.92;
+}
+.lp-sp.a {
+  z-index: 1;
+}
+@keyframes lp-sp-float {
+  from {
+    transform: rotate(var(--tilt)) translateY(0);
+  }
+  to {
+    transform: rotate(var(--tilt)) translateY(-12px);
+  }
+}
+/* one phone per side once the gutters fit one; both once they fit two */
+@media (min-width: 1560px) {
+  .lp-hero > .lp-side {
+    display: block;
+  }
+  .lp-sp.b {
+    display: none;
+  }
+}
+@media (min-width: 1900px) {
+  .lp-sp.b {
+    display: block;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-sp {
+    animation: none;
+    transform: rotate(var(--tilt));
+  }
+}
+
 /* ── game strip: the studio's own games, right under the hero ── */
 .lp-games {
   position: relative;

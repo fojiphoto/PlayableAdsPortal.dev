@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gem Blocks: AdLab demo playable</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a6dcc4; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Gem blocks are dragged into a grid and full lines clear" role="img"></canvas>
+<script>
+(function () {
+  "use strict";
+  // A self-contained block-puzzle demo: a hand drags gem pieces from the tray into an 8x8 grid,
+  // full rows and columns flash and clear, combos stack up, INSTALL pops in, then it restarts.
+  // Everything is drawn from the clock (render(t)); the board for each step is precomputed below.
+  var LOOP = 11, CTA_AT = 7.5, DRAG = 0.55, CLR = 0.5, TS = 0.5;
+  var C  = ["#fbbf24", "#8bc34a", "#2dd4bf", "#fb923c", "#10b981"];   // gold, leaf, teal, orange, emerald
+  var LT = ["#fef3c7", "#e3f1cf", "#ccfbf1", "#ffedd5", "#d1fae5"];
+  var DK = ["#b45309", "#4d7c0f", "#0f766e", "#c2410c", "#065f46"];
+  var B0 = ["##.##.##", "###.###.", "####.#.#", "#.######", "#.######", "..######", "..######", "#####..."];
+  var MV = [   // piece cells, target row/col, colour, tray slot, drag start, combo text
+    { p: [[0, 0], [0, 1], [0, 2]], r: 7, c: 5, ci: 0, slot: 1, at: 0.75, txt: "NICE!" },
+    { p: [[0, 0], [0, 1], [1, 0], [1, 1]], r: 5, c: 0, ci: 2, slot: 0, at: 2.45, txt: "COMBO x2" },
+    { p: [[0, 0], [1, 0], [2, 0], [2, 1]], r: 5, c: 0, ci: 3, slot: 2, at: 4.15, txt: "COMBO x3" },
+    { p: [[0, 0], [0, 1], [1, 0], [1, 1], [2, 0]], r: 3, c: 0, ci: 4, slot: 1, at: 5.85, txt: "AMAZING!" }
+  ];
+  var DECOY = [{ p: [[0, 0]], ci: 1, slot: 0 }, { p: [[0, 0], [1, 0]], ci: 0, slot: 2 }];
+
+  var cv = document.getElementById("c");
+  var ctx = cv.getContext("2d");
+  var W = 0, H = 0, dpr = 1;
+  var reduce = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  var FONT = "px system-ui, -apple-system, Segoe UI, sans-serif";
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!running) render(STILL);
+  }
+
+  // ── helpers ──
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function ease(x) { x = clamp(x, 0, 1); return 1 - Math.pow(1 - x, 3); }
+  function inout(x) { x = clamp(x, 0, 1); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+  function back(x) { x = clamp(x, 0, 1); var c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); }
+  function rnd(i) { var x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); }
+  function rr(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function poly(pts, fill) {
+    ctx.beginPath(); ctx.moveTo(pts[0], pts[1]);
+    for (var i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+    ctx.closePath(); ctx.fillStyle = fill; ctx.fill();
+  }
+  function star(x, y, r) {
+    ctx.beginPath();
+    ctx.moveTo(x, y - r * 2); ctx.lineTo(x + r * 0.5, y - r * 0.5); ctx.lineTo(x + r * 2, y); ctx.lineTo(x + r * 0.5, y + r * 0.5);
+    ctx.lineTo(x, y + r * 2); ctx.lineTo(x - r * 0.5, y + r * 0.5); ctx.lineTo(x - r * 2, y); ctx.lineTo(x - r * 0.5, y - r * 0.5);
+    ctx.closePath(); ctx.fill();
+  }
+  function text(str, x, y, size, fill, stroke, lw) {
+    ctx.font = "900 " + Math.round(size) + FONT; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+    if (stroke) { ctx.lineWidth = lw; ctx.strokeStyle = stroke; ctx.strokeText(str, x, y); }
+    ctx.fillStyle = fill; ctx.fillText(str, x, y);
+  }
+  // a bevelled gem block, top-left corner at x,y, size z
+  function block(x, y, z, ci) {
+    var p = z * 0.05, w = z - 2 * p, b = w * 0.2;
+    x += p; y += p;
+    ctx.save(); rr(x, y, w, w, w * 0.2); ctx.clip();
+    ctx.fillStyle = C[ci]; ctx.fillRect(x, y, w, w);
+    poly([x, y, x + w, y, x + w - b, y + b, x + b, y + b], LT[ci]);
+    poly([x, y, x + b, y + b, x + b, y + w - b, x, y + w], "rgba(255,255,255,.38)");
+    poly([x, y + w, x + b, y + w - b, x + w - b, y + w - b, x + w, y + w], DK[ci]);
+    poly([x + w, y, x + w, y + w, x + w - b, y + w - b, x + w - b, y + b], "rgba(0,0,0,.16)");
+    ctx.fillStyle = "rgba(255,255,255,.8)"; ctx.beginPath(); ctx.arc(x + b * 1.7, y + b * 1.7, w * 0.07, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  function shard(x, y, r, ci) {
+    poly([x, y - r, x + r * 0.85, y - r * 0.2, x, y + r, x - r * 0.85, y - r * 0.2], C[ci]);
+    poly([x, y - r, x + r * 0.85, y - r * 0.2, x, y - r * 0.05], LT[ci]);
+    poly([x, y + r, x + r * 0.85, y - r * 0.2, x, y - r * 0.05], DK[ci]);
+  }
+
+  // ── precompute the board before / after every move ──
+  var boards = [], placed = [];
+  (function () {
+    var b = [], r, c, i;
+    for (r = 0; r < 8; r++) for (c = 0; c < 8; c++) b.push(B0[r][c] === "#" ? Math.floor(rnd(r * 8 + c + 11) * 5) : -1);
+    boards.push(b);
+    MV.forEach(function (m) {
+      var q = b.slice(), mr = 0, mc = 0;
+      m.p.forEach(function (o) { q[(m.r + o[0]) * 8 + m.c + o[1]] = m.ci; mr = Math.max(mr, o[0]); mc = Math.max(mc, o[1]); });
+      m.h = mr + 1; m.w = mc + 1; m.land = m.at + DRAG;
+      var pr = m.r + mr / 2, pc = m.c + mc / 2;
+      m.rows = []; m.cols = []; m.del = {};
+      for (r = 0; r < 8; r++) { for (c = 0; c < 8 && q[r * 8 + c] >= 0; c++); if (c === 8) m.rows.push(r); }
+      for (c = 0; c < 8; c++) { for (r = 0; r < 8 && q[r * 8 + c] >= 0; r++); if (r === 8) m.cols.push(c); }
+      m.rows.forEach(function (rw) { for (var k = 0; k < 8; k++) m.del[rw * 8 + k] = 0.06 + Math.abs(k - pc) * 0.035; });
+      m.cols.forEach(function (cl) { for (var k = 0; k < 8; k++) { var d = 0.06 + Math.abs(k - pr) * 0.035, j = k * 8 + cl; m.del[j] = j in m.del ? Math.min(m.del[j], d) : d; } });
+      m.n = m.rows.length + m.cols.length;
+      placed.push(q);
+      b = q.slice(); for (i in m.del) b[i] = -1;
+      boards.push(b);
+    });
+  })();
+  var REFILL = MV[2].land + 0.3;
+
+  // ── layout ──
+  var s, cell, bx, by, trayY;
+  function layout() {
+    s = Math.min(W / 270, H / 470);
+    var extra = Math.max(0, H / s - 470);
+    cell = 28 * s; bx = (W - cell * 8) / 2; by = (86 + extra * 0.3) * s;
+    trayY = by + cell * 8 + (52 + extra * 0.15) * s;
+  }
+  function slotPos(slot) { return [W / 2 + (slot - 1) * 80 * s, trayY]; }
+  function targetPos(m) { return [bx + (m.c + m.w / 2) * cell, by + (m.r + m.h / 2) * cell]; }
+  function piece(m, x, y, z, a) {
+    var w = m.w || 1, h = m.h || 1;
+    if (!m.w) m.p.forEach(function (o) { w = Math.max(w, o[1] + 1); h = Math.max(h, o[0] + 1); });
+    ctx.globalAlpha = a;
+    m.p.forEach(function (o) { block(x + (o[1] - w / 2) * z, y + (o[0] - h / 2) * z, z, m.ci); });
+    ctx.globalAlpha = 1;
+  }
+  function dragPos(m, q) {
+    var e = inout(q), a = slotPos(m.slot), b = targetPos(m);
+    var mx = (a[0] + b[0]) / 2, my = b[1] + (a[1] - b[1]) * 0.15;
+    return [(1 - e) * (1 - e) * a[0] + 2 * (1 - e) * e * mx + e * e * b[0],
+            (1 - e) * (1 - e) * a[1] + 2 * (1 - e) * e * my + e * e * b[1],
+            cell * (TS + (1 - TS) * ease(q * 1.3))];
+  }
+
+  function background(t) {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#9ed9c0"); g.addColorStop(0.62, "#e6f5dc"); g.addColorStop(1, "#fff6dc");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // slow rising bubbles
+    for (var i = 0; i < 9; i++) {
+      var y = H + 20 * s - ((t * (10 + rnd(i) * 10) + rnd(i + 5) * H) % (H + 40 * s));
+      ctx.fillStyle = "rgba(255,255,255," + (0.25 + rnd(i + 2) * 0.25) + ")";
+      ctx.beginPath(); ctx.arc(rnd(i + 9) * W + Math.sin(t + i) * 6 * s, y, (4 + rnd(i + 1) * 9) * s, 0, 7); ctx.fill();
+    }
+  }
+
+  function board(t) {
+    var bw = cell * 8, pad = 8 * s;
+    ctx.fillStyle = "rgba(6,40,28,.22)"; rr(bx - pad, by - pad + 6 * s, bw + pad * 2, bw + pad * 2, 16 * s); ctx.fill();
+    var g = ctx.createLinearGradient(0, by, 0, by + bw);
+    g.addColorStop(0, "#0e4a33"); g.addColorStop(1, "#06281c");
+    ctx.fillStyle = g; rr(bx - pad, by - pad, bw + pad * 2, bw + pad * 2, 16 * s); ctx.fill();
+    ctx.strokeStyle = "rgba(124,179,66,.75)"; ctx.lineWidth = 2 * s; ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.06)";
+    for (var i = 0; i < 64; i++) { rr(bx + (i % 8) * cell + 2 * s, by + Math.floor(i / 8) * cell + 2 * s, cell - 4 * s, cell - 4 * s, 5 * s); ctx.fill(); }
+
+    var k = -1;
+    for (i = 0; i < MV.length; i++) if (t >= MV[i].land) k = i;
+    var m = k >= 0 ? MV[k] : null, d = m ? t - m.land : 9;
+    var clearing = m && d < CLR && m.n;
+    var grid = k < 0 ? boards[0] : clearing ? placed[k] : boards[k + 1];
+    // glow behind lines that are about to clear
+    if (clearing && d > 0.02) {
+      ctx.fillStyle = "rgba(253,230,138," + 0.55 * (1 - d / CLR) + ")";
+      m.rows.forEach(function (r) { rr(bx - 4 * s, by + r * cell - 3 * s, bw + 8 * s, cell + 6 * s, 8 * s); ctx.fill(); });
+      m.cols.forEach(function (c) { rr(bx + c * cell - 3 * s, by - 4 * s, cell + 6 * s, bw + 8 * s, 8 * s); ctx.fill(); });
+    }
+    for (i = 0; i < 64; i++) {
+      if (grid[i] < 0) continue;
+      var x = bx + (i % 8) * cell, y = by + Math.floor(i / 8) * cell, sc = 1, wh = 0;
+      if (clearing && i in m.del) {
+        var q = (d - m.del[i]) / 0.2;
+        if (q >= 1) continue;
+        if (q > 0) { wh = Math.min(1, q * 3); sc = q < 0.3 ? 1 + 0.14 * Math.sin(q / 0.3 * Math.PI) : 1 - ease((q - 0.3) / 0.7); }
+      }
+      var fresh = m && d < 0.3 && placed[k][i] >= 0 && boards[k][i] < 0;
+      if (fresh) { sc = 1 + 0.1 * (1 - d / 0.3); wh = Math.max(wh, 0.7 * (1 - d / 0.3)); }
+      var z = cell * sc;
+      block(x + (cell - z) / 2, y + (cell - z) / 2, z, grid[i]);
+      if (wh > 0) { ctx.fillStyle = "rgba(255,255,255," + wh * 0.85 + ")"; rr(x + (cell - z) / 2 + z * 0.05, y + (cell - z) / 2 + z * 0.05, z * 0.9, z * 0.9, z * 0.18); ctx.fill(); }
+    }
+  }
+
+  function tray(t) {
+    for (var i = 0; i < 3; i++) {
+      var p = slotPos(i);
+      ctx.fillStyle = "rgba(6,40,28,.08)"; ctx.beginPath(); ctx.ellipse(p[0], p[1], 34 * s, 30 * s, 0, 0, 7); ctx.fill();
+    }
+    MV.forEach(function (m, k) {
+      if (t >= m.at) return;
+      var a = 1, sc = 1;
+      if (k === 3) { if (t < REFILL) return; sc = back((t - REFILL) / 0.4); }
+      if (t > m.at - 0.12) sc *= 1 + (1 - (m.at - t) / 0.12) * 0.12;   // lift as the finger presses
+      var p = slotPos(m.slot);
+      if (sc > 0) piece(m, p[0], p[1], cell * TS * sc, a);
+    });
+    if (t >= REFILL) DECOY.forEach(function (m, j) {
+      var p = slotPos(m.slot), sc = back((t - REFILL - 0.08 * (j + 1)) / 0.4);
+      if (sc > 0) piece(m, p[0], p[1], cell * TS * sc, 1);
+    });
+  }
+
+  function dragging(t) {
+    MV.forEach(function (m) {
+      var q = (t - m.at) / DRAG;
+      if (q < 0 || q >= 1) return;
+      var p = dragPos(m, q);
+      if (q > 0.4) {   // ghost preview on the board
+        ctx.globalAlpha = 0.3 * ease((q - 0.4) / 0.3);
+        m.p.forEach(function (o) { block(bx + (m.c + o[1]) * cell, by + (m.r + o[0]) * cell, cell, m.ci); });
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = "rgba(6,40,28,.18)"; rr(p[0] - m.w * p[2] / 2 + 4 * s, p[1] - m.h * p[2] / 2 + 7 * s, m.w * p[2], m.h * p[2], 6 * s); ctx.fill();
+      piece(m, p[0], p[1] - Math.sin(q * Math.PI) * 6 * s, p[2], 1);
+    });
+  }
+
+  function handAt(fx, fy, k, a) {   // fingertip at fx, fy
+    if (a <= 0) return;
+    ctx.globalAlpha = clamp(a, 0, 1);
+    ctx.save(); ctx.translate(fx + 8.6 * s * k, fy + 20.3 * s * k); ctx.scale(s * k, s * k); ctx.rotate(-0.4);
+    ctx.fillStyle = "#fff"; ctx.strokeStyle = "#123a2a"; ctx.lineWidth = 2;
+    rr(-5, -22, 10, 26, 5); ctx.fill(); ctx.stroke();
+    rr(-11, -2, 22, 20, 8); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+  function hands(t) {
+    MV.forEach(function (m) {
+      var d = t - m.at, p, a;
+      if (d < -0.45 || d > DRAG + 0.3) return;
+      if (d < 0) {   // reach in from the lower right, then press
+        p = slotPos(m.slot); var e = ease((d + 0.45) / 0.33);
+        handAt(p[0] + (1 - e) * 34 * s, p[1] + 10 * s + (1 - e) * 40 * s, d > -0.12 ? 0.9 : 1, e * 1.2);
+      } else if (d < DRAG) {
+        p = dragPos(m, d / DRAG);
+        handAt(p[0], p[1] + m.h * p[2] / 2 + 2 * s, 0.9, 1);
+      } else {
+        p = targetPos(m); a = 1 - (d - DRAG) / 0.3;
+        handAt(p[0] + (d - DRAG) * 40 * s, p[1] + m.h * cell / 2 + 2 * s + (d - DRAG) * 60 * s, 1, a);
+      }
+    });
+  }
+
+  function effects(t) {
+    MV.forEach(function (m) {
+      var d = t - m.land;
+      if (d < 0 || d > 2) return;
+      // shards from every cleared cell
+      for (var i in m.del) {
+        var dt = d - m.del[i] - 0.12;
+        if (dt < 0 || dt > 0.75) continue;
+        var cx = bx + (i % 8 + 0.5) * cell, cy = by + (Math.floor(i / 8) + 0.5) * cell, ci = placed[MV.indexOf(m)][i];
+        ctx.globalAlpha = 1 - dt / 0.75;
+        for (var k = 0; k < 3; k++) {
+          var sd = i * 3 + k + m.at * 10, ang = rnd(sd) * 6.28, sp = 50 + rnd(sd + 4) * 80;
+          shard(cx + Math.cos(ang) * sp * dt * s, cy + (Math.sin(ang) * sp * dt + 220 * dt * dt) * s, (2.5 + rnd(sd + 2) * 2.5) * s, ci);
+        }
+        if (dt < 0.3) { ctx.fillStyle = "#fff"; star(cx, cy, (1 + 2 * (1 - dt / 0.3)) * s); }
+      }
+      ctx.globalAlpha = 1;
+      // "+10" per line
+      var j = 0, dp = (d - 0.22) / 0.9;
+      if (dp > 0 && dp < 1) {
+        ctx.globalAlpha = 1 - ease(dp);
+        var rise = (12 + 34 * ease(dp)) * s, sz = 19 * s * (dp < 0.15 ? back(dp / 0.15) : 1);
+        m.rows.forEach(function (r) { text("+10", W / 2 + (m.n > 1 ? (j++ % 2 ? 46 : -46) * s : 0), by + (r + 0.5) * cell - rise, sz, "#fff", "#064e3b", 4 * s); });
+        m.cols.forEach(function (c) { text("+10", bx + (c + 0.5) * cell + 12 * s, by + 4 * cell - rise, sz, "#fff", "#064e3b", 4 * s); });
+        ctx.globalAlpha = 1;
+      }
+      // combo banner
+      var dc = (d - 0.28) / 1.25;
+      if (dc > 0 && dc < 1 && m.n) {
+        var big = m.txt === "AMAZING!", sc2 = back(dc / 0.2) * (1 + 0.03 * Math.sin(d * 9)), cy2 = by + cell * (big ? 2.2 : 1.6);
+        ctx.globalAlpha = dc > 0.8 ? (1 - dc) / 0.2 : 1;
+        ctx.save(); ctx.translate(W / 2, cy2 - ease(dc) * 10 * s); ctx.rotate(-0.06); ctx.scale(sc2, sc2);
+        var gr = ctx.createLinearGradient(0, -14 * s, 0, 14 * s);
+        gr.addColorStop(0, "#fef3c7"); gr.addColorStop(0.5, "#fbbf24"); gr.addColorStop(1, "#f59e0b");
+        text(m.txt, 0, 0, (big ? 34 : 27) * s, gr, "#06281c", 7 * s);
+        if (big) text("COMBO x4", 0, 27 * s, 14 * s, "#fff", "#06281c", 5 * s);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+    });
+  }
+
+  function score(t) {
+    var v = 0, pop = 1;
+    MV.forEach(function (m) {
+      var q = (t - m.land - 0.3) / 0.5;
+      v += 10 * m.n * ease(q);
+      if (q > 0 && q < 1) pop = 1 + 0.16 * Math.sin(q * Math.PI);
+    });
+    return [Math.round(v), pop];
+  }
+  function hud(t) {
+    var sc = score(t), x = 18 * s, y = 18 * s, w = 74 * s, h = 30 * s;
+    ctx.save();
+    ctx.translate(x + w / 2, y + h / 2); ctx.scale(sc[1], sc[1]); ctx.translate(-(x + w / 2), -(y + h / 2));
+    ctx.fillStyle = "rgba(6,40,28,.88)"; rr(x, y, w, h, h / 2); ctx.fill();
+    ctx.strokeStyle = "rgba(163,217,119,.55)"; ctx.lineWidth = 1.5 * s; ctx.stroke();
+    block(x + 6 * s, y + 6 * s, 18 * s, 0);
+    ctx.fillStyle = "#fbbf24";
+    ctx.font = "800 " + Math.round(16 * s) + FONT;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(String(sc[0]), x + 31 * s, y + h / 2 + 1 * s);
+    ctx.restore();
+    ctx.fillStyle = "rgba(18,58,42,.6)";
+    ctx.font = "700 " + Math.round(7.5 * s) + FONT;
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = (1.6 * s) + "px";
+    ctx.fillText("MADE WITH ADLAB", W / 2 + 0.8 * s, y + 52 * s);
+    if (ctx.letterSpacing !== undefined) ctx.letterSpacing = "0px";
+    if (t >= CTA_AT) {
+      var k = back((t - CTA_AT) / 0.45) * (1 + 0.035 * Math.sin((t - CTA_AT) * 6));
+      var bw = 150 * s, bh = 46 * s;
+      ctx.save(); ctx.translate(W / 2, H - 64 * s); ctx.scale(k, k);
+      ctx.fillStyle = "rgba(180,110,10,.35)"; rr(-bw / 2, -bh / 2 + 5 * s, bw, bh, bh / 2); ctx.fill();
+      var g = ctx.createLinearGradient(0, -bh / 2, 0, bh / 2);
+      g.addColorStop(0, "#fbbf24"); g.addColorStop(1, "#f59e0b");
+      ctx.fillStyle = g; rr(-bw / 2, -bh / 2, bw, bh, bh / 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.32)"; rr(-bw / 2 + 10 * s, -bh / 2 + 5 * s, bw - 20 * s, bh * 0.32, bh * 0.16); ctx.fill();
+      ctx.fillStyle = "#3a2a06";
+      ctx.font = "900 " + Math.round(18 * s) + FONT;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      if (ctx.letterSpacing !== undefined) ctx.letterSpacing = (1.5 * s) + "px";
+      ctx.fillText("INSTALL", 0.75 * s, 1 * s);
+      if (ctx.letterSpacing !== undefined) ctx.letterSpacing = "0px";
+      ctx.restore();
+    }
+  }
+
+  function render(t) {
+    layout();
+    background(t);
+    board(t);
+    tray(t);
+    dragging(t);
+    effects(t);
+    hands(t);
+    hud(t);
+    var fade = t > LOOP - 0.45 ? (t - (LOOP - 0.45)) / 0.45 : t < 0.25 ? 1 - t / 0.25 : 0;
+    if (fade > 0) { ctx.fillStyle = "rgba(255,253,246," + fade * 0.9 + ")"; ctx.fillRect(0, 0, W, H); }
+  }
+
+  // ── loop ──
+  var STILL = 8.4;     // the frame shown when motion is reduced: lines cleared, INSTALL showing
+  var running = false, start = 0, raf = 0;
+  function frame(now) {
+    if (!start) start = now;
+    render(((now - start) / 1000) % LOOP);
+    raf = requestAnimationFrame(frame);
+  }
+  function apply() {
+    var pin = /[#&]t=([\d.]+)/.exec(location.hash);   // #t=6.1 freezes one frame (handy for screenshots)
+    if (pin) STILL = parseFloat(pin[1]) % LOOP;
+    var still = !!pin || (reduce && reduce.matches);
+    if (still && running) { cancelAnimationFrame(raf); running = false; }
+    if (!still && !running) { running = true; start = 0; raf = requestAnimationFrame(frame); }
+    if (still) render(STILL);
+  }
+  window.addEventListener("resize", resize);
+  if (reduce) {
+    if (reduce.addEventListener) reduce.addEventListener("change", apply);
+    else if (reduce.addListener) reduce.addListener(apply);
+  }
+  resize();
+  apply();
+})();
+</script>
+</body>
+</html>
