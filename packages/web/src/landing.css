@@ -666,9 +666,7 @@
 .lp-who-card,
 .lp-plan,
 .lp-cost-left,
-.lp-faq-item,
-.lp-contact-form,
-.lp-contact-done {
+.lp-faq-item {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
   border: 1px solid var(--edge);
 }
@@ -1343,79 +1341,7 @@
   color: var(--text-3);
 }
 
-/* contact */
-.lp-contact-wrap {
-  max-width: 720px;
-  margin: 26px auto 0;
-}
-.lp-contact-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  border-radius: 22px;
-  padding: 26px 24px;
-  box-shadow: var(--shadow-1);
-}
-.lp-cf-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-}
-.lp-contact-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-3);
-}
-.lp-contact-form input,
-.lp-contact-form select,
-.lp-contact-form textarea {
-  width: 100%;
-  padding: 10px 13px;
-  border: 1px solid rgba(163, 217, 119, 0.22);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-  font-weight: 400;
-  transition: border-color 0.2s, background 0.2s;
-}
-.lp-contact-form select {
-  appearance: auto;
-}
-.lp-contact-form select option {
-  background: #0a3a28;
-  color: var(--text);
-}
-.lp-contact-form textarea {
-  min-height: 110px;
-  resize: vertical;
-}
-.lp-contact-form input::placeholder,
-.lp-contact-form textarea::placeholder {
-  color: rgba(169, 198, 181, 0.6);
-}
-.lp-contact-form input:focus,
-.lp-contact-form select:focus,
-.lp-contact-form textarea:focus {
-  outline: none;
-  border-color: var(--leaf);
-  background: rgba(255, 255, 255, 0.08);
-}
-.lp-req {
-  color: var(--gold);
-}
-.lp-cf-err {
-  margin: 0;
-  font-size: 13px;
-  color: #ffab91;
-}
-.lp-captcha {
-  margin: 6px 0 12px;
-}
+/* contact form honeypot */
 .lp-hp {
   position: absolute;
   left: -9999px;
@@ -1423,25 +1349,6 @@
   height: 1px;
   opacity: 0;
 }
-.lp-contact-done {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  border-radius: 22px;
-  padding: 30px 24px;
-  text-align: center;
-  box-shadow: var(--shadow-1);
-}
-.lp-contact-done strong {
-  font-size: 17px;
-  color: #fff;
-}
-.lp-contact-done span {
-  color: var(--text-3);
-}
-
-/* CTA band: Factorial's closing green panel */
 .lp-cta-band {
   margin: 0;
   padding: 72px 24px;
@@ -1650,11 +1557,6 @@
     letter-spacing: 0.1em;
   }
 }
-@media (max-width: 620px) {
-  .lp-cf-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 @media (max-width: 560px) {
   .lp-nav-inner {
     gap: 12px;
@@ -1712,9 +1614,6 @@
   }
   .lp-cost-save {
     font-size: 23px;
-  }
-  .lp-contact-form {
-    padding: 22px 18px;
   }
 }
 @media (max-width: 430px) {
@@ -1784,5 +1683,186 @@
   }
   .lp-faq-a {
     transition: none;
+  }
+}
+
+/* ── contact: the factorialstudio.com "Start your project" block (cream section) ── */
+.lp-cozy {
+  /* a light section on the dark page: re-pin the text tokens the landing overrides */
+  --text: #123a2a;
+  --text-3: #587564;
+  background: var(--cream);
+  color: var(--text);
+  padding: 88px 24px;
+  scroll-margin-top: 70px;
+}
+.lp-cozy-inner {
+  max-width: 1140px;
+  margin: 0 auto;
+}
+.lp .lp-cozy-eyebrow {
+  color: var(--brand);
+}
+.lp .lp-cozy-h2 {
+  color: var(--brand-700);
+  text-align: left;
+  margin-bottom: 16px;
+}
+.lp .lp-cozy-h2 em {
+  color: #b45309;
+  font-style: normal;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+.lp-cozy-lead {
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--text-3);
+  max-width: 640px;
+  margin: 0 0 50px;
+}
+.lp-cozy-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  gap: 50px;
+  align-items: start;
+}
+.lp-ci {
+  display: flex;
+  gap: 14px;
+  padding: 18px 0;
+  border-bottom: 2px solid #e7e2cf;
+}
+.lp-ci-last {
+  border-bottom: none;
+}
+.lp-ci-ico {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, #eaf6dd, #d6edc0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.lp-ci-ico svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--brand);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lp-ci b {
+  display: block;
+  font-family: var(--font-heading);
+  font-weight: 400;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--brand-700);
+  margin-bottom: 2px;
+}
+.lp-ci span {
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.lp-ci span a {
+  color: #15803d;
+  font-weight: 600;
+  text-decoration: none;
+}
+.lp-ci span a:hover {
+  text-decoration: underline;
+}
+.lp-cform {
+  background: var(--cream-2);
+  border: 2px solid #e7e2cf;
+  border-radius: 30px;
+  padding: 34px;
+}
+.lp-cform-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.lp-cform label {
+  display: block;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--brand);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 14px 0 6px;
+}
+.lp-cform input,
+.lp-cform select,
+.lp-cform textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--font-display);
+  font-size: 15.5px;
+  color: var(--text);
+  background: #fff;
+  border: 2px solid #e2dcc6;
+  border-radius: 12px;
+  padding: 12px 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.lp-cform input::placeholder,
+.lp-cform textarea::placeholder {
+  color: #9aab9f;
+}
+.lp-cform input:focus,
+.lp-cform select:focus,
+.lp-cform textarea:focus {
+  border-color: var(--leaf);
+}
+.lp-cform textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+.lp-cform .lp-cform-btn {
+  margin-top: 22px;
+  width: 100%;
+  justify-content: center;
+}
+.lp-form-msg {
+  margin-top: 14px;
+  font-weight: 600;
+  font-size: 14px;
+  min-height: 1em;
+}
+.lp-form-msg.ok {
+  color: #15803d;
+}
+.lp-form-msg.err {
+  color: #c2410c;
+}
+.lp-form-msg a {
+  color: inherit;
+  text-decoration: underline;
+}
+@media (max-width: 900px) {
+  .lp-cozy-grid {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+}
+@media (max-width: 560px) {
+  .lp-cozy {
+    padding: 64px 16px;
+  }
+  .lp-cform {
+    padding: 22px 18px;
+    border-radius: 22px;
+  }
+  .lp-cform-row {
+    grid-template-columns: 1fr;
+    gap: 0;
   }
 }

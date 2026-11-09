@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { sendContact } from "./api";
 import { ChatBubble } from "./components/ChatBubble";
-import { Turnstile, useCaptchaSiteKey } from "./components/Turnstile";
 import "./landing.css";
 
 /* ── data ─────────────────────────────────────────────── */
@@ -174,8 +172,6 @@ const FAQ: { q: string; a: string }[] = [
     a: "Yes. Create a workspace and invite teammates. Apps, concepts and exports are shared, and roles decide who can upload and export and who can only view. You can belong to several workspaces and switch between them.",
   },
 ];
-
-const TOPICS = ["Enterprise plan", "Pricing / volume", "Support", "Something else"];
 
 /* ── helpers ─────────────────────────────────────────── */
 
@@ -827,122 +823,163 @@ function Faq() {
   );
 }
 
-function Contact() {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [company, setCompany] = useState("");
-  const [topic, setTopic] = useState(TOPICS[0]);
-  const [message, setMessage] = useState("");
-  const [website, setWebsite] = useState(""); // honeypot
-  const [busy, setBusy] = useState(false);
-  const [sentTo, setSentTo] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const siteKey = useCaptchaSiteKey();
-  const [captcha, setCaptcha] = useState<string | null>(null);
-  const [captchaRun, setCaptchaRun] = useState(0);
+/**
+ * "Start your project": the same contact block as factorialstudio.com (info column + cream form),
+ * posting to the same FormSubmit inbox, so every enquiry lands with the studio's other leads.
+ */
+const FORMSUBMIT_ENDPOINT = "https://formsubmit.co/ajax/ed1d5b72ba86e31cb741a2f58d48cd92";
+const SERVICES = [
+  "Playable Ads (Factorial AdLab)",
+  "QA & Testing",
+  "Game Development",
+  "Mobile Publishing",
+  "Art & Animation",
+  "Console Porting",
+  "Live Operations",
+  "WebGL / Distribution",
+  "Other",
+];
 
-  async function submit(e: FormEvent) {
+const ContactIcon = ({ children }: { children: ReactNode }) => (
+  <div className="lp-ci-ico">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      {children}
+    </svg>
+  </div>
+);
+
+function Contact() {
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (message.trim().length < 10) {
-      setErr("Please tell us a little more (at least 10 characters).");
-      return;
-    }
-    if (siteKey && !captcha) {
-      setErr("Please complete the security check.");
-      return;
-    }
-    setBusy(true);
-    setErr(null);
+    const form = e.currentTarget;
+    setStatus("sending");
     try {
-      await sendContact({
-        name: name.trim() || email.trim(),
-        email: email.trim(),
-        company: company.trim() || undefined,
-        message: `Topic: ${topic}\n\n${message.trim()}`,
-        website,
-        turnstileToken: captcha ?? undefined,
-      });
-      setSentTo(email.trim());
-    } catch (er) {
-      setErr((er as Error).message);
-      if (siteKey) setCaptchaRun((n) => n + 1); // tokens are single-use
-    } finally {
-      setBusy(false);
+      const r = await fetch(FORMSUBMIT_ENDPOINT, { method: "POST", headers: { Accept: "application/json" }, body: new FormData(form) });
+      const d = (await r.json().catch(() => null)) as { success?: unknown; message?: string } | null;
+      // a 200 doesn't mean sent: FormSubmit reports a rejection in the body
+      if (!d || String(d.success) !== "true") throw new Error(d?.message || "rejected");
+      form.reset();
+      setStatus("sent");
+      window.setTimeout(() => setStatus((s) => (s === "sent" ? "idle" : s)), 6000);
+    } catch (err) {
+      console.error("contact form:", (err as Error).message);
+      setStatus("error");
     }
   }
 
   return (
-    <section id="contact" className="lp-section">
-      <SectionHead
-        left
-        title={
-          <>
-            Talk to <em>us</em>
-          </>
-        }
-        sub="Enterprise plans, volume pricing or just a question: send us a note and we'll get back to you." />
-      <div className="lp-contact-wrap">
-        {sentTo ? (
-          <div className="lp-contact-done" role="status">
-            <span className="lp-check" aria-hidden="true">
-              <CheckIcon />
-            </span>
-            <strong>Thanks, we've got it.</strong>
-            <span>We'll reply to {sentTo} shortly.</span>
-          </div>
-        ) : (
-          <form className="lp-contact-form" onSubmit={submit} noValidate={false}>
-            <div className="lp-cf-row">
-              <label>
-                Name
-                <input autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
-              </label>
-              <label>
+    <section id="contact" className="lp-cozy">
+      <div className="lp-cozy-inner">
+        <div className="lp-eyebrow lp-cozy-eyebrow">Get in touch</div>
+        <h2 className="lp-h2 lp-cozy-h2">
+          Start your <em>project</em>
+        </h2>
+        <p className="lp-cozy-lead">Tell us about your game, we'll respond within 24 hours.</p>
+        <div className="lp-cozy-grid">
+          <div className="lp-cozy-info">
+            <div className="lp-ci">
+              <ContactIcon>
+                <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+                <circle cx="12" cy="10" r="3" />
+              </ContactIcon>
+              <div>
+                <b>Headquarters</b>
                 <span>
-                  Work email <span className="lp-req">*</span>
+                  Factorial Studio Private Limited
+                  <br />
+                  306 Tariq Business Center, Lahore, Pakistan
                 </span>
-                <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} maxLength={200} />
-              </label>
-            </div>
-            <div className="lp-cf-row">
-              <label>
-                Company
-                <input autoComplete="organization" value={company} onChange={(e) => setCompany(e.target.value)} maxLength={160} />
-              </label>
-              <label>
-                Topic
-                <select value={topic} onChange={(e) => setTopic(e.target.value)}>
-                  {TOPICS.map((t) => (
-                    <option key={t}>{t}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <label>
-              <span>
-                How can we help? <span className="lp-req">*</span>
-              </span>
-              <textarea
-                rows={5}
-                required
-                minLength={10}
-                placeholder="Which networks you ship to, roughly how many exports a month, anything else we should know."
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-              />
-            </label>
-            <input className="lp-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={website} onChange={(e) => setWebsite(e.target.value)} />
-            {err && <p className="lp-cf-err">{err}</p>}
-            {siteKey && (
-              <div className="lp-captcha">
-                <Turnstile siteKey={siteKey} action="contact" onToken={setCaptcha} resetSignal={captchaRun} />
               </div>
-            )}
-            <button type="submit" className="lp-btn lp-btn-solid lp-btn-lg lp-btn-block" disabled={busy}>
-              {busy ? "Sending…" : "Send message"}
+            </div>
+            <div className="lp-ci">
+              <ContactIcon>
+                <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.7a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.4 1.8.6 2.7.7a2 2 0 0 1 1.7 2Z" />
+              </ContactIcon>
+              <div>
+                <b>Call or WhatsApp</b>
+                <span>
+                  <a href="tel:+923224695140">+92 322 469 5140</a>
+                </span>
+              </div>
+            </div>
+            <div className="lp-ci">
+              <ContactIcon>
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="m3 7 9 6 9-6" />
+              </ContactIcon>
+              <div>
+                <b>General inquiries</b>
+                <span>
+                  <a href="mailto:contact@factorialstudio.com">contact@factorialstudio.com</a>
+                </span>
+              </div>
+            </div>
+            <div className="lp-ci">
+              <ContactIcon>
+                <rect x="7" y="3" width="10" height="18" rx="3" />
+                <path d="M11 18h2" />
+              </ContactIcon>
+              <div>
+                <b>Playable ads &amp; AdLab</b>
+                <span>
+                  <a href="mailto:contact@factorialstudio.com">contact@factorialstudio.com</a>
+                </span>
+              </div>
+            </div>
+            <div className="lp-ci lp-ci-last">
+              <ContactIcon>
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 7v5l3 2" />
+              </ContactIcon>
+              <div>
+                <b>Response time</b>
+                <span>Within 24 hours</span>
+              </div>
+            </div>
+          </div>
+
+          <form className="lp-cform" onSubmit={(e) => void submit(e)}>
+            <div className="lp-cform-row">
+              <div>
+                <label htmlFor="cf-first">First name</label>
+                <input id="cf-first" name="First Name" type="text" placeholder="First" autoComplete="given-name" required />
+              </div>
+              <div>
+                <label htmlFor="cf-last">Last name</label>
+                <input id="cf-last" name="Last Name" type="text" placeholder="Last" autoComplete="family-name" required />
+              </div>
+            </div>
+            <label htmlFor="cf-email">Email</label>
+            <input id="cf-email" name="Email" type="email" placeholder="you@studio.com" autoComplete="email" required />
+            <label htmlFor="cf-svc">Service needed</label>
+            <select id="cf-svc" name="Service Needed" defaultValue={SERVICES[0]}>
+              <option value="">Select a service…</option>
+              {SERVICES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+            <label htmlFor="cf-msg">Project details</label>
+            <textarea id="cf-msg" name="Project Details" placeholder="Tell us about your project, timeline, platforms, and budget…" required />
+            <input type="hidden" name="_subject" value="New project inquiry — Factorial AdLab (app.factorialstudio.dev)" />
+            <input type="hidden" name="_template" value="table" />
+            <input type="hidden" name="_captcha" value="false" />
+            <input type="text" name="_honey" className="lp-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" />
+            <button type="submit" className="lp-btn lp-btn-solid lp-btn-lg lp-btn-block lp-cform-btn" disabled={status === "sending"}>
+              {status === "sending" ? "Sending…" : status === "sent" ? "✓ Message sent!" : "Send message →"}
             </button>
+            <div className={`lp-form-msg${status === "sent" ? " ok" : status === "error" ? " err" : ""}`} role="status">
+              {status === "sent" && "Thanks, we'll reply within 24 hours."}
+              {status === "error" && (
+                <>
+                  Sorry, that did not send. Please email <a href="mailto:contact@factorialstudio.com">contact@factorialstudio.com</a> and we
+                  will reply the same day.
+                </>
+              )}
+            </div>
           </form>
-        )}
+        </div>
       </div>
     </section>
   );
