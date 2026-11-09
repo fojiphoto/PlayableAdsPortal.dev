@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getNetwork } from "@forge/packager";
 import { authed } from "../auth.js";
+import { db } from "../db.js";
 import {
   createApp,
   createConcept,
@@ -61,11 +62,23 @@ export async function appRoutes(app: FastifyInstance): Promise<void> {
     return reply.code(201).send(appView(await createApp(req.user!.id, req.workspace!.org.id, name, req.body?.platform)));
   });
 
+  /** playables (creatives) and exports under one app, for the library table */
+  async function appCounts(appId: string): Promise<{ creativeCount: number; exportCount: number }> {
+    const row = await db()
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM creatives cr JOIN concepts c ON c.id = cr.concept_id WHERE c.app_id = ?) AS creatives,
+                (SELECT COUNT(*) FROM exports e JOIN creatives cr ON cr.id = e.creative_id JOIN concepts c ON c.id = cr.concept_id WHERE c.app_id = ?) AS exports`,
+      )
+      .get<{ creatives: number; exports: number }>(appId, appId);
+    return { creativeCount: Number(row?.creatives ?? 0), exportCount: Number(row?.exports ?? 0) };
+  }
+
   app.get("/api/apps", authed, async (req) =>
     Promise.all(
       (await listApps(req.user!.id)).map(async (a) => ({
         ...appView(a),
         conceptCount: (await listConcepts(a.id)).length,
+        ...(await appCounts(a.id)),
       })),
     ),
   );

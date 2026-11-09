@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { listThreads, openThread, getThreadDetail, replyThread, closeThread, reportBug } from "../api";
 import type { SupportThread, SupportThreadDetail } from "../types";
+import { Icon } from "./icons";
+import { Msg, PageHead } from "./pageKit";
 
 /** Support page: the workspace's tickets with replies from the team, plus a bug-report form. */
 export function Support({
@@ -46,41 +48,57 @@ export function Support({
   }, [initialThreadId]);
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold text-slate-100">Support</h1>
-        <div className="flex gap-2 text-sm">
-          <button onClick={() => { setMode("new"); setActive(null); onOpenThread?.(null); }} className="rounded-lg bg-amber-600 px-3 py-1.5 font-medium text-white hover:bg-amber-500">
-            New ticket
-          </button>
-          <button onClick={() => { setMode("bug"); setActive(null); onOpenThread?.(null); }} className="rounded-lg border border-[#1f6b4a] px-3 py-1.5 text-slate-200 hover:border-[#7cb342]">
-            Report a bug
-          </button>
-        </div>
-      </div>
-      {err && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">{err}</div>}
-
-      <div className="grid gap-6 md:grid-cols-[280px_1fr]">
-        <aside className="grid content-start gap-1.5">
-          {threads.length === 0 && <div className="text-sm text-slate-400">No tickets yet.</div>}
-          {threads.map((t) => (
+    <div>
+      <PageHead
+        title="Support"
+        sub="Your workspace's tickets and our replies. We answer here and by email."
+        actions={
+          <>
             <button
-              key={t.id}
-              onClick={() => void open(t.id)}
-              className={`rounded-lg border px-3 py-2 text-left text-sm ${active?.id === t.id ? "border-amber-500 bg-amber-500/10" : "border-[#1b5540] hover:border-[#7cb342]"}`}
+              onClick={() => {
+                setMode("new");
+                setActive(null);
+                onOpenThread?.(null);
+              }}
+              className="pg-btn pg-btn-primary"
             >
+              <Icon.Plus />
+              New ticket
+            </button>
+            <button
+              onClick={() => {
+                setMode("bug");
+                setActive(null);
+                onOpenThread?.(null);
+              }}
+              className="pg-btn pg-btn-ghost"
+            >
+              <Icon.Alert />
+              Report a bug
+            </button>
+          </>
+        }
+      />
+      {err && <Msg kind="err">{err}</Msg>}
+
+      <div className="grid gap-[18px] md:grid-cols-[300px_minmax(0,1fr)]">
+        <aside className="grid content-start gap-1.5">
+          <div className="setup-section">Tickets{threads.length ? ` · ${threads.length}` : ""}</div>
+          {threads.length === 0 && <p className="pg-p">No tickets yet.</p>}
+          {threads.map((t) => (
+            <button key={t.id} onClick={() => void open(t.id)} className={`pg-item${active?.id === t.id ? " on" : ""}`} aria-current={active?.id === t.id ? "true" : undefined}>
               <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-slate-100">{t.subject}</span>
-                {t.unread > 0 && <span className="shrink-0 rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-black">{t.unread}</span>}
+                <span className="pg-item-t">{t.subject}</span>
+                {t.unread > 0 && <span className="pg-badge shrink-0">{t.unread}</span>}
               </div>
-              <div className="text-[11px] text-slate-500">
+              <div className="pg-item-s">
                 {t.status} · {new Date(t.updatedAt).toLocaleDateString()}
               </div>
             </button>
           ))}
         </aside>
 
-        <section>
+        <section className="min-w-0">
           {mode === "new" ? (
             <NewTicket
               onCreated={(t) => {
@@ -101,9 +119,7 @@ export function Support({
               }}
             />
           ) : (
-            <div className="rounded-xl border border-dashed border-[#1f6b4a] p-8 text-center text-sm text-slate-400">
-              Pick a ticket, or open a new one — we reply by email and here.
-            </div>
+            <div className="pg-empty">Pick a ticket, or open a new one. We reply here and by email.</div>
           )}
         </section>
       </div>
@@ -129,14 +145,30 @@ function NewTicket({ onCreated }: { onCreated: (t: SupportThreadDetail) => void 
     }
   }
   return (
-    <form onSubmit={submit} className={`${panel} grid gap-3`}>
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">New ticket</h2>
-      <input className={input} placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} required maxLength={160} />
-      <textarea className={`${input} min-h-[160px]`} placeholder="What's going on? Creative/network names and what you expected help a lot." value={message} onChange={(e) => setMessage(e.target.value)} required />
-      {err && <div className="text-sm text-red-400">{err}</div>}
-      <button disabled={busy} className="justify-self-start rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
-        {busy ? "Sending…" : "Open ticket"}
-      </button>
+    <form onSubmit={submit} className="pg-card grid gap-3.5">
+      <h2 className="pg-h" style={{ margin: 0 }}>
+        New ticket
+      </h2>
+      <label className="pg-field">
+        <span className="pg-label">Subject</span>
+        <input className="pg-input" value={subject} onChange={(e) => setSubject(e.target.value)} required maxLength={160} />
+      </label>
+      <label className="pg-field">
+        <span className="pg-label">Message</span>
+        <textarea
+          className="pg-input min-h-[160px]"
+          placeholder="What's going on? Playable and network names, and what you expected, help a lot."
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          required
+        />
+      </label>
+      {err && <Msg kind="err">{err}</Msg>}
+      <div>
+        <button disabled={busy} className="pg-btn pg-btn-primary">
+          {busy ? "Sending…" : "Open ticket"}
+        </button>
+      </div>
     </form>
   );
 }
@@ -172,36 +204,43 @@ export function ThreadView({ thread, onChanged, asSupport = false }: { thread: S
     }
   }
   return (
-    <div className={panel}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-base font-semibold text-slate-100">{thread.subject}</h2>
-          <div className="text-xs text-slate-500">
-            {thread.status}
-            {asSupport && thread.user?.email && <> · {thread.user.email}</>}
+    <div className="pg-card">
+      <div className="pg-card-head" style={{ alignItems: "flex-start" }}>
+        <div className="min-w-0">
+          <h2 className="pg-h" style={{ margin: 0, overflowWrap: "anywhere" }}>
+            {thread.subject}
+          </h2>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12.5px] text-text-3">
+            <span className={`pg-tag ${thread.status === "closed" ? "" : "brand"}`}>{thread.status}</span>
+            {asSupport && thread.user?.email && <span>{thread.user.email}</span>}
           </div>
         </div>
-        <button onClick={() => void toggle()} disabled={busy} className="text-xs text-slate-400 hover:text-amber-300 hover:underline disabled:opacity-40">
+        <button onClick={() => void toggle()} disabled={busy} className="pg-btn pg-btn-ghost pg-btn-sm">
           {thread.status === "closed" ? "Reopen" : "Close ticket"}
         </button>
       </div>
-      <div className="mb-4 grid gap-2">
+      <div className="mb-4 grid gap-2.5">
         {thread.messages.map((m) => (
-          <div
-            key={m.id}
-            className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${m.fromSupport ? "justify-self-start border border-amber-500/30 bg-amber-500/5" : "justify-self-end bg-[#123f2d]"}`}
-          >
-            <div className="mb-1 text-[11px] text-slate-400">
-              {m.fromSupport ? "Factorial support" : m.authorEmail ?? "you"} · {new Date(m.createdAt).toLocaleString()}
+          <div key={m.id} className={`pg-bubble ${m.fromSupport ? "them" : "me"}`}>
+            <div className="pg-bubble-meta">
+              {m.fromSupport ? "Factorial support" : (m.authorEmail ?? "you")} · {new Date(m.createdAt).toLocaleString()}
             </div>
-            <div className="whitespace-pre-wrap text-slate-100">{m.body}</div>
+            <div className="whitespace-pre-wrap text-text" style={{ overflowWrap: "anywhere" }}>
+              {m.body}
+            </div>
           </div>
         ))}
       </div>
-      <form onSubmit={send} className="grid gap-2">
-        <textarea className={`${input} min-h-[90px]`} placeholder={asSupport ? "Reply as support (emailed to the user)…" : "Reply…"} value={reply} onChange={(e) => setReply(e.target.value)} />
-        {err && <div className="text-sm text-red-400">{err}</div>}
-        <button disabled={busy || !reply.trim()} className="justify-self-end rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
+      <form onSubmit={send} className="grid gap-2.5 border-t border-line pt-4">
+        <textarea
+          className="pg-input min-h-[90px]"
+          placeholder={asSupport ? "Reply as support (emailed to the user)…" : "Reply…"}
+          value={reply}
+          onChange={(e) => setReply(e.target.value)}
+          aria-label="Reply"
+        />
+        {err && <Msg kind="err">{err}</Msg>}
+        <button disabled={busy || !reply.trim()} className="pg-btn pg-btn-primary justify-self-end">
           {busy ? "…" : "Send"}
         </button>
       </form>
@@ -230,25 +269,38 @@ function BugForm({ onDone }: { onDone: () => void }) {
   }
   if (sent)
     return (
-      <div className={panel}>
-        <p className="text-sm text-[#a3d977]">Thanks — the bug report reached the team.</p>
-        <button onClick={onDone} className="mt-3 text-sm text-amber-400 hover:underline">
+      <div className="pg-card">
+        <Msg kind="success">Thanks, the bug report reached the team.</Msg>
+        <button onClick={onDone} className="pg-link mt-3">
           Back to tickets
         </button>
       </div>
     );
   return (
-    <form onSubmit={submit} className={`${panel} grid gap-3`}>
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">Report a bug</h2>
-      <input className={input} placeholder="Short title" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={160} />
-      <textarea className={`${input} min-h-[160px]`} placeholder="Steps to reproduce, what happened, what you expected, network/browser." value={body} onChange={(e) => setBody(e.target.value)} required />
-      {err && <div className="text-sm text-red-400">{err}</div>}
-      <button disabled={busy} className="justify-self-start rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
-        {busy ? "Sending…" : "Send report"}
-      </button>
+    <form onSubmit={submit} className="pg-card grid gap-3.5">
+      <h2 className="pg-h" style={{ margin: 0 }}>
+        Report a bug
+      </h2>
+      <label className="pg-field">
+        <span className="pg-label">Title</span>
+        <input className="pg-input" placeholder="Short title" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={160} />
+      </label>
+      <label className="pg-field">
+        <span className="pg-label">What happened</span>
+        <textarea
+          className="pg-input min-h-[160px]"
+          placeholder="Steps to reproduce, what happened, what you expected, network and browser."
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          required
+        />
+      </label>
+      {err && <Msg kind="err">{err}</Msg>}
+      <div>
+        <button disabled={busy} className="pg-btn pg-btn-primary">
+          {busy ? "Sending…" : "Send report"}
+        </button>
+      </div>
     </form>
   );
 }
-
-const panel = "rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-5";
-const input = "w-full rounded-lg border border-[#1f6b4a] bg-[#06281c] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500";

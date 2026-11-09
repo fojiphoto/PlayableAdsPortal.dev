@@ -1,217 +1,838 @@
-import { useState } from "react";
-import { ContactDialog } from "./components/ContactDialog";
-const NETWORKS = [
-  "AppLovin", "Unity Ads", "Google Ads", "Meta", "Mintegral", "ironSource", "TikTok / Pangle",
-  "Vungle", "Liftoff", "Snapchat", "Moloco", "Chartboost", "DV360", "AdColony", "InMobi",
-  "Tapjoy", "Fyber", "Smadex", "BigaBid", "Kayzen",
+import { useEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { sendContact } from "./api";
+import { ChatBubble } from "./components/ChatBubble";
+import { Turnstile, useCaptchaSiteKey } from "./components/Turnstile";
+import "./landing.css";
+
+/* ── data ─────────────────────────────────────────────── */
+
+const NAV: { id: string; label: string }[] = [
+  { id: "how", label: "How it works" },
+  { id: "networks", label: "Networks" },
+  { id: "compare", label: "Why AdLab" },
+  { id: "pricing", label: "Pricing" },
+  { id: "faq", label: "FAQ" },
+  { id: "contact", label: "Contact" },
 ];
 
-function Check() {
+/** Every network the exporter supports (mirrors GET /api/networks). */
+const NETWORKS: { name: string; abbr: string; color: string }[] = [
+  { name: "AppLovin", abbr: "AL", color: "#1a73e8" },
+  { name: "Unity Ads", abbr: "U", color: "#222c37" },
+  { name: "Google Ads", abbr: "G", color: "#34a853" },
+  { name: "Meta", abbr: "M", color: "#0866ff" },
+  { name: "TikTok / Pangle", abbr: "TT", color: "#111111" },
+  { name: "Mintegral", abbr: "MT", color: "#00a6a6" },
+  { name: "ironSource", abbr: "iS", color: "#5d2de6" },
+  { name: "Vungle", abbr: "V", color: "#7a3cff" },
+  { name: "Liftoff", abbr: "LO", color: "#e2335c" },
+  { name: "DV360", abbr: "DV", color: "#1e8e3e" },
+  { name: "Snapchat", abbr: "SC", color: "#e6c200" },
+  { name: "Moloco", abbr: "MO", color: "#2741d6" },
+  { name: "Chartboost", abbr: "CB", color: "#1a9e5c" },
+  { name: "AdColony", abbr: "AC", color: "#f4511e" },
+  { name: "InMobi", abbr: "IM", color: "#2f6fe4" },
+  { name: "Tapjoy", abbr: "TJ", color: "#8e44ad" },
+  { name: "Fyber", abbr: "FY", color: "#0f9d8a" },
+  { name: "Smadex", abbr: "SX", color: "#ff6b35" },
+  { name: "BigaBid", abbr: "BB", color: "#3949ab" },
+  { name: "Kayzen", abbr: "KZ", color: "#d81b60" },
+  { name: "Remerge", abbr: "RM", color: "#00897b" },
+  { name: "Tencent Ads", abbr: "TC", color: "#1677ff" },
+  { name: "Aarki", abbr: "AK", color: "#c2185b" },
+  { name: "LINE Ads", abbr: "LN", color: "#06c755" },
+  { name: "Appreciate", abbr: "AP", color: "#6d4cff" },
+  { name: "RevX", abbr: "RX", color: "#ef6c00" },
+  { name: "Adikteev", abbr: "AD", color: "#5e35b1" },
+  { name: "YouAppi", abbr: "YA", color: "#0097a7" },
+  { name: "MRAID (generic)", abbr: "MR", color: "#546e7a" },
+];
+const NET_COUNT = NETWORKS.length;
+const ROW_1 = NETWORKS.slice(0, 15);
+const ROW_2 = NETWORKS.slice(15);
+const FAN = ["AppLovin", "Meta", "Mintegral", "Google", "TikTok", "Unity"];
+
+type PaidPlan = "starter" | "studio";
+interface PlanCard {
+  id: "free" | PaidPlan | "enterprise";
+  name: string;
+  amount: string;
+  cadence?: string;
+  blurb: string;
+  cta: string;
+  features: string[];
+  featured?: boolean;
+}
+/** Mirrors packages/server/src/plans.ts (monthly billing only). */
+const PLANS: PlanCard[] = [
+  {
+    id: "free",
+    name: "Free",
+    amount: "$0",
+    blurb: "Try the tool and export your first playable in a few minutes.",
+    cta: "Start free",
+    features: ["Unlimited Unity Ads exports", "Unity Ads only", "Device-frame preview", "No card required"],
+  },
+  {
+    id: "starter",
+    name: "Starter",
+    amount: "$49",
+    cadence: "/mo",
+    blurb: "For a solo developer shipping playables on a regular basis.",
+    cta: "Choose Starter",
+    features: ["30 exports / 30 days", `All ${NET_COUNT} ad networks`, "Custom CTA & store links", "Device-frame preview"],
+  },
+  {
+    id: "studio",
+    name: "Studio",
+    amount: "$199",
+    cadence: "/mo",
+    blurb: "For a UA team shipping across all the major networks.",
+    cta: "Choose Studio",
+    features: ["150 exports / 30 days", `All ${NET_COUNT} ad networks`, "Team workspace", "Priority support"],
+    featured: true,
+  },
+  {
+    id: "enterprise",
+    name: "Enterprise",
+    amount: "Custom",
+    blurb: "Unlimited volume, custom network ordering and an SLA.",
+    cta: "Contact sales",
+    features: ["Unlimited exports", "All networks", "Custom network ordering", "Dedicated support"],
+  },
+];
+
+const COMPARE: { feat: string; us: string; them: string; bad: boolean; hl?: boolean }[] = [
+  { feat: "Workflow", us: "Unity plugin or HTML5 upload", them: "Generic WebGL or third-party tools", bad: false },
+  { feat: "Typical monthly cost", us: "$0 – $199 / mo", them: "Agency or per-creative fees", bad: true, hl: true },
+  { feat: "Supported ad networks", us: `${NET_COUNT}, each packaged to spec`, them: "A standard set of networks", bad: false },
+  { feat: "Per-network size checks", us: "Every file checked against its cap", them: "Checked by hand", bad: true },
+  { feat: "Custom preloader", us: "Your own logo and loading screen", them: "No preloader branding", bad: true },
+  { feat: "Setup", us: "Upload once, export everywhere", them: "Re-export for each network", bad: true },
+  { feat: "Team access", us: "Shared workspaces with roles", them: "Files passed around by email", bad: true },
+];
+
+/** Illustrative only: about an hour of work (~$60) to hand-package and test one network export. */
+const MANUAL_COST_PER_EXPORT = 60;
+const SAVINGS: Record<PaidPlan, { name: string; price: number; exports: number }> = {
+  starter: { name: "Starter", price: 49, exports: 30 },
+  studio: { name: "Studio", price: 199, exports: 150 },
+};
+
+const FAQ: { q: string; a: string }[] = [
+  {
+    q: "What does the Unity plugin do?",
+    a: "Import the .unitypackage from your dashboard into the project you already have. From the editor you pick the scene, wire the install button, then build and upload in one step. It's included on every plan, Free too.",
+  },
+  {
+    q: "Which ad networks can I export to?",
+    a: `${NET_COUNT} today, including AppLovin, Unity Ads, Google Ads, Meta, TikTok/Pangle, Mintegral, ironSource, Vungle, Liftoff and Moloco. Each export uses that network's own CTA hook and file format: single HTML, zip or MRAID.`,
+  },
+  {
+    q: "How are file size caps handled?",
+    a: "Every export is measured against the cap of the network it's for (for example 5 MB for AppLovin, 2 MB for Meta) before you download it. If a file is over, you see it straight away instead of after a rejection.",
+  },
+  {
+    q: "Can I upload an HTML5 playable instead of a Unity build?",
+    a: "Yes. Upload a single .html file or a .zip of your playable in the dashboard and export it the same way. A zipped Unity WebGL build works too, if you'd rather not use the plugin.",
+  },
+  {
+    q: "What do I get on the Free plan?",
+    a: "Unlimited Unity Ads exports with the full device-frame preview, and no card is needed. Upgrade to Starter or Studio when you want the other networks.",
+  },
+  {
+    q: "Can my team share one account?",
+    a: "Yes. Create a workspace and invite teammates. Apps, concepts and exports are shared, and roles decide who can upload and export and who can only view. You can belong to several workspaces and switch between them.",
+  },
+];
+
+const TOPICS = ["Enterprise plan", "Pricing / volume", "Support", "Something else"];
+
+/* ── helpers ─────────────────────────────────────────── */
+
+const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+function scrollToId(id: string) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+}
+
+function anchor(id: string, after?: () => void) {
+  return (e: ReactMouseEvent) => {
+    e.preventDefault();
+    after?.();
+    scrollToId(id);
+  };
+}
+
+/** Adds `.in` once the element scrolls into view (threshold .12). */
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setShown(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((en) => en.isIntersecting)) {
+          setShown(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.12 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return [ref, shown] as const;
+}
+
+/** Counts from 0 to `target` over 900 ms (ease-out cubic) whenever `run` turns true or the target changes. */
+function useCountUp(target: number, run: boolean) {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (!run) return;
+    if (reducedMotion()) {
+      setValue(target);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / 900);
+      setValue(Math.round(target * (1 - Math.pow(1 - t, 3))));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, run]);
+  return value;
+}
+
+const usd = (n: number) => `$${n.toLocaleString("en-US")}`;
+
+/* ── icons (lucide style) ────────────────────────────── */
+
+function Icon({ children, width = 1.7 }: { children: ReactNode; width?: number }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 6 9 17l-5-5" />
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={width} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+const CheckIcon = ({ width = 3 }: { width?: number }) => (
+  <Icon width={width}>
+    <path d="M20 6 9 17l-5-5" />
+  </Icon>
+);
+const XIcon = ({ width = 2.4 }: { width?: number }) => (
+  <Icon width={width}>
+    <path d="M18 6 6 18M6 6l12 12" />
+  </Icon>
+);
+const MenuIcon = () => (
+  <Icon width={2}>
+    <path d="M4 7h16M4 12h16M4 17h16" />
+  </Icon>
+);
+const Tick = ({ sm }: { sm?: boolean }) => (
+  <span className={`lp-check${sm ? " sm" : ""}`} aria-hidden="true">
+    <CheckIcon />
+  </span>
+);
+
+/** A neutral isometric cube: "your Unity build". */
+function CubeMark() {
+  return (
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <path d="M24 4 42 14v20L24 44 6 34V14Z" fill="#222c37" />
+      <path d="M24 4 42 14 24 24 6 14Z" fill="#4b5563" />
+      <path d="M24 24v20L6 34V14Z" fill="#111827" />
+      <path d="M24 13.5 33 18.6v10.3L24 34l-9-5.1V18.6Z" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinejoin="round" />
+      <path d="M24 24v10M24 24l9-5.4M24 24l-9-5.4" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
     </svg>
   );
 }
 
-export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; onSignIn: () => void }) {
-  const [contact, setContact] = useState(false);
+function NetMark({ net }: { net: (typeof NETWORKS)[number] }) {
   return (
-    <div className="fx" style={{ background: "var(--ink)", minHeight: "100%" }}>
-      {/* nav */}
-      <nav className="fx-nav">
-        <a className="fx-logo" href="https://factorialstudio.com">
-          <img src="/logo.png" alt="Factorial Studio" style={{ width: 42, height: 42, objectFit: "contain" }} />
-          <b>FACTORIAL<em>ADLAB</em></b>
-        </a>
-        <div className="fx-nav-actions">
-          <a href="https://factorialstudio.com" className="fx-navback" style={{ color: "var(--muted)", fontWeight: 500, fontSize: ".9rem" }}>
-            ← Factorial Studio
+    <span className="lp-mark" style={{ background: net.color }} aria-hidden="true">
+      {net.abbr}
+    </span>
+  );
+}
+
+function Brand() {
+  return (
+    <>
+      <span className="lp-brand-mark">
+        <img src="/logo.png" alt="" />
+      </span>
+      <span className="lp-brand-name">
+        Factorial <b>AdLab</b>
+      </span>
+    </>
+  );
+}
+
+/* ── page ─────────────────────────────────────────────── */
+
+export function Landing({ onGetStarted, onSignIn }: { onGetStarted: () => void; onSignIn: () => void }) {
+  const [menu, setMenu] = useState(false);
+
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(false);
+    const onResize = () => window.innerWidth > 1100 && setMenu(false);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [menu]);
+
+  function choosePlan(id: PlanCard["id"]) {
+    if (id === "enterprise") {
+      scrollToId("contact");
+      return;
+    }
+    if (id === "starter" || id === "studio") {
+      try {
+        sessionStorage.setItem("adlab.pendingPlan", id);
+      } catch {
+        /* storage blocked: the plan can still be picked on the Plans page */
+      }
+    }
+    onGetStarted();
+  }
+
+  return (
+    <div className="lp">
+      <header className="lp-nav">
+        <div className="lp-nav-inner">
+          <a className="lp-brand" href="#top" onClick={anchor("top")} aria-label="Factorial AdLab, back to top">
+            <Brand />
           </a>
-          <button className="btn btn-ghost" onClick={onSignIn}>Sign in</button>
-          <button className="btn btn-gold" onClick={onGetStarted}>Get started</button>
-        </div>
-      </nav>
-
-      {/* hero */}
-      <header className="fx-hero">
-        <div className="wrap fx-hero-grid">
-          <div>
-            <span className="fx-tag">Playable ads · one build, every network</span>
-            <h1>
-              One build in.
-              <em>Every network out.</em>
-            </h1>
-            <p>
-              Factorial AdLab turns a single playable into a correct, size-checked ad for{" "}
-              <b>AppLovin, Meta, Mintegral, Unity Ads</b> and 20+ networks — the call-to-action, MRAID hooks and
-              per-network size caps handled for you.
-            </p>
-            <ul className="fx-checks">
-              <li><Check /> No manual re-exporting, no per-network guesswork</li>
-              <li><Check /> Every file checked against that network's size cap</li>
-              <li><Check /> MRAID wrapping &amp; CTA wired per network</li>
-            </ul>
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 26 }}>
-              <button className="btn btn-gold" onClick={onGetStarted}>Get started free</button>
-              <a className="btn btn-ghost" href="#how">See how it works</a>
-            </div>
+          <nav className="lp-links" aria-label="Sections">
+            {NAV.map((n) => (
+              <a key={n.id} href={`#${n.id}`} onClick={anchor(n.id)}>
+                {n.label}
+              </a>
+            ))}
+          </nav>
+          <div className="lp-nav-cta">
+            <button className="lp-btn lp-btn-ghost" onClick={onSignIn}>
+              Sign in
+            </button>
+            <button className="lp-btn lp-btn-solid" onClick={onGetStarted}>
+              Get started
+            </button>
+            <button
+              className="lp-burger"
+              aria-label={menu ? "Close menu" : "Open menu"}
+              aria-expanded={menu}
+              aria-controls="lp-sheet"
+              onClick={() => setMenu((m) => !m)}
+            >
+              {menu ? <XIcon width={2} /> : <MenuIcon />}
+            </button>
           </div>
-
-          {/* live playable-ad demos — running in mobile frames */}
-          <div className="fx-demos">
-            <div className="fx-demos-eyebrow">▶ Live playable ads</div>
-            <div className="fx-phones">
-              <div className="fx-phone">
-                <span className="fx-phone-notch" />
-                <iframe className="fx-phone-screen" src="/demos/block-blast.html" title="Block Blast playable ad" loading="lazy" />
-                <div className="fx-phone-cap"><b>Block Blast</b><span>Puzzle</span></div>
-              </div>
-              <div className="fx-phone">
-                <span className="fx-phone-notch" />
-                <iframe className="fx-phone-screen" src="/demos/snack-io.html" title="Snack.IO playable ad" loading="lazy" />
-                <div className="fx-phone-cap"><b>Snack.IO</b><span>Arcade .io</span></div>
-              </div>
-            </div>
+        </div>
+        <div className="lp-sheet" id="lp-sheet" hidden={!menu}>
+          {NAV.map((n) => (
+            <a key={n.id} href={`#${n.id}`} onClick={anchor(n.id, () => setMenu(false))}>
+              {n.label}
+            </a>
+          ))}
+          <div className="lp-sheet-cta">
+            <button className="lp-btn lp-btn-outline lp-btn-lg" onClick={onSignIn}>
+              Sign in
+            </button>
+            <button className="lp-btn lp-btn-solid lp-btn-lg" onClick={onGetStarted}>
+              Get started
+            </button>
           </div>
         </div>
       </header>
 
-      {/* how it works */}
-      <section className="fx-section cream" id="how">
-        <div className="wrap">
-          <div className="fx-eyebrow">How it works</div>
-          <h2 className="disp">From your Unity project to <em>every network</em> in three steps</h2>
-          <p className="fx-lead">Sign up, verify your company domain (instant with a work email), then:</p>
-          <div className="fx-steps">
-            <div className="fx-step"><span className="n">1</span><div><h4>Add the plugin to Unity</h4><p>Download the Factorial AdLab package from your dashboard and import it into the project you already have. Nothing to rewrite.</p></div></div>
-            <div className="fx-step"><span className="n">2</span><div><h4>Build your playable</h4><p>Point the install button at <b>Playable.InstallFullGame()</b>, pick the scene, then build or capture and upload — right from the editor.</p></div></div>
-            <div className="fx-step"><span className="n">3</span><div><h4>Export every network</h4><p>Tick the networks, preview on a phone frame, and download one checked, correctly wrapped file per network. HTML5 builds work too — just upload the zip.</p></div></div>
-          </div>
-        </div>
-      </section>
+      <main>
+        <Hero onGetStarted={onGetStarted} />
+        <How />
+        <Networks />
+        <Pricing onChoose={choosePlan} />
+        <Compare />
+        <Savings onGetStarted={onGetStarted} />
+        <Faq />
+        <Contact />
+        <section className="lp-cta-band">
+          <h2 className="lp-h2">Ship your next playable to every network today</h2>
+          <p className="lp-sub">Start on the free plan. No card needed to try the whole tool.</p>
+          <button className="lp-btn lp-btn-white lp-btn-lg" onClick={onGetStarted}>
+            Get started free
+          </button>
+        </section>
+      </main>
 
-      {/* networks */}
-      <section className="fx-section">
-        <div className="wrap">
-          <div className="fx-eyebrow">Networks</div>
-          <h2 className="disp">One export button. <em>Every destination.</em></h2>
-          <p className="fx-lead">Each export is packaged the way that network's review team expects — single HTML, zip, or MRAID.</p>
-          <div className="fx-netgrid">
-            {NETWORKS.map((n) => <span className="fx-chip" key={n}>{n}</span>)}
-            <span className="fx-chip" style={{ color: "var(--gold)", borderColor: "var(--gold2)" }}>+ more</span>
-          </div>
+      <footer className="lp-footer">
+        <div className="lp-footer-inner">
+          <a className="lp-brand" href="#top" onClick={anchor("top")}>
+            <Brand />
+          </a>
+          <nav className="lp-footer-links" aria-label="Footer">
+            {NAV.filter((n) => n.id !== "compare").map((n) => (
+              <a key={n.id} href={`#${n.id}`} onClick={anchor(n.id)}>
+                {n.label}
+              </a>
+            ))}
+            <button className="lp-linklike" onClick={onSignIn}>
+              Sign in
+            </button>
+          </nav>
         </div>
-      </section>
-
-      {/* pricing */}
-      <section className="fx-section cream" id="pricing">
-        <div className="wrap">
-          <div className="fx-eyebrow">Pricing</div>
-          <h2 className="disp">Plans that scale with your <em>export volume</em></h2>
-          <p className="fx-lead">Every export counts one network. Start free, upgrade when you ship more.</p>
-          <div className="fx-pricing">
-            <div className="fx-plan">
-              <h3>Free</h3><div className="price">$0</div><div className="per">to try it out</div>
-              <ul><li>Unlimited Unity Ads exports</li><li>Device-frame preview</li><li>No card required</li></ul>
-              <button className="btn btn-ghost" onClick={onGetStarted}>Start free</button>
-            </div>
-            <div className="fx-plan">
-              <h3>Starter</h3><div className="price">$49</div><div className="per">/ month</div>
-              <ul><li>30 exports / 30 days</li><li>All 20+ networks</li><li>Custom CTA &amp; store links</li></ul>
-              <button className="btn btn-ghost" onClick={onGetStarted}>Choose Starter</button>
-            </div>
-            <div className="fx-plan pop">
-              <span className="fx-pop-tag">Most popular</span>
-              <h3>Studio</h3><div className="price">$199</div><div className="per">/ month</div>
-              <ul><li>150 exports / 30 days</li><li>All networks</li><li>Team workspace</li><li>Priority support</li></ul>
-              <button className="btn btn-gold" onClick={onGetStarted}>Choose Studio</button>
-            </div>
-            <div className="fx-plan">
-              <h3>Enterprise</h3><div className="price">Custom</div><div className="per">volume &amp; SLA</div>
-              <ul><li>Unlimited exports</li><li>Custom network ordering</li><li>Dedicated support</li></ul>
-              <button className="btn btn-ghost" onClick={() => setContact(true)}>Contact sales</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* comparison */}
-      <section className="fx-section">
-        <div className="wrap">
-          <div className="fx-eyebrow">Why AdLab</div>
-          <h2 className="disp">Stop re-exporting <em>by hand</em></h2>
-          <div className="fx-vs">
-            <div className="fx-vs-col fx-vs-a">
-              <h3>Doing it manually</h3>
-              <ul>
-                <li>✗ Re-export and re-package for every network</li>
-                <li>✗ Guess each network's size cap &amp; format</li>
-                <li>✗ Wire MRAID / CTA by hand, hope it passes review</li>
-                <li>✗ Rejections after you've already shipped</li>
-              </ul>
-            </div>
-            <div className="fx-vs-col fx-vs-b">
-              <h3>Factorial AdLab</h3>
-              <ul>
-                <li>✓ Upload once, export to every network</li>
-                <li>✓ Every file checked against its cap before you ship</li>
-                <li>✓ MRAID + CTA wired per network automatically</li>
-                <li>✓ Validated output, device-frame preview, one-click download</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* faq */}
-      <section className="fx-section cream">
-        <div className="wrap">
-          <div className="fx-eyebrow">Questions</div>
-          <h2 className="disp">Everything you need <em>before you start</em></h2>
-          <div className="fx-faq">
-            <div className="fx-fq"><h4>What exactly does Factorial AdLab do?</h4><p>You upload one HTML5 playable and pick your networks. AdLab inlines it into a self-contained file, wires the call-to-action, injects MRAID where the network needs it, and checks every file against that network's size cap — one correct package per network, out.</p></div>
-            <div className="fx-fq"><h4>Which ad networks are supported?</h4><p>AppLovin, Unity Ads, Google, Meta, TikTok/Pangle, Mintegral, ironSource, Vungle, Liftoff, Snapchat, Moloco, Remerge, LINE and more — 29 today, each wired to its own CTA hook (ExitApi, FbPlayableAd, dapi, MRAID…) and checked against its size cap.</p></div>
-            <div className="fx-fq"><h4>Do I need a special plugin?</h4><p>No. Any HTML5 playable (a .zip or a single .html) works. Upload it in the dashboard and export — a game-engine plugin is on the way for one-click build &amp; upload.</p></div>
-            <div className="fx-fq"><h4>Will my exports pass each network's validator?</h4><p>That's the point of the pipeline. Exports are shaped to match what each network's review tool accepts — size, format, orientation and the callbacks it requires.</p></div>
-            <div className="fx-fq"><h4>Can I try it before paying?</h4><p>Yes — sign up free and export unlimited Unity Ads playables, no card required.</p></div>
-          </div>
-        </div>
-      </section>
-
-      {/* cta */}
-      <section className="fx-cta">
-        <div className="wrap">
-          <h2>Ship your next playable to <em>every network</em></h2>
-          <p>Start free — no card required to explore the tool.</p>
-          <div className="row">
-            <button className="btn btn-gold" onClick={onGetStarted}>Get started free</button>
-            <button className="btn btn-ghost" onClick={onSignIn}>Sign in</button>
-          </div>
-        </div>
-      </section>
-
-      {/* footer */}
-      <footer className="fx-footer">
-        <div className="wrap">
-          <div className="fl">
-            <a href="https://factorialstudio.com">Factorial Studio</a>
-            <a href="#how">How it works</a>
-            <a href="#pricing">Pricing</a>
-            <a href="https://factorialstudio.com/development/">Development</a>
-            <a href="https://factorialstudio.com/marketing/">Marketing</a>
-          </div>
-          <p style={{ marginBottom: 10 }}>
-            <button onClick={() => setContact(true)} style={{ color: "var(--gold)", fontWeight: 600, background: "none", border: 0, cursor: "pointer", font: "inherit", padding: 0 }}>Send us a message</button>
-            <span style={{ opacity: 0.45, margin: "0 10px" }}>·</span>
-            <a href="mailto:contact@factorialstudio.com" style={{ color: "var(--gold)", fontWeight: 600 }}>contact@factorialstudio.com</a>
-            <span style={{ opacity: 0.45, margin: "0 10px" }}>·</span>
-            <a href="tel:+923224695140" style={{ color: "var(--gold)", fontWeight: 600 }}>+92 322 469 5140</a>
-          </p>
-          <p>© 2026 Factorial Studio Private Limited · Lahore, Pakistan · Factorial AdLab</p>
+        <div className="lp-footer-legal">
+          © {new Date().getFullYear()} Factorial AdLab
+          <span className="lp-footer-disclaimer">
+            Network names are trademarks of their respective owners and are used only to describe export compatibility. Factorial AdLab
+            isn't affiliated with or endorsed by any of them.
+          </span>
         </div>
       </footer>
-      {contact && <ContactDialog onClose={() => setContact(false)} topic="Enterprise / volume enquiry" />}
+
+      <ChatBubble />
     </div>
+  );
+}
+
+/* ── sections ─────────────────────────────────────────── */
+
+function Hero({ onGetStarted }: { onGetStarted: () => void }) {
+  return (
+    <section id="top" className="lp-hero">
+      <div className="lp-hero-copy">
+        <span className="lp-eyebrow">Playable ads · one build, every network</span>
+        <h1 className="lp-h1">
+          One Unity build.
+          <br />
+          <span className="lp-grad">Every ad network,</span> exported clean.
+        </h1>
+        <p className="lp-lead">
+          Factorial AdLab turns a single Unity build into a size-checked, correctly wrapped playable for each network you ship to, with the
+          CTA, store links and MRAID calls already in place.
+        </p>
+        <div className="lp-hero-cta">
+          <button className="lp-btn lp-btn-solid lp-btn-lg" onClick={onGetStarted}>
+            Get started free
+          </button>
+          <a className="lp-btn lp-btn-outline lp-btn-lg" href="#how" onClick={anchor("how")}>
+            See how it works
+          </a>
+        </div>
+        <ul className="lp-hero-points">
+          <li>
+            <Tick /> Unity plugin included on every plan
+          </li>
+          <li>
+            <Tick /> Every file checked against its network's cap
+          </li>
+          <li>
+            <Tick /> Packaged the way each network's review expects
+          </li>
+        </ul>
+      </div>
+
+      <div className="lp-hero-art">
+        <div className="fan">
+          <div className="fan-source" aria-hidden="true">
+            <CubeMark />
+            <span className="fan-source-label">Your Unity build</span>
+          </div>
+          <div className="fan-out" aria-hidden="true">
+            {FAN.map((n, i) => (
+              <span key={n} className="fan-chip" style={{ ["--i" as string]: i }}>
+                {n}
+              </span>
+            ))}
+          </div>
+          <div className="fan-phone">
+            <span className="fan-phone-notch" aria-hidden="true" />
+            <div className="fan-phone-screen">
+              <iframe src="/adlab-demo.html" title="Demo playable" loading="lazy" sandbox="allow-scripts" tabIndex={-1} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SectionHead({ title, sub, left }: { title: ReactNode; sub: ReactNode; left?: boolean }) {
+  return (
+    <div className={`lp-section-head${left ? " left" : ""}`}>
+      <h2 className="lp-h2">{title}</h2>
+      <p className="lp-sub">{sub}</p>
+    </div>
+  );
+}
+
+function How() {
+  const [ref, shown] = useReveal<HTMLElement>();
+  return (
+    <section id="how" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
+      <SectionHead title="From Unity build to a shippable ad in three steps" sub="No re-exporting by hand and no guessing what each network wants." />
+      <ol className="lp-steps">
+        <li className="lp-step">
+          <div className="lp-step-n">1</div>
+          <h3>Add the plugin</h3>
+          <p>Import the AdLab package into the Unity project you already have. Nothing in your game needs rewriting.</p>
+        </li>
+        <li className="lp-step">
+          <div className="lp-step-n">2</div>
+          <h3>Mark the playable</h3>
+          <p>Choose the scene, the install button and the end card, check it in a phone frame, then build and upload from the editor.</p>
+        </li>
+        <li className="lp-step">
+          <div className="lp-step-n">3</div>
+          <h3>Export from the dashboard</h3>
+          <p>Tick the networks you want and download one correctly wrapped, size-checked and named file for each.</p>
+        </li>
+      </ol>
+      <div className="lp-who">
+        <div className="lp-who-card">
+          <h3>The plugin</h3>
+          <p>Sits inside the Unity editor and builds a lean playable runtime, rather than shipping a full general-purpose WebGL player.</p>
+        </div>
+        <div className="lp-who-card">
+          <h3>The dashboard</h3>
+          <p>Apps, concepts and creatives in one place, with per-network checks, size warnings, analytics and shared team workspaces.</p>
+        </div>
+        <div className="lp-who-card">
+          <h3>Who it's for</h3>
+          <p>User-acquisition teams, playable ad studios and indie developers who want their game in front of more players.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function MarqueeRow({ nets, reverse }: { nets: typeof NETWORKS; reverse?: boolean }) {
+  return (
+    <div className="lp-marquee-row">
+      <ul className={`lp-marquee-track${reverse ? " reverse" : ""}`} style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        {[...nets, ...nets].map((n, i) => (
+          <li key={i} className={`lp-marquee-chip${i >= nets.length ? " dup" : ""}`} aria-hidden={i >= nets.length || undefined}>
+            <NetMark net={n} />
+            {n.name}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Networks() {
+  const [ref, shown] = useReveal<HTMLElement>();
+  return (
+    <section id="networks" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
+      <SectionHead title={`One export button. ${NET_COUNT} destinations.`} sub="Every major playable ad network, packaged the way each one expects." />
+      <div className="lp-marquee">
+        <MarqueeRow nets={ROW_1} />
+        <MarqueeRow nets={ROW_2} reverse />
+      </div>
+    </section>
+  );
+}
+
+function Pricing({ onChoose }: { onChoose: (id: PlanCard["id"]) => void }) {
+  const [ref, shown] = useReveal<HTMLElement>();
+  return (
+    <section id="pricing" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
+      <SectionHead
+        title="Plans that scale with your export volume"
+        sub="Each export counts one network. Free includes unlimited Unity Ads exports, and paid quotas reset every 30 days. Billed monthly."
+      />
+      <div className="lp-plan-grid">
+        {PLANS.map((p) => (
+          <div key={p.id} className={`lp-plan${p.featured ? " featured" : ""}`}>
+            {p.featured && <span className="lp-plan-tag">Most popular</span>}
+            <h3 className="lp-plan-name">{p.name}</h3>
+            <div className="lp-plan-price">
+              <span className="lp-plan-amt">{p.amount}</span>
+              {p.cadence && <span className="lp-plan-cad">{p.cadence}</span>}
+            </div>
+            <p className="lp-plan-blurb">{p.blurb}</p>
+            <button className={`lp-btn lp-btn-lg lp-plan-cta ${p.featured ? "lp-btn-solid" : "lp-btn-outline"}`} onClick={() => onChoose(p.id)}>
+              {p.cta}
+            </button>
+            <ul className="lp-plan-feats">
+              {p.features.map((f) => (
+                <li key={f}>
+                  <Tick sm /> {f}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Compare() {
+  const [ref, shown] = useReveal<HTMLElement>();
+  return (
+    <section id="compare" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
+      <SectionHead title="Why choose Factorial AdLab" sub="A side-by-side look at AdLab and the usual export routes." />
+      <div className="lp-cmp-table" role="table" aria-label="Feature comparison">
+        <div className="lp-cmp-head" role="row">
+          <div className="lp-cmp-feat" role="columnheader">
+            Features
+          </div>
+          <div className="lp-cmp-col lp-cmp-us" role="columnheader">
+            <span className="lp-cmp-brand">
+              <img src="/logo.png" alt="" />
+              <span>
+                Factorial <b>AdLab</b>
+              </span>
+            </span>
+            <span className="lp-cmp-reco">Recommended</span>
+          </div>
+          <div className="lp-cmp-col lp-cmp-them" role="columnheader">
+            Other playable solutions
+          </div>
+        </div>
+        {COMPARE.map((r) => (
+          <div key={r.feat} className={`lp-cmp-row${r.hl ? " hl" : ""}`} role="row">
+            <div className="lp-cmp-feat" role="rowheader">
+              {r.feat}
+            </div>
+            <div className="lp-cmp-col lp-cmp-us" role="cell">
+              <span className="lp-cmp-yes">
+                <CheckIcon width={2.4} />
+              </span>
+              <span>
+                <span className="lp-cmp-tag">AdLab: </span>
+                {r.us}
+              </span>
+            </div>
+            <div className="lp-cmp-col lp-cmp-them" role="cell">
+              <span className={r.bad ? "lp-cmp-no" : "lp-cmp-yes"}>{r.bad ? <XIcon /> : <CheckIcon width={2.4} />}</span>
+              <span>
+                <span className="lp-cmp-tag">Others: </span>
+                {r.them}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Savings({ onGetStarted }: { onGetStarted: () => void }) {
+  const [ref, shown] = useReveal<HTMLElement>();
+  const [plan, setPlan] = useState<PaidPlan>("studio");
+  const s = SAVINGS[plan];
+  const yearly = (s.exports * MANUAL_COST_PER_EXPORT - s.price) * 12;
+  const counted = useCountUp(yearly, shown);
+  return (
+    <section id="savings" ref={ref} className={`lp-section lp-reveal${shown ? " in" : ""}`}>
+      <SectionHead
+        title="Cut costs. Do more with less."
+        sub={`Illustrative: about an hour ($${MANUAL_COST_PER_EXPORT}) to package and test each export by hand.`}
+      />
+      <div className="lp-cost-wrap">
+        <div className="lp-cost-left">
+          <div className="lp-cost-tabs" role="tablist" aria-label="Plan">
+            {(Object.keys(SAVINGS) as PaidPlan[]).map((id) => (
+              <button key={id} role="tab" aria-selected={plan === id} className={`lp-cost-tab${plan === id ? " on" : ""}`} onClick={() => setPlan(id)}>
+                {SAVINGS[id].name}
+              </button>
+            ))}
+          </div>
+          <p className="lp-cost-netlabel">Networks you can use:</p>
+          <ul className="lp-cost-nets">
+            {NETWORKS.slice(0, 20).map((n) => (
+              <li key={n.name} className="lp-cost-net">
+                <span className="lp-cost-net-tick" aria-hidden="true">
+                  <CheckIcon />
+                </span>
+                <NetMark net={n} />
+                <span className="lp-cost-net-name">{n.name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="lp-cost-card" key={plan} role="tabpanel">
+          <span className="lp-cost-card-mark" aria-hidden="true">
+            <img src="/logo.png" alt="" />
+          </span>
+          <div className="lp-cost-headline">{NET_COUNT} Networks</div>
+          <div className="lp-cost-builds">
+            {s.exports} exports / 30 days <span>(about {(s.exports * 12).toLocaleString("en-US")} a year)</span>
+          </div>
+          <p className="lp-cost-note">
+            Every one of those exports is wrapped, size-checked and named for its network automatically, so nobody spends the afternoon
+            re-packaging the same build.
+          </p>
+          <div className="lp-cost-save" aria-live="polite">
+            Save {usd(counted)} / year
+          </div>
+          <p className="lp-cost-sub">
+            On the {s.name} plan ({usd(s.price)}/mo), compared with packaging every export by hand.
+          </p>
+          <button className="lp-btn lp-btn-solid lp-btn-lg lp-cost-cta" onClick={onGetStarted}>
+            Start saving with Factorial AdLab today
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Faq() {
+  const [ref, shown] = useReveal<HTMLElement>();
+  const [open, setOpen] = useState<number | null>(0);
+  return (
+    <section id="faq" ref={ref} className={`lp-section lp-faq lp-reveal${shown ? " in" : ""}`}>
+      <SectionHead title="Questions & Answers" sub="Everything you need to know before you start." />
+      <div className="lp-faq-list">
+        {FAQ.map((f, i) => {
+          const isOpen = open === i;
+          return (
+            <div key={f.q} className={`lp-faq-item${isOpen ? " open" : ""}`}>
+              <button className="lp-faq-q" aria-expanded={isOpen} aria-controls={`lp-faq-${i}`} onClick={() => setOpen(isOpen ? null : i)}>
+                <span>{f.q}</span>
+                <span className="lp-faq-ico" aria-hidden="true">
+                  {isOpen ? "–" : "+"}
+                </span>
+              </button>
+              <div className="lp-faq-a" id={`lp-faq-${i}`} role="region" aria-hidden={!isOpen}>
+                <p>{f.a}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function Contact() {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [company, setCompany] = useState("");
+  const [topic, setTopic] = useState(TOPICS[0]);
+  const [message, setMessage] = useState("");
+  const [website, setWebsite] = useState(""); // honeypot
+  const [busy, setBusy] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const siteKey = useCaptchaSiteKey();
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaRun, setCaptchaRun] = useState(0);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (message.trim().length < 10) {
+      setErr("Please tell us a little more (at least 10 characters).");
+      return;
+    }
+    if (siteKey && !captcha) {
+      setErr("Please complete the security check.");
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      await sendContact({
+        name: name.trim() || email.trim(),
+        email: email.trim(),
+        company: company.trim() || undefined,
+        message: `Topic: ${topic}\n\n${message.trim()}`,
+        website,
+        turnstileToken: captcha ?? undefined,
+      });
+      setSentTo(email.trim());
+    } catch (er) {
+      setErr((er as Error).message);
+      if (siteKey) setCaptchaRun((n) => n + 1); // tokens are single-use
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section id="contact" className="lp-section">
+      <SectionHead left title="Talk to us" sub="Enterprise plans, volume pricing or just a question: send us a note and we'll get back to you." />
+      <div className="lp-contact-wrap">
+        {sentTo ? (
+          <div className="lp-contact-done" role="status">
+            <span className="lp-check" aria-hidden="true">
+              <CheckIcon />
+            </span>
+            <strong>Thanks, we've got it.</strong>
+            <span>We'll reply to {sentTo} shortly.</span>
+          </div>
+        ) : (
+          <form className="lp-contact-form" onSubmit={submit} noValidate={false}>
+            <div className="lp-cf-row">
+              <label>
+                Name
+                <input autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} />
+              </label>
+              <label>
+                <span>
+                  Work email <span className="lp-req">*</span>
+                </span>
+                <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} maxLength={200} />
+              </label>
+            </div>
+            <div className="lp-cf-row">
+              <label>
+                Company
+                <input autoComplete="organization" value={company} onChange={(e) => setCompany(e.target.value)} maxLength={160} />
+              </label>
+              <label>
+                Topic
+                <select value={topic} onChange={(e) => setTopic(e.target.value)}>
+                  {TOPICS.map((t) => (
+                    <option key={t}>{t}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label>
+              <span>
+                How can we help? <span className="lp-req">*</span>
+              </span>
+              <textarea
+                rows={5}
+                required
+                minLength={10}
+                placeholder="Which networks you ship to, roughly how many exports a month, anything else we should know."
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+              />
+            </label>
+            <input className="lp-hp" tabIndex={-1} autoComplete="off" aria-hidden="true" value={website} onChange={(e) => setWebsite(e.target.value)} />
+            {err && <p className="lp-cf-err">{err}</p>}
+            {siteKey && (
+              <div className="lp-captcha">
+                <Turnstile siteKey={siteKey} action="contact" onToken={setCaptcha} resetSignal={captchaRun} />
+              </div>
+            )}
+            <button type="submit" className="lp-btn lp-btn-solid lp-btn-lg lp-btn-block" disabled={busy}>
+              {busy ? "Sending…" : "Send message"}
+            </button>
+          </form>
+        )}
+      </div>
+    </section>
   );
 }

@@ -45,6 +45,9 @@ export interface App {
   kitId?: string | null;
   createdAt: string;
   conceptCount?: number;
+  /** playables (creatives) and exports under this app (library list only) */
+  creativeCount?: number;
+  exportCount?: number;
 }
 
 export interface Concept {

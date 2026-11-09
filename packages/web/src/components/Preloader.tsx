@@ -12,10 +12,9 @@ import {
   updateKit,
 } from "../api";
 import type { Kit, KitDraft, KitsState, PreloaderTemplate } from "../types";
+import { Icon } from "./icons";
+import { Loading, Msg, PageHead } from "./pageKit";
 
-const panel = "rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-5";
-const label = "mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400";
-const input = "w-full rounded-lg border border-[#1f6b4a] bg-[#06281c] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500 disabled:opacity-60";
 const MAX_LOGO = 512 * 1024;
 const NONE = "none";
 
@@ -65,7 +64,7 @@ function Phone({ html, scale = 1, title }: { html: string | null; scale?: number
   const b = compact ? 3 : 8;
   return (
     <div
-      className={`overflow-hidden border-[#1b5540] bg-black ${compact ? "rounded-lg" : "rounded-[1.6rem]"}`}
+      className={`pg-phone ${compact ? "rounded-lg" : "rounded-[1.6rem]"}`}
       style={{ width: w * scale + 2 * b, height: h * scale + 2 * b, borderWidth: b }}
     >
       {html ? (
@@ -77,7 +76,7 @@ function Phone({ html, scale = 1, title }: { html: string | null; scale?: number
           style={{ width: w, height: h, transform: `scale(${scale})` }}
         />
       ) : (
-        <div className="h-full w-full animate-pulse bg-[#0a3a28]" />
+        <div className="h-full w-full animate-pulse bg-ink-700" />
       )}
     </div>
   );
@@ -189,166 +188,231 @@ export function Preloader() {
 
   const isDefault = !!savedId && state?.defaultKitId === savedId;
 
+  const templateName = (id: string) => templates.find((t) => t.id === id)?.name ?? id;
+  const atLimit = !!state && state.kits.length >= state.limit;
+
   return (
-    <div className="mx-auto max-w-6xl">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="mb-1 text-2xl font-semibold text-slate-100">Preloader kits</h1>
-          <p className="text-sm text-slate-400">
-            Loading screens shown over your playables while they load. Pick a template, brand it, then choose which apps and concepts use it.
-          </p>
-        </div>
-        {canEdit && (
-          <button
-            onClick={newKit}
-            disabled={!!state && state.kits.length >= state.limit}
-            className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40"
-          >
-            New kit
-          </button>
-        )}
-      </div>
+    <div>
+      <PageHead
+        icon={<Icon.Image />}
+        title="Customize Preloader"
+        sub="The loading screen shown over your playables while they load. Pick a template, brand it, then choose which apps and concepts use it."
+        actions={
+          canEdit && (
+            <button onClick={newKit} disabled={atLimit} className="pg-btn pg-btn-primary" title={atLimit ? `Up to ${state?.limit} kits` : undefined}>
+              <Icon.Plus />
+              New kit
+            </button>
+          )
+        }
+      />
 
       {state && !canEdit && (
-        <div className="mb-4 rounded-lg border border-[#1f6b4a] bg-[#0a3a28]/40 px-4 py-2 text-sm text-slate-300">
-          Only workspace admins can edit kits. {state.canAssign ? "You can still choose which kit each app and concept uses below." : ""}
-        </div>
+        <Msg kind="ok">Only workspace admins can edit kits. {state.canAssign ? "You can still choose which kit each app and concept uses below." : ""}</Msg>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[220px_1fr_auto]">
-        {/* kit list */}
-        <aside className="grid content-start gap-1.5">
-          {state?.kits.length === 0 && selected !== "new" && (
-            <div className="rounded-lg border border-dashed border-[#1f6b4a] p-4 text-sm text-slate-400">
-              No kits yet. {canEdit ? "Create one to brand your exports." : "Ask an admin to create one."}
-            </div>
-          )}
-          {state?.kits.map((k) => (
-            <button
-              key={k.id}
-              onClick={() => openKit(k)}
-              className={`rounded-lg border px-3 py-2 text-left text-sm ${selected === k.id ? "border-amber-500 bg-amber-500/10" : "border-[#1b5540] hover:border-[#7cb342]"}`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-slate-100">{k.name}</span>
-                {state.defaultKitId === k.id && <span className="shrink-0 rounded bg-amber-500 px-1.5 text-[10px] font-bold text-black">DEFAULT</span>}
-              </div>
-              <div className="text-[11px] text-slate-500">
-                {templates.find((t) => t.id === k.template)?.name ?? k.template}
-                {k.usedBy ? ` · used ${k.usedBy}×` : ""}
-              </div>
-            </button>
-          ))}
-          {selected === "new" && <div className="rounded-lg border border-amber-500 bg-amber-500/10 px-3 py-2 text-sm text-slate-100">{draft?.name || "New kit"} (unsaved)</div>}
-        </aside>
-
-        {/* editor */}
-        {draft ? (
-          <div className={`${panel} grid content-start gap-5`}>
-            <div>
-              <label className={label}>Kit name</label>
-              <input className={input} value={draft.name} maxLength={60} disabled={!canEdit} onChange={(e) => set({ name: e.target.value })} />
-            </div>
-
-            <div>
-              <label className={label}>Template</label>
-              <div className="flex flex-wrap gap-2">
-                {templates.map((t) => (
-                  <TemplateThumb key={t.id} t={t} base={galleryBase} kitId={savedId} active={draft.template === t.id} disabled={!canEdit} onPick={() => set({ template: t.id })} />
-                ))}
-              </div>
-              {tpl && <p className="mt-2 text-xs text-slate-400">{tpl.description}</p>}
-            </div>
-
-            <div>
-              <label className={label}>{tpl?.imageRole === "background" ? "Splash image (fills the screen)" : "Logo"}</label>
-              <div className="flex flex-wrap items-center gap-3">
-                {shownLogo ? (
-                  <img src={shownLogo} alt="Current image" className="h-10 w-10 rounded-md border border-[#1f6b4a] bg-black/30 object-contain" />
-                ) : (
-                  <span className="flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-[#1f6b4a] text-[10px] text-slate-500">none</span>
-                )}
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
-                  disabled={!canEdit}
-                  onChange={(e) => pickLogo(e.target.files?.[0])}
-                  className="text-sm text-slate-300 file:mr-3 file:rounded-md file:border-0 file:bg-[#123f2d] file:px-3 file:py-1.5 file:text-slate-100"
-                />
-                {shownLogo && canEdit && (
-                  <button onClick={clearLogo} className="text-xs text-red-400 hover:underline">
-                    Remove image
-                  </button>
-                )}
-              </div>
-              <p className="mt-1 text-[11px] text-slate-500">PNG, JPEG, GIF, WebP or SVG, up to 512 KB. It is inlined into every export, so smaller is better.</p>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <ColorField label="Background" value={draft.bg} fallback="#0b1220" disabled={!canEdit} onChange={(v) => set({ bg: v })} />
-              <ColorField label="Accent (bar, spinner)" value={draft.accent} fallback="#ffffff" auto disabled={!canEdit} onChange={(v) => set({ accent: v })} />
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
-              <div>
-                <label className={label}>Tagline (optional)</label>
-                <input className={input} value={draft.text} maxLength={60} placeholder="Loading…" disabled={!canEdit} onChange={(e) => set({ text: e.target.value })} />
-              </div>
-              <label className="flex items-center gap-2 pb-2 text-sm text-slate-200">
-                <input type="checkbox" checked={draft.showPercent} disabled={!canEdit} onChange={(e) => set({ showPercent: e.target.checked })} className="accent-amber-500" />
-                Show percentage
-              </label>
-            </div>
-
-            {msg && <div className={`text-sm ${msg.ok ? "text-emerald-400" : "text-red-400"}`}>{msg.text}</div>}
-
-            {canEdit && (
-              <div className="flex flex-wrap items-center gap-3">
-                <button onClick={() => void save()} disabled={busy || !draft.name.trim()} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
-                  {busy ? "Saving…" : savedId ? "Save kit" : "Create kit"}
-                </button>
-                {savedId && (
-                  <>
-                    <button
-                      onClick={() => void act(() => setDefaultKit(isDefault ? null : savedId), savedId, isDefault ? "No workspace default now. Exports get a preloader only where an app or concept picks one." : "Now the workspace default.")}
-                      disabled={busy}
-                      className="rounded-lg border border-[#1f6b4a] px-3 py-2 text-sm text-slate-200 hover:border-[#7cb342] disabled:opacity-40"
-                    >
-                      {isDefault ? "Unset default" : "Make default"}
-                    </button>
-                    <button onClick={() => void act(async () => (await duplicateKit(savedId)).id)} disabled={busy} className="text-sm text-slate-300 hover:text-amber-300 hover:underline disabled:opacity-40">
-                      Duplicate
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (confirm(`Delete "${draft.name}"? Apps and concepts using it fall back to the workspace default.`)) void act(() => deleteKit(savedId), null, "Kit deleted.");
-                      }}
-                      disabled={busy}
-                      className="text-sm text-red-400 hover:underline disabled:opacity-40"
-                    >
-                      Delete
-                    </button>
-                  </>
-                )}
-              </div>
+      <div className="pg-stack">
+        {/* kit library */}
+        <section className="pg-card">
+          <div className="pg-card-head">
+            <h2 className="pg-h">Your preloaders</h2>
+            {state && (
+              <span className="pg-count">
+                {state.kits.length} of {state.limit}
+              </span>
             )}
           </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-[#1f6b4a] p-8 text-center text-sm text-slate-400">
-            {canEdit ? "Pick a kit, or create a new one." : "Pick a kit to see it."}
-          </div>
-        )}
+          {!state ? (
+            <Loading />
+          ) : state.kits.length === 0 && selected !== "new" ? (
+            <p className="pg-p" style={{ margin: 0 }}>
+              No preloaders yet. {canEdit ? "Create one to brand your exports." : "Ask an admin to create one."}
+            </p>
+          ) : (
+            <ul className="pre-grid">
+              {state.kits.map((k) => (
+                <li key={k.id}>
+                  <button onClick={() => openKit(k)} className={`pre-card${selected === k.id ? " on" : ""}`} aria-pressed={selected === k.id}>
+                    <KitThumb bg={k.bg} logo={k.logoDataUri} cover={templates.find((t) => t.id === k.template)?.imageRole === "background"} />
+                    {state.defaultKitId === k.id && <span className="pre-badge">DEFAULT</span>}
+                    <span className="pre-meta">
+                      <span className="pre-name">{k.name}</span>
+                      <span className="pre-size">
+                        {templateName(k.template)}
+                        {k.usedBy ? ` · used ${k.usedBy}×` : ""}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {selected === "new" && draft && (
+                <li>
+                  <div className="pre-card on" style={{ cursor: "default" }}>
+                    <KitThumb bg={draft.bg} logo={shownLogo} cover={tpl?.imageRole === "background"} />
+                    <span className="pre-badge">NEW</span>
+                    <span className="pre-meta">
+                      <span className="pre-name">{draft.name || "New kit"}</span>
+                      <span className="pre-size">Not saved yet</span>
+                    </span>
+                  </div>
+                </li>
+              )}
+              {canEdit && selected !== "new" && (
+                <li>
+                  <button onClick={newKit} disabled={atLimit} className="pre-card pre-new" style={{ minHeight: 150, height: "100%" }}>
+                    <span className="grid place-items-center gap-1.5">
+                      <Icon.Plus />
+                      New kit
+                    </span>
+                  </button>
+                </li>
+              )}
+            </ul>
+          )}
+        </section>
 
-        {/* live preview */}
-        <div className="flex flex-col items-center">
-          <span className="mb-3 text-sm text-slate-400">Preview (as exported)</span>
-          <Phone html={draft ? previewHtml : null} title="preloader preview" />
+        <div className="grid gap-[18px] lg:grid-cols-[minmax(0,1fr)_auto]">
+          {/* editor */}
+          {draft ? (
+            <section className="pg-card grid content-start gap-5">
+              <div className="pg-card-head" style={{ marginBottom: 0 }}>
+                <h2 className="pg-h">{savedId ? "Edit preloader" : "New preloader"}</h2>
+                {isDefault && <span className="pg-tag brand">Workspace default</span>}
+              </div>
+
+              <label className="pg-field">
+                <span className="pg-label">Name</span>
+                <input className="pg-input" value={draft.name} maxLength={60} placeholder="Summer sale splash" disabled={!canEdit} onChange={(e) => set({ name: e.target.value })} />
+              </label>
+
+              <div className="pg-field">
+                <span className="pg-label">Template</span>
+                <div className="flex flex-wrap gap-2">
+                  {templates.map((t) => (
+                    <TemplateThumb key={t.id} t={t} base={galleryBase} kitId={savedId} active={draft.template === t.id} disabled={!canEdit} onPick={() => set({ template: t.id })} />
+                  ))}
+                </div>
+                {tpl && (
+                  <p className="pg-hint" style={{ marginTop: 2 }}>
+                    {tpl.description}
+                  </p>
+                )}
+              </div>
+
+              <div className="pg-field">
+                <span className="pg-label">{tpl?.imageRole === "background" ? "Splash image (fills the screen)" : "Logo"}</span>
+                <div className="flex flex-wrap items-center gap-3">
+                  {shownLogo ? (
+                    <img src={shownLogo} alt="Current image" className="h-[42px] w-[42px] rounded-[9px] border border-line-strong bg-canvas object-contain" />
+                  ) : (
+                    <span className="flex h-[42px] w-[42px] items-center justify-center rounded-[9px] border border-dashed border-line-strong text-[11px] text-text-3">none</span>
+                  )}
+                  <label className={`pre-file-btn${!canEdit ? " disabled" : ""}`}>
+                    <Icon.Upload />
+                    <span>{shownLogo ? "Replace image" : "Upload image"}</span>
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                      disabled={!canEdit}
+                      onChange={(e) => pickLogo(e.target.files?.[0])}
+                      className="sr-only"
+                    />
+                  </label>
+                  {shownLogo && canEdit && (
+                    <button onClick={clearLogo} className="pg-link danger text-[13px]">
+                      Remove image
+                    </button>
+                  )}
+                </div>
+                <p className="pg-hint" style={{ marginTop: 2 }}>
+                  PNG, JPG, GIF, WebP or SVG · up to 512 KB. It is inlined into every export, so smaller is better.
+                </p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ColorField label="Background" value={draft.bg} fallback="#0b1220" disabled={!canEdit} onChange={(v) => set({ bg: v })} />
+                <ColorField label="Accent (bar, spinner)" value={draft.accent} fallback="#ffffff" auto disabled={!canEdit} onChange={(v) => set({ accent: v })} />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+                <label className="pg-field">
+                  <span className="pg-label">
+                    Tagline <span className="font-normal text-text-3">(optional)</span>
+                  </span>
+                  <input className="pg-input" value={draft.text} maxLength={60} placeholder="Loading…" disabled={!canEdit} onChange={(e) => set({ text: e.target.value })} />
+                </label>
+                <label className="pg-checkrow pb-3">
+                  <input type="checkbox" className="pg-check" checked={draft.showPercent} disabled={!canEdit} onChange={(e) => set({ showPercent: e.target.checked })} />
+                  Show percentage
+                </label>
+              </div>
+
+              {msg && <Msg kind={msg.ok ? "success" : "err"}>{msg.text}</Msg>}
+
+              {canEdit && (
+                <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4">
+                  <button onClick={() => void save()} disabled={busy || !draft.name.trim()} className="pg-btn pg-btn-primary">
+                    {busy ? "Saving…" : savedId ? "Save kit" : "Create kit"}
+                  </button>
+                  {savedId && (
+                    <>
+                      <button
+                        onClick={() =>
+                          void act(
+                            () => setDefaultKit(isDefault ? null : savedId),
+                            savedId,
+                            isDefault ? "No workspace default now. Exports get a preloader only where an app or concept picks one." : "Now the workspace default.",
+                          )
+                        }
+                        disabled={busy}
+                        className="pg-btn pg-btn-ghost"
+                      >
+                        {isDefault ? "Unset default" : "Make default"}
+                      </button>
+                      <button onClick={() => void act(async () => (await duplicateKit(savedId)).id)} disabled={busy} className="pg-link muted text-[14px]">
+                        Duplicate
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (confirm(`Delete "${draft.name}"? Apps and concepts using it fall back to the workspace default.`)) void act(() => deleteKit(savedId), null, "Kit deleted.");
+                        }}
+                        disabled={busy}
+                        className="pg-link danger ml-auto inline-flex items-center gap-1.5 text-[14px]"
+                      >
+                        <Icon.Trash width={15} height={15} />
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </section>
+          ) : (
+            <div className="pg-empty self-start">
+              {msg ? <Msg kind={msg.ok ? "success" : "err"}>{msg.text}</Msg> : canEdit ? "Pick a kit above, or create a new one." : "Pick a kit to see it."}
+            </div>
+          )}
+
+          {/* live preview */}
+          <section className="pg-card flex flex-col items-center gap-3 self-start" style={{ padding: "18px 22px 22px" }}>
+            <span className="pg-label">Preview (as exported)</span>
+            <Phone html={draft ? previewHtml : null} title="preloader preview" />
+          </section>
         </div>
-      </div>
 
-      {state && <Assignments state={state} onChanged={() => void load(selected)} />}
+        {state && <Assignments state={state} onChanged={() => void load(selected)} />}
+      </div>
     </div>
+  );
+}
+
+/** A kit's card thumbnail: its background colour with its logo (or splash image). */
+function KitThumb({ bg, logo, cover }: { bg: string | null; logo: string | null | undefined; cover?: boolean }) {
+  return (
+    <span className={`pre-thumb${cover ? " cover" : ""}`} style={bg ? { background: bg } : undefined}>
+      {logo ? <img src={logo} alt="" /> : <span className="pre-thumb-ph">No image</span>}
+    </span>
   );
 }
 
@@ -370,14 +434,9 @@ function TemplateThumb({
   const draft = useMemo(() => (base ? { ...base, template: t.id, showPercent: true } : null), [base, t.id]);
   const html = usePreviewHtml(draft, kitId, 0.62, 600);
   return (
-    <button
-      onClick={onPick}
-      disabled={disabled}
-      title={t.description}
-      className={`flex flex-col items-center gap-1 rounded-lg border p-1.5 ${active ? "border-amber-500 bg-amber-500/10" : "border-[#1b5540] hover:border-[#7cb342]"} disabled:cursor-default`}
-    >
+    <button onClick={onPick} disabled={disabled} title={t.description} aria-pressed={active} className={`pre-tpl${active ? " on" : ""}`}>
       <Phone html={html} scale={0.28} title={`${t.name} template`} />
-      <span className={`text-xs ${active ? "text-amber-200" : "text-slate-300"}`}>{t.name}</span>
+      <span>{t.name}</span>
     </button>
   );
 }
@@ -400,23 +459,24 @@ function ColorField({
   const [raw, setRaw] = useState(value ?? "");
   useEffect(() => setRaw(value ?? ""), [value]);
   return (
-    <div>
-      <label className={label}>{text}</label>
+    <div className="pg-field">
+      <span className="pg-label">{text}</span>
       <div className="flex items-center gap-2">
-        <input type="color" value={value ?? fallback} disabled={disabled} onChange={(e) => onChange(e.target.value)} className="h-9 w-11 cursor-pointer rounded border border-[#1f6b4a] bg-transparent disabled:cursor-default" />
+        <input type="color" value={value ?? fallback} disabled={disabled} onChange={(e) => onChange(e.target.value)} className="pre-swatch" aria-label={`${text} colour`} />
         <input
           value={raw}
           disabled={disabled}
           placeholder={auto ? "auto" : fallback}
+          aria-label={`${text} hex value`}
           onChange={(e) => {
             setRaw(e.target.value);
             if (/^#[0-9a-f]{6}$/i.test(e.target.value)) onChange(e.target.value);
             else if (e.target.value === "") onChange(null);
           }}
-          className="w-28 rounded-lg border border-[#1f6b4a] bg-[#06281c] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500 disabled:opacity-60"
+          className="pg-input mono w-32"
         />
         {auto && value && !disabled && (
-          <button onClick={() => onChange(null)} className="text-xs text-slate-400 hover:text-amber-300 hover:underline">
+          <button onClick={() => onChange(null)} className="pg-link muted text-[13px]">
             auto
           </button>
         )}
@@ -443,32 +503,32 @@ function Assignments({ state, onChanged }: { state: KitsState; onChanged: () => 
 
   const { apps, concepts } = state.assignments;
   return (
-    <section className={`${panel} mt-8`}>
-      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-amber-400">Where kits apply</h2>
-      <p className="mb-4 text-xs text-slate-400">A concept uses its own kit if set, otherwise its app's, otherwise the workspace default. Re-export a creative to pick up a change.</p>
-      {err && <div className="mb-3 text-sm text-red-400">{err}</div>}
+    <section className="pg-card">
+      <h2 className="pg-h" style={{ marginBottom: 4 }}>
+        Where kits apply
+      </h2>
+      <p className="pg-hint" style={{ margin: "0 0 16px" }}>
+        A concept uses its own kit if set, otherwise its app's, otherwise the workspace default. Re-export a playable to pick up a change.
+      </p>
+      {err && <Msg kind="err">{err}</Msg>}
 
-      <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
-        <span className="w-40 text-slate-300">Workspace default</span>
-        <KitSelect
-          kits={state.kits}
-          value={state.defaultKitId}
-          inheritLabel={null}
-          disabled={!state.canEdit}
-          onChange={(v) => void run(() => setDefaultKit(v === NONE ? null : v))}
-        />
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[10px] bg-canvas px-3.5 py-3 text-[14px]">
+        <span className="w-40 font-semibold text-text">Workspace default</span>
+        <KitSelect kits={state.kits} value={state.defaultKitId} inheritLabel={null} disabled={!state.canEdit} onChange={(v) => void run(() => setDefaultKit(v === NONE ? null : v))} />
       </div>
 
       {apps.length === 0 ? (
-        <div className="text-sm text-slate-500">No apps in this workspace yet.</div>
+        <p className="pg-p" style={{ margin: 0 }}>
+          No apps in this workspace yet.
+        </p>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid gap-2.5">
           {apps.map((a) => {
             const appEffective = a.kitId ? nameOf(a.kitId) : workspaceLabel;
             return (
-              <div key={a.id} className="rounded-lg border border-[#1b5540] p-3">
-                <div className="flex flex-wrap items-center gap-3 text-sm">
-                  <span className="w-40 truncate font-medium text-slate-100" title={a.name}>
+              <div key={a.id} className="rounded-[10px] border border-line px-3.5 py-3">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[14px]">
+                  <span className="w-40 truncate font-medium text-text" title={a.name}>
                     {a.name}
                   </span>
                   <KitSelect kits={state.kits} value={a.kitId} inheritLabel={`Workspace default (${workspaceLabel})`} disabled={!state.canAssign} onChange={(v) => void run(() => setAppKit(a.id, v))} />
@@ -476,8 +536,8 @@ function Assignments({ state, onChanged }: { state: KitsState; onChanged: () => 
                 {concepts
                   .filter((c) => c.appId === a.id)
                   .map((c) => (
-                    <div key={c.id} className="mt-2 flex flex-wrap items-center gap-3 pl-4 text-sm">
-                      <span className="w-36 truncate text-slate-300" title={c.name}>
+                    <div key={c.id} className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 pl-4 text-[14px]">
+                      <span className="w-36 truncate text-text-2" title={c.name}>
                         ↳ {c.name}
                       </span>
                       <KitSelect kits={state.kits} value={c.kitId} inheritLabel={`App (${appEffective})`} disabled={!state.canAssign} onChange={(v) => void run(() => setConceptKit(c.id, v))} />
@@ -508,12 +568,7 @@ function KitSelect({
 }) {
   const v = value ?? (inheritLabel ? "" : NONE);
   return (
-    <select
-      value={v}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
-      className="min-w-[220px] rounded-lg border border-[#1f6b4a] bg-[#06281c] px-2 py-1.5 text-sm text-slate-100 outline-none focus:border-amber-500 disabled:opacity-60"
-    >
+    <select value={v} disabled={disabled} onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)} className="pg-input sm w-full sm:w-auto sm:min-w-[240px]">
       {inheritLabel && <option value="">Inherit: {inheritLabel}</option>}
       {kits.map((k) => (
         <option key={k.id} value={k.id}>

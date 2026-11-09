@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { getToken, setToken, me, getNetworks, listApps, createApp, getApp, createConcept, getBillingStatus } from "./api";
 import { renameApp, renameConcept, verifyEmail, resendVerification } from "./api";
 import { listWorkspaces, switchWorkspace, createWorkspace, getInvite, acceptInvite, supportUnread } from "./api";
@@ -14,7 +14,17 @@ import { Analytics } from "./components/Analytics";
 import { Preloader } from "./components/Preloader";
 import { Domain } from "./components/Domain";
 import { Start } from "./components/Start";
-import { legacyRoute, linkClick, routePath, titleFor, useRoute, type Route } from "./router";
+import { Docs } from "./components/Docs";
+import { ChatBubble } from "./components/ChatBubble";
+import { Shell, Alert, toast, type Crumb } from "./components/Shell";
+import { Library } from "./components/Library";
+import { AppDetail } from "./components/AppDetail";
+import { NewAppDialog, NameDialog } from "./components/NewAppDialog";
+import { Icon } from "./components/icons";
+import { AUTH_PAGES, legacyRoute, linkClick, routePath, titleFor, useRoute, type Page, type Route } from "./router";
+
+/** a plan picked on the landing page before signing up: after sign-in, Plans starts its checkout */
+export const PENDING_PLAN_KEY = "adlab.pendingPlan";
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -25,11 +35,12 @@ export default function App() {
   const [concepts, setConcepts] = useState<Concept[]>([]);
   // which app `concepts` belong to (so a stale concept id in the URL can be told apart from "loading")
   const [loadedAppId, setLoadedAppId] = useState<string | null>(null);
-  const [newApp, setNewApp] = useState("");
-  const [newConcept, setNewConcept] = useState("");
+  const [appsLoaded, setAppsLoaded] = useState(false);
+  // which dialog is open (new app / concept / workspace, rename)
+  const [dialog, setDialog] = useState<null | "newApp" | "newConcept" | "renameApp" | "renameConcept" | "newWorkspace">(null);
+  // the open creative's name, for the breadcrumb (reported by Workspace)
+  const [creativeName, setCreativeName] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  // a signed-out visit to a deep link (e.g. a shared /apps/… URL) goes straight to sign-in, then back there
-  const [view, setView] = useState<"landing" | "auth">(() => (window.location.pathname !== "/" ? "auth" : "landing"));
   const [status, setStatus] = useState<PlanStatus | null>(null);
   // the screen comes from the URL (see router.ts): reload, back/forward and shared links work
   const [route, navigate] = useRoute();
@@ -63,7 +74,6 @@ export default function App() {
     if (invite) setInviteToken(invite);
     if (reset) {
       setResetToken(reset);
-      setView("auth");
     }
     if (verify) {
       verifyEmail(verify)
@@ -90,6 +100,16 @@ export default function App() {
     }
   }, []);
 
+  // a new screen starts at the top (the window keeps its scroll position otherwise)
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [page, route.appId, route.conceptId, route.tab]);
+
+  // signed in on an auth URL (reload of /login, back button): go home
+  useEffect(() => {
+    if (user && AUTH_PAGES.includes(page)) navigate({ page: "app" }, { replace: true });
+  }, [user, page, navigate]);
+
   // Keyed on the user's id, not the object: refreshWorkspace itself calls setUser with a fresh object,
   // so depending on `user` re-ran this forever (an endless /api/me + /api/apps loop that also kept
   // clearing the selected app).
@@ -105,7 +125,7 @@ export default function App() {
       getInvite(inviteToken)
         .then((i) => {
           setNotice(i.expired ? "That invitation has expired — ask for a new one." : i.accepted ? "That invitation was already used." : `Sign in or sign up as ${i.email} to join ${i.org}.`);
-          setView("auth");
+          if (window.location.pathname === "/") navigate({ page: "login" }, { replace: true });
         })
         .catch((e) => setNotice((e as Error).message));
       return;
@@ -189,10 +209,14 @@ export default function App() {
     if (gated) {
       // the workspace requires 2FA this account doesn't have: its data stays locked until it's on
       setApps([]);
+      setAppsLoaded(true);
       return;
     }
     refreshUnread();
-    listApps().then(setApps).catch((e) => setErr((e as Error).message));
+    listApps()
+      .then(setApps)
+      .catch((e) => setErr((e as Error).message))
+      .finally(() => setAppsLoaded(true));
     getBillingStatus().then(setStatus).catch(() => {});
   }
 
@@ -202,10 +226,11 @@ export default function App() {
       .catch(() => {});
   }
 
-  async function pickWorkspace(value: string) {
+  /** switch to another workspace, or (`__new` + a name) create one and switch to it */
+  async function pickWorkspace(value: string, newName?: string) {
     try {
       if (value === "__new") {
-        const name = window.prompt("Name the new workspace")?.trim();
+        const name = newName?.trim();
         if (!name) return;
         await createWorkspace(name);
       } else if (value !== workspace?.id) {
@@ -214,30 +239,23 @@ export default function App() {
       navigate({ page: "app" }); // the old workspace's app/concept ids mean nothing here
       await refreshWorkspace();
     } catch (e) {
+      if (value === "__new") throw e; // the dialog shows it
       setErr((e as Error).message);
     }
   }
 
-  async function renameAppUi(a: AppT) {
-    const name = window.prompt("Rename app", a.name)?.trim();
-    if (!name || name === a.name) return;
-    try {
-      const updated = await renameApp(a.id, name);
-      setApps((xs) => xs.map((x) => (x.id === a.id ? { ...x, name: updated.name } : x)));
-      setActiveApp((cur) => (cur && cur.id === a.id ? { ...cur, name: updated.name } : cur));
-    } catch (e) {
-      setErr((e as Error).message);
-    }
+  /** throws on failure (the dialog shows the message) */
+  async function renameAppTo(a: AppT, name: string) {
+    const updated = await renameApp(a.id, name);
+    setApps((xs) => xs.map((x) => (x.id === a.id ? { ...x, name: updated.name } : x)));
+    setActiveApp((cur) => (cur && cur.id === a.id ? { ...cur, name: updated.name } : cur));
+    toast("App renamed");
   }
-  async function renameConceptUi(c: Concept) {
-    const name = window.prompt("Rename concept", c.name)?.trim();
-    if (!name || name === c.name) return;
-    try {
-      const updated = await renameConcept(c.id, name);
-      setConcepts((xs) => xs.map((x) => (x.id === c.id ? { ...x, name: updated.name } : x)));
-    } catch (e) {
-      setErr((e as Error).message);
-    }
+  /** throws on failure (inline editors stay open and the page shows the error; the dialog shows it itself) */
+  async function renameConceptTo(c: Concept, name: string) {
+    const updated = await renameConcept(c.id, name);
+    setConcepts((xs) => xs.map((x) => (x.id === c.id ? { ...x, name: updated.name } : x)));
+    toast("Concept renamed");
   }
   async function resendVerify() {
     try {
@@ -248,31 +266,24 @@ export default function App() {
       setNotice((e as Error).message);
     }
   }
-  async function addApp() {
-    const name = newApp.trim();
-    if (!name) return;
-    try {
-      const a = await createApp(name);
-      setNewApp("");
-      setApps((xs) => [a, ...xs]);
-      navigate({ page: "app", appId: a.id });
-    } catch (e) {
-      setErr((e as Error).message);
-    }
+  /** throws on failure (the dialog shows the message) */
+  async function addApp(name: string, platform: string) {
+    const a = await createApp(name, platform);
+    setApps((xs) => [{ ...a, conceptCount: 0 }, ...xs]);
+    setDialog(null);
+    toast(`Created ${a.name}`);
+    navigate({ page: "app", appId: a.id });
   }
 
-  async function addConcept() {
+  /** throws on failure (the dialog shows the message) */
+  async function addConcept(name: string) {
     if (!activeApp) return;
-    const name = newConcept.trim();
-    if (!name) return;
-    try {
-      const c = await createConcept(activeApp.id, name);
-      setNewConcept("");
-      setConcepts((xs) => [c, ...xs]);
-      navigate({ page: "app", appId: activeApp.id, conceptId: c.id });
-    } catch (e) {
-      setErr((e as Error).message);
-    }
+    const c = await createConcept(activeApp.id, name);
+    setConcepts((xs) => [c, ...xs]);
+    setApps((xs) => xs.map((x) => (x.id === activeApp.id ? { ...x, conceptCount: (x.conceptCount ?? 0) + 1 } : x)));
+    setDialog(null);
+    toast(`Created ${c.name}`);
+    navigate({ page: "app", appId: activeApp.id, conceptId: c.id });
   }
 
   function logout() {
@@ -282,320 +293,290 @@ export default function App() {
     setActiveApp(null);
     setConcepts([]);
     setLoadedAppId(null);
+    setAppsLoaded(false);
     navigate({ page: "app" }, { replace: true });
     document.title = "Factorial AdLab — one build, every ad network";
   }
 
   if (checking) return null;
   if (!user) {
-    return view === "auth" ? (
+    // "/" is the landing page; /login /signup /forgot are the auth screens; any other path (a shared
+    // /apps/… link) shows sign-in and stays put, so signing in lands right there
+    const onLanding = page === "app" && !route.appId && !resetToken;
+    if (onLanding) {
+      return <Landing onGetStarted={() => navigate({ page: "signup" })} onSignIn={() => navigate({ page: "login" })} />;
+    }
+    const mode = resetToken ? "reset" : page === "signup" || page === "forgot" ? page : "login";
+    return (
       <AuthScreen
-          resetToken={resetToken ?? undefined}
-          onResetDone={() => setResetToken(null)} onAuth={setUser} onBack={() => setView("landing")} />
-    ) : (
-      <Landing onGetStarted={() => setView("auth")} onSignIn={() => setView("auth")} />
+        key={mode}
+        mode={mode}
+        notice={notice}
+        onMode={(m) => navigate({ page: m === "reset" ? "login" : m })}
+        resetToken={resetToken ?? undefined}
+        onResetDone={() => {
+          setResetToken(null);
+          navigate({ page: "login" }, { replace: true });
+        }}
+        onAuth={(u) => {
+          if (AUTH_PAGES.includes(page)) {
+            let pending: string | null = null;
+            try {
+              pending = sessionStorage.getItem(PENDING_PLAN_KEY);
+            } catch {
+              /* storage blocked */
+            }
+            navigate({ page: pending ? "plans" : "app" }, { replace: true });
+          }
+          setUser(u);
+        }}
+        onBack={() => navigate({ page: "app" })}
+      />
+    );
+  }
+
+  // ── signed in: the dashboard shell ──
+  const appLoading = !!route.appId && (activeApp?.id !== route.appId || loadedAppId !== route.appId);
+  const crumbs = crumbsFor(route, activeApp, activeConcept, creativeName);
+
+  let body: ReactNode;
+  if (twoFactorGate && page !== "settings") {
+    body = (
+      <div className="sh-gate">
+        <div className="sh-lib-empty-ico">
+          <Icon.Shield />
+        </div>
+        <h1>{workspace?.name} requires two-factor authentication</h1>
+        <p>
+          An admin made 2FA required for everyone in this workspace. Turn it on for your account to continue; it takes a minute with any
+          authenticator app. You can also switch to another workspace from the account menu.
+        </p>
+        <a {...nav({ page: "settings" })} className="sh-btn sh-btn-primary">
+          <Icon.Shield /> Set up two-factor authentication
+        </a>
+      </div>
+    );
+  } else if (page === "start") {
+    body = <Start go={(r) => navigate(r)} onDataChanged={() => listApps().then(setApps).catch(() => {})} canEdit={canEdit} />;
+  } else if (page === "plans") {
+    body = <Plans status={status} onChanged={setStatus} email={user.email} />;
+  } else if (page === "settings") {
+    body = <Settings user={user} status={status} onWorkspaceChanged={() => void refreshWorkspace()} />;
+  } else if (page === "analytics") {
+    body = <Analytics />;
+  } else if (page === "preloader") {
+    body = <Preloader />;
+  } else if (page === "docs") {
+    body = <Docs go={(r) => navigate(r)} />;
+  } else if (page === "support") {
+    body = (
+      <Support
+        initialThreadId={route.threadId ?? null}
+        onUnreadChange={refreshUnread}
+        onOpenThread={(id) => navigate({ page: "support", threadId: id ?? undefined })}
+      />
+    );
+  } else if (page === "admin" && user.isAdmin) {
+    body = (
+      <Admin
+        tab={route.tab ?? null}
+        threadId={route.threadId ?? null}
+        onNavigate={(tab, threadId) => navigate({ page: "admin", tab, threadId: threadId ?? undefined })}
+        me={user.email}
+      />
+    );
+  } else if (page === "domain") {
+    body = <Domain />;
+  } else if (!route.appId) {
+    body = <Library apps={apps} loaded={appsLoaded} canEdit={canEdit} nav={nav} onNewApp={() => setDialog("newApp")} />;
+  } else if (appLoading || !activeApp || (route.conceptId && !activeConcept)) {
+    body = (
+      <div className="sh-loading">
+        <span className="sh-spin dark" />
+      </div>
+    );
+  } else if (activeConcept) {
+    const back = nav({ page: "app", appId: activeApp.id });
+    body = (
+      <>
+        <div className="sh-page-head">
+          <div style={{ minWidth: 0 }}>
+            <a {...back} className="sh-crumb-back">
+              ← {activeApp.name}
+            </a>
+            <h1 className="sh-page-title">
+              <span className="t">{activeConcept.name}</span>
+            </h1>
+            <p className="sh-page-sub">Upload a build, preview it in a phone frame, then export it to the networks you pick.</p>
+          </div>
+          {canEdit && (
+            <div className="sh-head-actions">
+              <button type="button" className="sh-btn sh-btn-ghost" onClick={() => setDialog("renameConcept")}>
+                <Icon.Pencil /> Rename
+              </button>
+            </div>
+          )}
+        </div>
+        <Workspace
+          key={activeConcept.id}
+          conceptId={activeConcept.id}
+          creativeId={route.creativeId ?? null}
+          onCreativeChange={(creativeId, replace) =>
+            navigate({ page: "app", appId: route.appId, conceptId: activeConcept.id, creativeId: creativeId ?? undefined }, { replace })
+          }
+          onActiveName={setCreativeName}
+          networks={networks}
+          readOnly={!canEdit}
+          onExported={() => getBillingStatus().then(setStatus).catch(() => {})}
+        />
+      </>
+    );
+  } else {
+    body = (
+      <AppDetail
+        app={activeApp}
+        concepts={concepts}
+        canEdit={canEdit}
+        nav={nav}
+        onRename={() => setDialog("renameApp")}
+        onNewConcept={() => setDialog("newConcept")}
+        onRenameConcept={async (c, name) => {
+          try {
+            await renameConceptTo(c, name);
+          } catch (e) {
+            setErr((e as Error).message);
+            throw e;
+          }
+        }}
+      />
     );
   }
 
   return (
-    <div className="min-h-full">
-      <header className="border-b border-[#1b5540]">
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-6 py-3">
-          <a {...nav({ page: "app" })} className="flex shrink-0 items-center gap-2">
-            <img src="/logo.png" alt="Factorial" className="h-7 w-7 rounded-lg object-contain" />
-            <span className="whitespace-nowrap font-semibold text-slate-100">Factorial AdLab</span>
-            <span className="rounded bg-[#123f2d] px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">Packager</span>
-          </a>
-          <div className="flex flex-wrap items-center justify-end gap-2 text-sm text-slate-400">
-            {status && (
-              <a
-                {...nav({ page: "plans" })}
-                className={`rounded-lg border px-3 py-1.5 ${page === "plans" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-200 hover:border-[#7cb342]"}`}
-              >
-                {status.planName}
-                {status.limit != null && <span className="text-slate-400"> · {status.used}/{status.limit}</span>}
-              </a>
-            )}
-            <a
-              {...nav({ page: "start" })}
-              className={`rounded-lg border px-3 py-1.5 ${page === "start" ? "border-amber-500 text-amber-200" : "border-amber-700/60 text-amber-300 hover:border-amber-500"}`}
-            >
-              Start here
-            </a>
-            <a
-              {...nav({ page: "analytics" })}
-              className={`rounded-lg border px-3 py-1.5 ${page === "analytics" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
-            >
-              Analytics
-            </a>
-            <a
-              {...nav({ page: "preloader" })}
-              className={`rounded-lg border px-3 py-1.5 ${page === "preloader" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
-            >
-              Preloader
-            </a>
-            <a
-              {...nav({ page: "domain" })}
-              className={`rounded-lg border px-3 py-1.5 ${page === "domain" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
-            >
-              Domain
-            </a>
-            <a
-              {...nav({ page: "support" })}
-              className={`relative rounded-lg border px-3 py-1.5 ${page === "support" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
-            >
-              Support
-              {unread > 0 && <span className="absolute -right-1.5 -top-1.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-black">{unread}</span>}
-            </a>
-            {user.isAdmin && (
-              <a
-                {...nav({ page: "admin" })}
-                className={`rounded-lg border px-3 py-1.5 ${page === "admin" ? "border-amber-500 text-amber-200" : "border-amber-700/50 text-amber-300 hover:border-amber-500"}`}
-              >
-                Admin
-              </a>
-            )}
-            <a
-              {...nav({ page: "settings" })}
-              className={`rounded-lg border px-3 py-1.5 ${page === "settings" ? "border-amber-500 text-amber-200" : "border-[#1b5540] text-slate-300 hover:border-[#7cb342]"}`}
-            >
-              Settings
-            </a>
-            {workspace && (
-              <select
-                value={workspace.id}
-                onChange={(e) => void pickWorkspace(e.target.value)}
-                title={`Workspace · you are ${workspace.role}`}
-                className="max-w-[180px] rounded-lg border border-[#1b5540] bg-[#0a3a28] px-2 py-1.5 text-slate-200 outline-none focus:border-amber-500"
-              >
-                {(workspaces.length ? workspaces : [{ id: workspace.id, name: workspace.name, role: workspace.role }]).map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} · {w.role}
-                  </option>
-                ))}
-                <option value="__new">＋ New workspace…</option>
-              </select>
-            )}
-            <span className="hidden max-w-[200px] truncate xl:inline" title={user.email}>{user.email}</span>
-            <button onClick={logout} className="rounded-lg border border-[#1f6b4a] px-3 py-1.5 text-slate-300 hover:border-[#7cb342]">
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {twoFactorGate && page !== "settings" ? (
-        <main className="min-w-0 flex-1 p-6">
-          <div className="mx-auto mt-10 max-w-lg rounded-xl border border-amber-500/40 bg-amber-500/5 p-6 text-center">
-            <h1 className="mb-2 text-lg font-semibold text-slate-100">{workspace?.name} requires two-factor authentication</h1>
-            <p className="mb-5 text-sm text-slate-300">
-              An admin made 2FA required for everyone in this workspace. Turn it on for your account to continue — it takes a minute with any
-              authenticator app. You can also switch to another workspace from the menu above.
-            </p>
-            <a {...nav({ page: "settings" })} className="inline-block rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500">
-              Set up two-factor authentication
-            </a>
-          </div>
-        </main>
-      ) : page === "start" ? (
-        <main className="min-w-0 flex-1 p-6">
-          <Start go={(r) => navigate(r)} onDataChanged={() => listApps().then(setApps).catch(() => {})} canEdit={canEdit} />
-        </main>
-      ) : page === "plans" ? (
-        <main className="min-w-0 flex-1 p-6">
-          <Plans status={status} onChanged={setStatus} email={user.email} />
-        </main>
-      ) : page === "settings" ? (
-        <main className="min-w-0 flex-1 p-6">
-          <Settings user={user} status={status} onWorkspaceChanged={() => void refreshWorkspace()} />
-        </main>
-      ) : page === "analytics" ? (
-        <main className="min-w-0 flex-1 p-6">
-          <Analytics />
-        </main>
-      ) : page === "preloader" ? (
-        <main className="min-w-0 flex-1 p-6">
-          <Preloader />
-        </main>
-      ) : page === "support" ? (
-        <main className="min-w-0 flex-1 p-6">
-          <Support initialThreadId={route.threadId ?? null} onUnreadChange={refreshUnread} onOpenThread={(id) => navigate({ page: "support", threadId: id ?? undefined })} />
-        </main>
-      ) : page === "admin" && user.isAdmin ? (
-        <main className="min-w-0 flex-1 p-6">
-          <Admin
-            tab={route.tab ?? null}
-            threadId={route.threadId ?? null}
-            onNavigate={(tab, threadId) => navigate({ page: "admin", tab, threadId: threadId ?? undefined })}
-            me={user.email}
-          />
-        </main>
-      ) : page === "domain" ? (
-        <main className="min-w-0 flex-1 p-6">
-          <Domain />
-        </main>
-      ) : (
-      <div className="flex">
-        {/* sidebar: apps + concepts */}
-        <aside className="w-64 shrink-0 border-r border-[#1b5540] p-4">
-          <SectionLabel>Apps</SectionLabel>
-          <div className="mb-2 grid gap-1">
-            {apps.map((a) => (
-              <div key={a.id} className="flex items-center gap-1">
-                <a
-                  {...nav({ page: "app", appId: a.id })}
-                  className={`flex min-w-0 flex-1 items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm ${
-                    activeApp?.id === a.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
-                  }`}
-                >
-                  <span className="truncate">{a.name}</span>
-                  {a.conceptCount ? <span className="text-xs text-slate-400">{a.conceptCount}</span> : null}
-                </a>
-                {activeApp?.id === a.id && (
-                  <button
-                    title="Rename app"
-                    onClick={() => void renameAppUi(a)}
-                    className="rounded px-1.5 py-1 text-xs text-slate-400 hover:bg-[#123f2d]/60 hover:text-amber-200"
-                  >
-                    ✎
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-          {canEdit ? (
-            <CreateRow value={newApp} onChange={setNewApp} onAdd={addApp} placeholder="New app…" />
-          ) : (
-            <div className="px-1 text-[11px] text-slate-500">View-only · {workspace?.name}</div>
-          )}
-
-          {activeApp && (
-            <div className="mt-6">
-              <SectionLabel>Concepts · {activeApp.name}</SectionLabel>
-              <div className="mb-2 grid gap-1">
-                {concepts.map((c) => (
-                  <div key={c.id} className="flex items-center gap-1">
-                    <a
-                      {...nav({ page: "app", appId: activeApp.id, conceptId: c.id })}
-                      className={`block min-w-0 flex-1 truncate rounded-md px-2.5 py-1.5 text-left text-sm ${
-                        activeConcept?.id === c.id ? "bg-amber-500/10 text-amber-200" : "text-slate-300 hover:bg-[#123f2d]/60"
-                      }`}
-                    >
-                      {c.name}
-                    </a>
-                    {activeConcept?.id === c.id && (
-                      <button
-                        title="Rename concept"
-                        onClick={() => void renameConceptUi(c)}
-                        className="rounded px-1.5 py-1 text-xs text-slate-400 hover:bg-[#123f2d]/60 hover:text-amber-200"
-                      >
-                        ✎
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {concepts.length === 0 && <div className="px-2.5 py-1 text-xs text-slate-400">No concepts yet</div>}
-              </div>
-              {canEdit && <CreateRow value={newConcept} onChange={setNewConcept} onAdd={addConcept} placeholder="New concept…" />}
-            </div>
-          )}
-        </aside>
-
-        {/* main */}
-        <main className="min-w-0 flex-1 p-6">
-          {notice && (
-            <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">
-              <span>{notice}</span>
-              <button onClick={() => setNotice(null)} className="text-emerald-300 hover:text-white" aria-label="Dismiss">x</button>
-            </div>
-          )}
-          {user && user.emailVerified === false && (
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm text-amber-200">
-              <span>Please verify your email address - check your inbox for the link.</span>
-              <button onClick={() => void resendVerify()} className="rounded-md border border-amber-400/50 px-2.5 py-1 text-xs font-medium hover:bg-amber-500/20">
-                Resend email
-              </button>
-            </div>
-          )}
-          {err && <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-300">{err}</div>}
-          {activeConcept ? (
-            <Workspace
-              key={activeConcept.id}
-              conceptId={activeConcept.id}
-              creativeId={route.creativeId ?? null}
-              onCreativeChange={(creativeId, replace) =>
-                navigate({ page: "app", appId: route.appId, conceptId: activeConcept.id, creativeId: creativeId ?? undefined }, { replace })
-              }
-              networks={networks}
-              readOnly={!canEdit}
-              onExported={() => getBillingStatus().then(setStatus).catch(() => {})}
-            />
-          ) : (
-            !activeApp ? (
-              // home: the step-by-step checklist (also at /start)
-              <Start go={(r) => navigate(r)} onDataChanged={() => listApps().then(setApps).catch(() => {})} canEdit={canEdit} />
-            ) : (
-              <div className="flex h-full min-h-[50vh] items-center justify-center text-center text-slate-400">
-                {concepts.length ? "Pick a concept on the left." : canEdit ? "Create a concept on the left (an ad idea for this app)." : "This app has no concepts yet."}
-              </div>
-            )
-          )}
-        </main>
-      </div>
+    <Shell
+      page={page}
+      nav={nav}
+      user={user}
+      workspace={workspace}
+      workspaces={workspaces}
+      status={status}
+      unread={unread}
+      crumbs={crumbs}
+      onPickWorkspace={(id) => void pickWorkspace(id)}
+      onNewWorkspace={() => setDialog("newWorkspace")}
+      onLogout={logout}
+    >
+      {notice && (
+        <Alert kind="ok" onDismiss={() => setNotice(null)}>
+          {notice}
+        </Alert>
       )}
-    </div>
-  );
-}
+      {user.emailVerified === false && (
+        <Alert
+          kind="warn"
+          action={
+            <button type="button" className="sh-alert-btn" onClick={() => void resendVerify()}>
+              Resend email
+            </button>
+          }
+        >
+          Please verify your email address: check your inbox for the link.
+        </Alert>
+      )}
+      {err && (
+        <Alert kind="err" onDismiss={() => setErr(null)}>
+          {err}
+        </Alert>
+      )}
 
-function SectionLabel({ children }: { children: ReactNode }) {
-  return <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{children}</div>;
-}
+      {body}
 
-function CreateRow({
-  value,
-  onChange,
-  onAdd,
-  placeholder,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onAdd: () => void;
-  placeholder: string;
-}) {
-  const box = useRef<HTMLInputElement>(null);
-  const [hint, setHint] = useState(false);
-  // "+" with an empty box used to do nothing at all: point at the name field instead
-  function add() {
-    if (!value.trim()) {
-      setHint(true);
-      box.current?.focus();
-      return;
-    }
-    setHint(false);
-    onAdd();
-  }
-  return (
-    <div>
-      <div className="flex gap-1">
-        <input
-          ref={box}
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            if (e.target.value.trim()) setHint(false);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") add();
-          }}
-          placeholder={placeholder}
-          aria-invalid={hint}
-          className={`min-w-0 flex-1 rounded-md border bg-[#0a3a28] px-2 py-1 text-sm text-slate-100 outline-none focus:border-amber-500 ${hint ? "border-amber-500" : "border-[#1f6b4a]"}`}
+      {dialog === "newApp" && <NewAppDialog onClose={() => setDialog(null)} onCreate={addApp} />}
+      {dialog === "newConcept" && activeApp && (
+        <NameDialog
+          title="New concept"
+          sub={`One ad idea for ${activeApp.name}. You upload its builds next.`}
+          label="Concept name"
+          placeholder="e.g. Fail-to-win level"
+          submitLabel="Create concept"
+          onClose={() => setDialog(null)}
+          onSubmit={addConcept}
         />
-        <button onClick={add} title="Add" className="rounded-md bg-[#123f2d] px-2.5 text-slate-200 hover:bg-[#1a5a40]">
-          +
-        </button>
-      </div>
-      {hint && <div className="mt-1 text-[11px] text-amber-300">Type a name first, then press + (or Enter).</div>}
-    </div>
+      )}
+      {dialog === "renameApp" && activeApp && (
+        <NameDialog
+          title="Rename app"
+          label="App name"
+          initial={activeApp.name}
+          submitLabel="Save"
+          onClose={() => setDialog(null)}
+          onSubmit={async (name) => {
+            await renameAppTo(activeApp, name);
+            setDialog(null);
+          }}
+        />
+      )}
+      {dialog === "renameConcept" && activeConcept && (
+        <NameDialog
+          title="Rename concept"
+          label="Concept name"
+          initial={activeConcept.name}
+          submitLabel="Save"
+          onClose={() => setDialog(null)}
+          onSubmit={async (name) => {
+            await renameConceptTo(activeConcept, name);
+            setDialog(null);
+          }}
+        />
+      )}
+      {dialog === "newWorkspace" && (
+        <NameDialog
+          title="New workspace"
+          sub="A separate set of apps, members and billing. You can switch between workspaces from the account menu."
+          label="Workspace name"
+          placeholder="e.g. Studio North"
+          submitLabel="Create workspace"
+          onClose={() => setDialog(null)}
+          onSubmit={async (name) => {
+            await pickWorkspace("__new", name);
+            setDialog(null);
+            toast(`Switched to ${name}`);
+          }}
+        />
+      )}
+
+      <ChatBubble signedIn onOpenSupport={() => navigate({ page: "support" })} />
+    </Shell>
   );
+}
+
+const PAGE_CRUMB: Partial<Record<Page, string>> = {
+  start: "Setup",
+  plans: "Plans",
+  settings: "Settings",
+  analytics: "Analytics",
+  preloader: "Customize Preloader",
+  domain: "Domain",
+  docs: "Docs",
+  support: "Support",
+  admin: "Admin",
+};
+
+/** Breadcrumb after the workspace name: Playable Ads › App › Concept › Creative, or the page's name. */
+function crumbsFor(route: Route, app: AppT | null, concept: Concept | null, creativeName: string | null): Crumb[] {
+  if (route.page === "app") {
+    const out: Crumb[] = [{ label: "Playable Ads", to: { page: "app" }, hideOnMobile: true }];
+    if (!route.appId) return out;
+    out.push({ label: app?.id === route.appId ? app.name : "…", to: { page: "app", appId: route.appId }, hideOnMobile: !!route.conceptId });
+    if (route.conceptId) {
+      out.push({ label: concept?.name ?? "…", to: { page: "app", appId: route.appId, conceptId: route.conceptId } });
+      if (creativeName && route.creativeId) out.push({ label: creativeName });
+    }
+    return out;
+  }
+  const label = PAGE_CRUMB[route.page] ?? titleFor(route).split(" · ")[0]!;
+  if (route.page === "support" && route.threadId) return [{ label, to: { page: "support" } }, { label: "Conversation" }];
+  if (route.page === "admin" && route.tab && route.tab !== "overview")
+    return [{ label, to: { page: "admin" } }, { label: route.tab.charAt(0).toUpperCase() + route.tab.slice(1) }];
+  return [{ label }];
 }

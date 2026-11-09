@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Icon } from "./icons";
 
 /** Calls that mean "the player tapped the CTA" for some network. */
 const CTA_CALLS = new Set(["mraid.open", "ExitApi.exit", "FbPlayableAd.onCTAClick", "install", "openAppStore", "dapi.openStoreUrl", "window.open", "postMessage download"]);
@@ -9,10 +10,14 @@ interface HostEvent {
   detail: string | null;
 }
 
+/** device outer size (screen + 10px bezel each side), portrait */
+const DEV_W = 278;
+const DEV_H = 554;
+
 /**
  * Phone-framed preview of one export. The frame is sandboxed (uploaded playables are untrusted
  * code) and the server simulates the network's container in it (MRAID 2.0, ExitApi, dapi, …), so the
- * console below shows exactly what the creative called — e.g. the CTA — without leaving the page.
+ * log below shows exactly what the creative called — e.g. the CTA — without leaving the page.
  */
 export function DevicePreview({ src, label }: { src: string | null; label?: string }) {
   const [landscape, setLandscape] = useState(false);
@@ -20,10 +25,22 @@ export function DevicePreview({ src, label }: { src: string | null; label?: stri
   const [events, setEvents] = useState<HostEvent[]>([]);
   const [host, setHost] = useState<string | null>(null);
   const [visible, setVisible] = useState(true);
+  const [avail, setAvail] = useState<number | null>(null);
   const frame = useRef<HTMLIFrameElement>(null);
+  const wrap = useRef<HTMLDivElement>(null);
   const t0 = useRef(Date.now());
-  const w = landscape ? 620 : 300;
-  const h = landscape ? 300 : 620;
+
+  // shrink the phone to fit narrow columns (landscape is 554px wide)
+  useEffect(() => {
+    const el = wrap.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => e && setAvail(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const outerW = landscape ? DEV_H : DEV_W;
+  const outerH = landscape ? DEV_W : DEV_H;
+  const scale = avail ? Math.min(1, avail / outerW) : 1;
 
   // a new export / restart starts a fresh session log
   useEffect(() => {
@@ -61,70 +78,71 @@ export function DevicePreview({ src, label }: { src: string | null; label?: stri
   const ctaCount = events.filter((e) => CTA_CALLS.has(e.call)).length;
 
   return (
-    <div className="flex flex-col items-center">
-      <div className="mb-3 flex items-center gap-3">
-        <span className="text-sm text-slate-400">{label ? `Preview · ${label}` : "Preview"}</span>
-        <button
-          onClick={() => setLandscape((v) => !v)}
-          className="rounded-md border border-[#1f6b4a] px-2 py-1 text-xs text-slate-300 hover:border-[#7cb342]"
-        >
-          {landscape ? "Portrait" : "Landscape"}
+    <>
+      <div className="sh-preview-controls">
+        <span className="sh-preview-label">{label ? `Preview · ${label}` : "Preview"}</span>
+        <button type="button" className={`sh-pv-ctrl${!landscape ? " on" : ""}`} onClick={() => setLandscape(false)} title="Portrait" aria-pressed={!landscape}>
+          <Icon.Phone />
         </button>
-      </div>
-
-      <div
-        className="rounded-[2rem] border-[10px] border-[#1b5540] bg-black shadow-2xl transition-all"
-        style={{ width: w + 20, height: h + 20 }}
-      >
-        {src ? (
-          <iframe
-            ref={frame}
-            key={`${src}#${run}`}
-            src={src}
-            title="playable preview"
-            sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-pointer-lock"
-            className="h-full w-full rounded-[1.4rem] bg-white"
-            style={{ width: w, height: h }}
-          />
-        ) : (
-          <div
-            className="flex items-center justify-center rounded-[1.4rem] text-center text-sm text-slate-400"
-            style={{ width: w, height: h }}
-          >
-            Export a network, then preview it here
-          </div>
+        <button type="button" className={`sh-pv-ctrl${landscape ? " on" : ""}`} onClick={() => setLandscape(true)} title="Landscape" aria-pressed={landscape}>
+          <Icon.PhoneLandscape />
+        </button>
+        {src && (
+          <button type="button" className="sh-pv-ctrl" onClick={() => setRun((n) => n + 1)} title="Restart">
+            <Icon.Refresh />
+          </button>
         )}
       </div>
 
+      <div className="sh-device-wrap" ref={wrap} style={{ height: outerH * scale }}>
+        <div className={`sh-device${landscape ? " landscape" : ""}`} style={scale < 1 ? { transform: `scale(${scale})` } : undefined}>
+          <div className="sh-device-screen">
+            {src ? (
+              <iframe
+                ref={frame}
+                key={`${src}#${run}`}
+                src={src}
+                title="playable preview"
+                sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-pointer-lock"
+                className="sh-device-frame"
+              />
+            ) : (
+              <div className="sh-device-empty">
+                <Icon.Play />
+                Export a network, then preview it here
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {src && (
-        <div className="mt-3 w-full max-w-[320px] rounded-lg border border-[#1b5540] bg-[#0a3a28]/50 p-3 text-xs" aria-live="polite">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="font-semibold uppercase tracking-wide text-amber-400">Host</span>
-            <span className="truncate text-slate-300">{host ? `${host} (simulated)` : "starting…"}</span>
-            <span className="ml-auto flex gap-1.5">
-              <button onClick={toggleVisible} className="rounded border border-[#1f6b4a] px-1.5 py-0.5 text-slate-300 hover:border-[#7cb342]" title="Fire viewableChange: networks pause creatives that are off-screen">
+        <div className="sh-host" aria-live="polite">
+          <div className="sh-host-top">
+            <span className="sh-host-k">Host</span>
+            <span className="sh-host-v">{host ? `${host} (simulated)` : "starting…"}</span>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 6, flexShrink: 0 }}>
+              <button type="button" onClick={toggleVisible} className="sh-mini-btn" title="Fire viewableChange: networks pause creatives that are off-screen">
+                {visible ? <Icon.EyeOff /> : <Icon.Eye />}
                 {visible ? "Hide ad" : "Show ad"}
-              </button>
-              <button onClick={() => setRun((n) => n + 1)} className="rounded border border-[#1f6b4a] px-1.5 py-0.5 text-slate-300 hover:border-[#7cb342]">
-                Restart
               </button>
             </span>
           </div>
           {events.length === 0 ? (
-            <div className="text-slate-500">No calls yet. Play the creative and tap its install button.</div>
+            <div className="sh-dim">No calls yet. Play the creative and tap its install button.</div>
           ) : (
-            <ol className="max-h-40 space-y-0.5 overflow-y-auto font-mono text-[11px]">
+            <ol className="sh-host-log">
               {events.map((e, i) => (
-                <li key={i} className={CTA_CALLS.has(e.call) ? "text-amber-200" : "text-slate-400"}>
-                  <span className="text-slate-500">{((e.t - t0.current) / 1000).toFixed(1)}s</span> {e.call}
-                  {e.detail && <span className="break-all text-slate-500"> {e.detail}</span>}
+                <li key={i} className={CTA_CALLS.has(e.call) ? "cta" : undefined}>
+                  <span className="sh-dim">{((e.t - t0.current) / 1000).toFixed(1)}s</span> {e.call}
+                  {e.detail && <span className="sh-dim"> {e.detail}</span>}
                 </li>
               ))}
             </ol>
           )}
-          {ctaCount > 0 && <div className="mt-2 text-[11px] text-emerald-400">CTA fired {ctaCount === 1 ? "once" : `${ctaCount} times`}: the install button reaches the network.</div>}
+          {ctaCount > 0 && <div className="sh-host-ok">CTA fired {ctaCount === 1 ? "once" : `${ctaCount} times`}: the install button reaches the network.</div>}
         </div>
       )}
-    </div>
+    </>
   );
 }

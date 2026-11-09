@@ -4,11 +4,8 @@ import QRCode from "qrcode";
 import { changePassword, twofaBegin, twofaConfirm, twofaDisable, twofaStatus } from "../api";
 import { getOrg, renameOrg, inviteMember, revokeInvite, setMemberRole, removeMember, leaveWorkspace, transferOwnership, setRequire2fa } from "../api";
 import type { AuthUser, OrgDetail, OrgRole, PlanStatus } from "../types";
-
-const input =
-  "w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500";
-const panel = "rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-5";
-const label = "mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400";
+import { Icon } from "./icons";
+import { Msg, PageHead } from "./pageKit";
 
 export function Settings({ user, status, onWorkspaceChanged }: { user: AuthUser; status: PlanStatus | null; onWorkspaceChanged?: () => void }) {
   const [cur, setCur] = useState("");
@@ -85,93 +82,146 @@ export function Settings({ user, status, onWorkspaceChanged }: { user: AuthUser;
     }
   }
 
+  const usedPct = status && status.limit ? Math.min(100, Math.round((status.used / status.limit) * 100)) : 0;
+
   return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="mb-6 text-2xl font-semibold text-slate-100">Settings</h1>
+    <div>
+      <PageHead title="Settings" sub="Your account, security, workspace and team, and the Unity plugin." />
 
-      {/* profile */}
-      <section className={`${panel} mb-5`}>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-amber-400">Profile</h2>
-        <div className="flex justify-between py-1 text-sm">
-          <span className="text-slate-400">Email</span>
-          <span className="text-slate-100">{user.email}</span>
-        </div>
-        <div className="flex justify-between py-1 text-sm">
-          <span className="text-slate-400">Plan</span>
-          <span className="text-slate-100">{status?.planName ?? "—"}</span>
-        </div>
-      </section>
+      <div className="pg-settings">
+        {/* account */}
+        <section className="pg-card">
+          <h2 className="pg-h">Your account</h2>
+          <dl className="pg-kv">
+            <div>
+              <dt>Email</dt>
+              <dd>{user.email}</dd>
+            </div>
+            <div>
+              <dt>Email verified</dt>
+              <dd>{user.emailVerified ? <span className="pg-tag ok">Verified</span> : <span className="pg-tag warn">Not yet</span>}</dd>
+            </div>
+            <div>
+              <dt>Plan</dt>
+              <dd>
+                <span className="pg-tag brand">{status?.planName ?? "—"}</span>
+              </dd>
+            </div>
+            {user.isAdmin && (
+              <div>
+                <dt>Platform role</dt>
+                <dd>
+                  <span className="pg-tag brand">Admin</span>
+                </dd>
+              </div>
+            )}
+          </dl>
+        </section>
 
-      {/* password */}
-      <section className={`${panel} mb-5`}>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-amber-400">Change password</h2>
-        <form onSubmit={submitPw} className="grid gap-3">
-          <div>
-            <label className={label}>Current password</label>
-            <input type="password" className={input} value={cur} onChange={(e) => setCur(e.target.value)} required />
-          </div>
-          <div>
-            <label className={label}>New password</label>
-            <input type="password" className={input} value={nw} onChange={(e) => setNw(e.target.value)} required minLength={6} />
-          </div>
-          {pwMsg && <div className={`text-sm ${pwMsg.ok ? "text-emerald-400" : "text-red-400"}`}>{pwMsg.text}</div>}
-          <button
-            type="submit"
-            disabled={pwBusy}
-            className="justify-self-start rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40"
-          >
-            {pwBusy ? "Saving…" : "Update password"}
-          </button>
-        </form>
-      </section>
-
-      {/* 2FA */}
-      <section className={panel}>
-        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-amber-400">Two-factor authentication</h2>
-        <p className="mb-3 text-sm text-slate-400">
-          {enabled === null ? "…" : enabled ? "Enabled — a code from your authenticator app is required at sign-in." : "Add a time-based code (TOTP) from an authenticator app."}
-        </p>
-
-        {tfaMsg && <div className="mb-3 text-sm text-red-400">{tfaMsg}</div>}
-
-        {enabled === false && !setup && (
-          <button onClick={startTfa} disabled={tfaBusy} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
-            {tfaBusy ? "…" : "Enable 2FA"}
-          </button>
+        {/* export usage */}
+        {status && (
+          <section className="pg-card">
+            <div className="pg-card-head">
+              <h2 className="pg-h">Export usage</h2>
+              <span className="pg-count">{status.limit == null ? "Unlimited" : "Last 30 days"}</span>
+            </div>
+            <div className="pg-usage">
+              <div className="pg-usage-row">
+                <span>
+                  <b>{status.used}</b> {status.limit == null ? "exports" : `of ${status.limit} exports`}
+                </span>
+                <span>{status.planName} plan</span>
+              </div>
+              {status.limit != null && (
+                <div className="pg-bar" role="progressbar" aria-valuenow={usedPct} aria-valuemin={0} aria-valuemax={100} aria-label="Exports used">
+                  <i style={{ width: `${usedPct}%` }} />
+                </div>
+              )}
+            </div>
+          </section>
         )}
 
-        {setup && (
-          <div className="grid gap-3 sm:grid-cols-[auto_1fr] sm:items-start">
-            <img src={setup.qr} alt="2FA QR code" className="rounded-lg bg-white p-1" width={160} height={160} />
-            <div>
-              <p className="mb-1 text-xs text-slate-400">Scan the QR in your authenticator app, or enter this key:</p>
-              <code className="mb-3 block break-all rounded bg-[#06281c] px-2 py-1 text-xs text-amber-300">{setup.secret}</code>
-              <label className={label}>Enter the 6-digit code</label>
-              <div className="flex gap-2">
-                <input className={`${input} max-w-[140px]`} value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" maxLength={6} placeholder="000000" />
-                <button onClick={confirmTfa} disabled={tfaBusy} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
-                  Verify &amp; enable
-                </button>
+        {/* 2FA */}
+        <section className="pg-card">
+          <div className="pg-card-head">
+            <h2 className="pg-h">Two-factor authentication</h2>
+            {enabled !== null && <span className={`pg-tag ${enabled ? "ok" : ""}`}>{enabled ? "On" : "Off"}</span>}
+          </div>
+          <p className="pg-p">
+            {enabled === null
+              ? "…"
+              : enabled
+                ? "On. Signing in asks for a code from your authenticator app."
+                : "Protect sign-in with a time-based code (TOTP) from an authenticator app."}
+          </p>
+
+          {tfaMsg && <Msg kind="err">{tfaMsg}</Msg>}
+
+          {enabled === false && !setup && (
+            <button onClick={startTfa} disabled={tfaBusy} className="pg-btn pg-btn-primary">
+              <Icon.Shield />
+              {tfaBusy ? "…" : "Turn on 2FA"}
+            </button>
+          )}
+
+          {setup && (
+            <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-start">
+              <img src={setup.qr} alt="2FA QR code" className="rounded-[10px] border border-line bg-paper p-1" width={160} height={160} />
+              <div className="flex min-w-0 flex-col gap-3">
+                <p className="pg-p" style={{ margin: 0 }}>
+                  Scan the QR in your authenticator app, or enter this key:
+                </p>
+                <code className="pg-codeblock">{setup.secret}</code>
+                <label className="pg-field">
+                  <span className="pg-label">Enter the 6-digit code</span>
+                  <div className="flex flex-wrap gap-2">
+                    <input className="pg-input mono max-w-[140px]" value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" maxLength={6} placeholder="000000" />
+                    <button onClick={confirmTfa} disabled={tfaBusy} className="pg-btn pg-btn-primary">
+                      Verify &amp; turn on
+                    </button>
+                  </div>
+                </label>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {enabled === true && (
-          <div>
-            <label className={label}>Enter a current code to disable</label>
-            <div className="flex gap-2">
-              <input className={`${input} max-w-[140px]`} value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" maxLength={6} placeholder="000000" />
-              <button onClick={disableTfa} disabled={tfaBusy} className="rounded-lg border border-red-500/50 px-4 py-2 text-sm font-medium text-red-300 hover:bg-red-500/10 disabled:opacity-40">
-                Disable 2FA
+          {enabled === true && (
+            <label className="pg-field">
+              <span className="pg-label">Enter a current code to turn it off</span>
+              <div className="flex flex-wrap gap-2">
+                <input className="pg-input mono max-w-[140px]" value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" maxLength={6} placeholder="000000" />
+                <button onClick={disableTfa} disabled={tfaBusy} className="pg-btn pg-btn-danger">
+                  Turn off 2FA
+                </button>
+              </div>
+            </label>
+          )}
+        </section>
+
+        {/* password */}
+        <section className="pg-card">
+          <h2 className="pg-h">Change password</h2>
+          <form onSubmit={submitPw} className="grid gap-3.5">
+            <label className="pg-field">
+              <span className="pg-label">Current password</span>
+              <input type="password" className="pg-input" value={cur} onChange={(e) => setCur(e.target.value)} required autoComplete="current-password" />
+            </label>
+            <label className="pg-field">
+              <span className="pg-label">New password</span>
+              <input type="password" className="pg-input" value={nw} onChange={(e) => setNw(e.target.value)} required minLength={6} autoComplete="new-password" />
+            </label>
+            {pwMsg && <Msg kind={pwMsg.ok ? "success" : "err"}>{pwMsg.text}</Msg>}
+            <div>
+              <button type="submit" disabled={pwBusy} className="pg-btn pg-btn-primary">
+                {pwBusy ? "Saving…" : "Update password"}
               </button>
             </div>
-          </div>
-        )}
-      </section>
+          </form>
+        </section>
 
-      <WorkspaceSection key={String(user.twoFactor)} me={user} onChanged={onWorkspaceChanged} />
-      <PluginSection />
+        <WorkspaceSection key={String(user.twoFactor)} me={user} onChanged={onWorkspaceChanged} />
+        <PluginSection />
+      </div>
     </div>
   );
 }
@@ -237,144 +287,195 @@ function WorkspaceSection({ me, onChanged }: { me: AuthUser; onChanged?: () => v
     onChanged?.();
   }
 
-  if (!org) return <section className={`${panel} mt-5 text-sm text-slate-400`}>{err ?? "Loading workspace…"}</section>;
+  if (!org)
+    return (
+      <section className="pg-card">
+        <h2 className="pg-h">Workspace &amp; team</h2>
+        {err ? <Msg kind="err">{err}</Msg> : <p className="pg-p" style={{ margin: 0 }}>Loading workspace…</p>}
+      </section>
+    );
   const isOwner = org.role === "owner";
   const isAdmin = isOwner || org.role === "admin";
   const canEditRow = (m: { id: string; role: OrgRole }) => isAdmin && m.role !== "owner" && (isOwner || m.role !== "admin");
 
   return (
-    <section className={`${panel} mt-5`}>
-      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
-          Workspace · <span className="text-slate-100 normal-case tracking-normal">{org.name}</span>
-        </h2>
-        <div className="flex items-center gap-3 text-xs">
-          <span className="text-slate-400">
-            you are <b className="text-slate-200">{org.role}</b>
-          </span>
-          {isAdmin && (
-            <button onClick={() => void rename()} className="text-amber-400 hover:underline">
-              Rename
-            </button>
-          )}
-          {!isOwner && (
-            <button onClick={() => void leave()} disabled={busy} className="text-red-400 hover:underline disabled:opacity-40">
-              Leave
-            </button>
-          )}
+    <>
+      <section className="pg-card">
+        <div className="pg-card-head">
+          <h2 className="pg-h">Workspace &amp; team</h2>
+          <div className="flex items-center gap-3 text-[13px]">
+            {isAdmin && (
+              <button onClick={() => void rename()} className="pg-link">
+                Rename
+              </button>
+            )}
+            {!isOwner && (
+              <button onClick={() => void leave()} disabled={busy} className="pg-link danger">
+                Leave
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      <p className="mb-3 text-sm text-slate-400">
-        Apps, plan, domain verification and the export quota belong to the workspace; the owner ({org.owner.email}) is billed. Roles: viewer →
-        member → admin → owner.
-      </p>
+        <dl className="pg-kv mb-4">
+          <div>
+            <dt>Workspace</dt>
+            <dd>{org.name}</dd>
+          </div>
+          <div>
+            <dt>Your role</dt>
+            <dd>
+              <span className={`pg-tag ${isAdmin ? "brand" : ""}`} title={ROLE_HELP[org.role]}>
+                {org.role}
+              </span>
+            </dd>
+          </div>
+          <div>
+            <dt>Billed to</dt>
+            <dd>{org.owner.email ?? "—"}</dd>
+          </div>
+        </dl>
+        <p className="pg-hint" style={{ margin: "0 0 16px" }}>
+          Apps, plan, domain verification and the export quota belong to the workspace. Roles: viewer → member → admin → owner.
+        </p>
 
-      <div className="mb-3 rounded-lg border border-[#1b5540] bg-[#06281c] px-3 py-2.5">
-        <label className="flex items-start gap-2 text-sm text-slate-200">
+        <div className="pg-tablewrap mb-4">
+          <table className="pg-table">
+            <thead>
+              <tr>
+                <th>Member</th>
+                {isAdmin && <th>2FA</th>}
+                <th>Role</th>
+                <th className="r" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {org.members.map((m) => (
+                <tr key={m.id}>
+                  <td className="wrap" style={{ overflowWrap: "anywhere" }}>
+                    {m.email}
+                    {m.id === me.id && <span className="dim"> (you)</span>}
+                  </td>
+                  {isAdmin && (
+                    <td>
+                      <span
+                        className={`pg-tag ${m.twoFactor ? "ok" : org.require2fa ? "err" : ""}`}
+                        title={m.twoFactor ? "Two-factor authentication is on" : "No two-factor authentication"}
+                      >
+                        {m.twoFactor ? "On" : "Off"}
+                      </span>
+                    </td>
+                  )}
+                  <td>
+                    {canEditRow(m) ? (
+                      <select
+                        value={m.role}
+                        disabled={busy}
+                        onChange={(e) => void run(() => setMemberRole(m.id, e.target.value as OrgRole))}
+                        className="pg-input sm w-auto"
+                        title={ROLE_HELP[m.role]}
+                      >
+                        <option value="viewer">viewer</option>
+                        <option value="member">member</option>
+                        {isOwner && <option value="admin">admin</option>}
+                      </select>
+                    ) : (
+                      <span className={`pg-tag ${m.role === "owner" || m.role === "admin" ? "brand" : ""}`} title={ROLE_HELP[m.role]}>
+                        {m.role}
+                      </span>
+                    )}
+                  </td>
+                  <td className="r">
+                    <span className="inline-flex gap-3">
+                      {isOwner && m.role !== "owner" && (
+                        <button onClick={() => void transfer(m.id, m.email)} disabled={busy} className="pg-link muted">
+                          Make owner
+                        </button>
+                      )}
+                      {canEditRow(m) && (
+                        <button onClick={() => void run(() => removeMember(m.id))} disabled={busy} className="pg-link danger">
+                          Remove
+                        </button>
+                      )}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {isAdmin && org.invites.length > 0 && (
+          <div className="mb-4">
+            <div className="pg-label mb-2">Pending invites</div>
+            <div className="grid gap-1.5">
+              {org.invites.map((i) => (
+                <div key={i.id} className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-dashed border-line-strong px-3 py-2 text-[13.5px]">
+                  <span className="min-w-0 text-text" style={{ overflowWrap: "anywhere" }}>
+                    {i.email} <span className="text-text-3">· {i.role} · expires {new Date(i.expiresAt).toLocaleDateString()}</span>
+                  </span>
+                  <button onClick={() => void run(() => revokeInvite(i.id))} disabled={busy} className="pg-link danger text-[13px]">
+                    Revoke
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {err && <Msg kind="err">{err}</Msg>}
+
+        {isAdmin ? (
+          <form onSubmit={invite}>
+            <div className="pg-label mb-2">Invite a teammate</div>
+            <div className="flex flex-wrap gap-2">
+              <input className="pg-input min-w-[200px] flex-1" type="email" placeholder="teammate@studio.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <select value={role} onChange={(e) => setRole(e.target.value as OrgRole)} className="pg-input w-auto" title={ROLE_HELP[role]}>
+                <option value="viewer">viewer</option>
+                <option value="member">member</option>
+                {isOwner && <option value="admin">admin</option>}
+              </select>
+              <button type="submit" disabled={busy} className="pg-btn pg-btn-primary">
+                <Icon.Mail />
+                {busy ? "…" : "Send invite"}
+              </button>
+            </div>
+            <p className="pg-hint">They get an email link; no account needed in advance. Invites expire after 7 days.</p>
+          </form>
+        ) : (
+          <p className="pg-hint" style={{ margin: 0 }}>
+            Only admins can manage team members. Ask the owner ({org.owner.email ?? "workspace owner"}) to invite people.
+          </p>
+        )}
+      </section>
+
+      {/* workspace two-factor policy */}
+      <section className="pg-card">
+        <div className="pg-card-head">
+          <h2 className="pg-h">Workspace two-factor policy</h2>
+          <span className={`pg-tag ${org.require2fa ? "brand" : ""}`}>{org.require2fa ? "Required" : "Optional"}</span>
+        </div>
+        <label className="pg-checkrow">
           <input
             type="checkbox"
-            className="mt-0.5 accent-amber-500"
+            className="pg-check"
             checked={!!org.require2fa}
             disabled={!isAdmin || busy || !me.twoFactor}
             onChange={(e) => void run(() => setRequire2fa(e.target.checked))}
           />
           <span>
             Require two-factor authentication for every member
-            <span className="block text-xs text-slate-400">
+            <span className="mt-0.5 block text-[13px] leading-normal text-text-3">
               {!isAdmin
                 ? "Admins decide this."
                 : !me.twoFactor
-                  ? "Turn on two-factor authentication for your own account (Security, above) to change this."
+                  ? "Turn on two-factor authentication for your own account (above) to change this."
                   : org.require2fa
                     ? `${org.members.filter((m) => !m.twoFactor).length} member(s) without 2FA can sign in but can't use this workspace until they turn it on.`
                     : "Members without 2FA get an email and can't use the workspace until they turn it on."}
             </span>
           </span>
         </label>
-      </div>
-
-      <div className="mb-3 grid gap-1">
-        {org.members.map((m) => (
-          <div key={m.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#1b5540] bg-[#06281c] px-3 py-2 text-sm">
-            <span className="text-slate-100">
-              {m.email}
-              {m.id === me.id && <span className="text-xs text-slate-500"> (you)</span>}
-              {isAdmin && (
-                <span
-                  className={`ml-2 rounded px-1.5 py-0.5 text-[10px] ${m.twoFactor ? "bg-emerald-500/15 text-emerald-300" : org.require2fa ? "bg-red-500/15 text-red-300" : "bg-[#123f2d] text-slate-400"}`}
-                  title={m.twoFactor ? "Two-factor authentication is on" : "No two-factor authentication"}
-                >
-                  {m.twoFactor ? "2FA" : "no 2FA"}
-                </span>
-              )}
-            </span>
-            <span className="flex items-center gap-2 text-xs">
-              {canEditRow(m) ? (
-                <select
-                  value={m.role}
-                  disabled={busy}
-                  onChange={(e) => void run(() => setMemberRole(m.id, e.target.value as OrgRole))}
-                  className="rounded border border-[#1f6b4a] bg-[#0a3a28] px-1.5 py-0.5 text-slate-200"
-                  title={ROLE_HELP[m.role]}
-                >
-                  <option value="viewer">viewer</option>
-                  <option value="member">member</option>
-                  {isOwner && <option value="admin">admin</option>}
-                </select>
-              ) : (
-                <span className="text-slate-400" title={ROLE_HELP[m.role]}>
-                  {m.role}
-                </span>
-              )}
-              {isOwner && m.role !== "owner" && (
-                <button onClick={() => void transfer(m.id, m.email)} disabled={busy} className="text-slate-400 hover:text-amber-300 hover:underline disabled:opacity-40">
-                  make owner
-                </button>
-              )}
-              {canEditRow(m) && (
-                <button onClick={() => void run(() => removeMember(m.id))} disabled={busy} className="text-red-400 hover:underline disabled:opacity-40">
-                  Remove
-                </button>
-              )}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {isAdmin && org.invites.length > 0 && (
-        <div className="mb-3">
-          <div className="mb-1 text-xs font-medium uppercase tracking-wide text-slate-400">Pending invites</div>
-          <div className="grid gap-1">
-            {org.invites.map((i) => (
-              <div key={i.id} className="flex items-center justify-between rounded-lg border border-dashed border-[#1b5540] px-3 py-1.5 text-sm text-slate-300">
-                <span>
-                  {i.email} <span className="text-xs text-slate-500">· {i.role} · expires {new Date(i.expiresAt).toLocaleDateString()}</span>
-                </span>
-                <button onClick={() => void run(() => revokeInvite(i.id))} disabled={busy} className="text-xs text-red-400 hover:underline disabled:opacity-40">
-                  Revoke
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {err && <div className="mb-2 text-sm text-red-400">{err}</div>}
-
-      {isAdmin && (
-        <form onSubmit={invite} className="flex flex-wrap gap-2">
-          <input className={`${input} min-w-[200px] flex-1`} type="email" placeholder="teammate@studio.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <select value={role} onChange={(e) => setRole(e.target.value as OrgRole)} className={`${input} w-auto`} title={ROLE_HELP[role]}>
-            <option value="viewer">viewer</option>
-            <option value="member">member</option>
-            {isOwner && <option value="admin">admin</option>}
-          </select>
-          <button type="submit" disabled={busy} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40">
-            {busy ? "…" : "Send invite"}
-          </button>
-          <p className="w-full text-xs text-slate-500">They get an email link; no account needed in advance. Invites expire after 7 days.</p>
-        </form>
-      )}
-    </section>
+      </section>
+    </>
   );
 }

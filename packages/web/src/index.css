@@ -1,7 +1,92 @@
 @import "tailwindcss";
 
+/*
+ * Factorial AdLab design tokens: light canvas, dark sidebar, purple brand, Inter.
+ * Every screen uses these, either as CSS variables (var(--brand)) or as Tailwind utilities generated
+ * from the @theme block below (bg-canvas, text-text-2, border-line, bg-brand, text-brand-700, bg-ink-900,
+ * shadow-card, rounded-card…). Don't hard-code hex values in components.
+ */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ink: dark surfaces (sidebar, footer, toast, phone bezel) */
+  --color-ink-900: #0e1116;
+  --color-ink-800: #151922;
+  --color-ink-700: #1c212c;
+  --color-ink-600: #262d3a;
+  --color-ink-500: #37404f;
+
+  /* surfaces */
+  --color-canvas: #f7f8fa;
+  --color-paper: #ffffff;
+  --color-paper-2: #fbfcfd;
+
+  /* lines */
+  --color-line: #e7eaef;
+  --color-line-strong: #d5dae2;
+
+  /* text */
+  --color-text: #101319;
+  --color-text-2: #4a5361;
+  --color-text-3: #7b8494;
+  --color-text-4: #9aa3af;
+  --color-text-inv: #eef1f6;
+  --color-text-inv-2: #9aa4b4;
+
+  /* brand purple */
+  --color-brand-50: #f6f0fe;
+  --color-brand-100: #ebddfd;
+  --color-brand-300: #c9a6f5;
+  --color-brand-400: #a26bea;
+  --color-brand: #6c25d8;
+  --color-brand-600: #5a1db8;
+  --color-brand-700: #4a1796;
+  --color-brand-ink: #2e0f5e;
+  --color-brand-pink: #e13ddc;
+
+  /* signal teal (success, check marks) */
+  --color-signal: #0d9488;
+  --color-signal-ink: #042f2b;
+  --color-signal-50: #f0fdfa;
+
+  /* status */
+  --color-danger: #ff5d5d;
+  --color-danger-50: #ffe9e9;
+  --color-danger-ink: #7a1616;
+  --color-warn: #ffb020;
+  --color-warn-50: #fff4de;
+
+  --radius-card: 14px;
+
+  --shadow-card: 0 1px 2px rgba(16, 19, 25, 0.04), 0 1px 3px rgba(16, 19, 25, 0.06);
+  --shadow-raised: 0 4px 12px rgba(16, 19, 25, 0.06), 0 2px 4px rgba(16, 19, 25, 0.04);
+  --shadow-float: 0 18px 48px rgba(16, 19, 25, 0.14), 0 6px 16px rgba(16, 19, 25, 0.08);
+  --shadow-violet: 0 8px 24px rgba(108, 37, 216, 0.3);
+}
+
 :root {
-  color-scheme: dark;
+  color-scheme: light;
+  /* the same tokens as plain variables, for hand-written CSS */
+  --ink-900: #0e1116; --ink-800: #151922; --ink-700: #1c212c; --ink-600: #262d3a; --ink-500: #37404f;
+  --canvas: #f7f8fa; --paper: #ffffff; --paper-2: #fbfcfd;
+  --line: #e7eaef; --line-strong: #d5dae2;
+  --text: #101319; --text-2: #4a5361; --text-3: #7b8494; --text-4: #9aa3af; --text-inv: #eef1f6; --text-inv-2: #9aa4b4;
+  --brand-050: #f6f0fe; --brand-100: #ebddfd; --brand-300: #c9a6f5; --brand-400: #a26bea;
+  --brand: #6c25d8; --brand-600: #5a1db8; --brand-700: #4a1796; --brand-ink: #2e0f5e; --brand-pink: #e13ddc;
+  --signal: #0d9488; --signal-ink: #042f2b; --signal-050: #f0fdfa;
+  --danger: #ff5d5d; --danger-050: #ffe9e9; --danger-ink: #7a1616; --warn: #ffb020; --warn-050: #fff4de;
+  --grad-brand: linear-gradient(135deg, #e13ddc 0%, #a230da 50%, #6c25d8 100%);
+  --grad-brand-soft: linear-gradient(135deg, #e13ddc 0%, #6c25d8 100%);
+  --grad-panel: linear-gradient(150deg, #2e0f5e 0%, #6c25d8 48%, #a230da 80%, #e13ddc 118%);
+  --grad-button: linear-gradient(160deg, #6c25d8 0%, #5a1db8 100%);
+  --shadow-1: 0 1px 2px rgba(16, 19, 25, 0.04), 0 1px 3px rgba(16, 19, 25, 0.06);
+  --shadow-2: 0 4px 12px rgba(16, 19, 25, 0.06), 0 2px 4px rgba(16, 19, 25, 0.04);
+  --shadow-3: 0 18px 48px rgba(16, 19, 25, 0.14), 0 6px 16px rgba(16, 19, 25, 0.08);
+  --shadow-violet: 0 8px 24px rgba(108, 37, 216, 0.3);
+  --r-sm: 8px; --r-md: 12px; --r-lg: 18px; --r-xl: 24px;
+  --font-display: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
 html,
 body,
@@ -10,7 +95,22 @@ body,
 }
 body {
   margin: 0;
-  background: #06281c;
-  color: #eaf5ee;
-  font-family: "Fredoka", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.mono {
+  font-family: var(--font-mono);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

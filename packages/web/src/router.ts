@@ -6,11 +6,17 @@ import { useCallback, useEffect, useState, type MouseEvent } from "react";
  *
  *   /                                              apps (nothing selected)
  *   /apps/:appId[/concepts/:conceptId[/creatives/:creativeId]]
- *   /start  /plans  /settings  /analytics  /preloader  /domain
+ *   /start  /plans  /settings  /analytics  /preloader  /domain  /docs
+ *   /login  /signup  /forgot                       signed-out auth screens
  *   /support[/:threadId]
  *   /admin[/:tab]   /admin/support/:threadId
  */
-export type Page = "app" | "start" | "plans" | "settings" | "analytics" | "preloader" | "domain" | "support" | "admin";
+export type Page =
+  | "app" | "start" | "plans" | "settings" | "analytics" | "preloader" | "domain" | "docs" | "support" | "admin"
+  | "login" | "signup" | "forgot";
+
+/** the signed-out auth screens (a signed-in visit to one goes home) */
+export const AUTH_PAGES: Page[] = ["login", "signup", "forgot"];
 
 export interface Route {
   page: Page;
@@ -21,7 +27,7 @@ export interface Route {
   tab?: string;
 }
 
-const SIMPLE: Page[] = ["start", "plans", "settings", "analytics", "preloader", "domain"];
+const SIMPLE: Page[] = ["start", "plans", "settings", "analytics", "preloader", "domain", "docs", "login", "signup", "forgot"];
 const seg = /^[A-Za-z0-9_-]{1,80}$/; // ids are UUIDs; anything else isn't a route
 
 export function parseRoute(pathname: string): Route | null {
@@ -80,13 +86,17 @@ export function legacyRoute(search: string): Route | null {
 }
 
 const TITLES: Record<Page, string> = {
-  app: "Studio",
-  start: "Start here",
+  app: "Playable Ads",
+  start: "Setup",
   plans: "Plans",
   settings: "Settings",
   analytics: "Analytics",
   preloader: "Preloader kits",
   domain: "Domain",
+  docs: "Docs",
+  login: "Sign in",
+  signup: "Create account",
+  forgot: "Reset password",
   support: "Support",
   admin: "Admin",
 };

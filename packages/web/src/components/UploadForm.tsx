@@ -1,9 +1,13 @@
 import { useRef, useState, type DragEvent, type ReactNode } from "react";
 import { uploadCreative, compileUnityBuild, waitForJob } from "../api";
 import type { CompileJobResult, CreativeSummary, Job } from "../types";
+import { Icon } from "./icons";
 
 type Mode = "html" | "unity";
 
+const fmtBytes = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(2)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+/** "Add a build" sheet: pick the source kind, drop the file, name it, upload (or compile a Unity build). */
 export function UploadForm({
   conceptId,
   onUploaded,
@@ -27,6 +31,7 @@ export function UploadForm({
     if (!f) return;
     setFile(f);
     setCompiled(null);
+    setErr(null);
     if (!name) setName(f.name.replace(/\.[^.]+$/, ""));
   }
 
@@ -84,10 +89,15 @@ export function UploadForm({
     );
   }
 
+  const kinds = mode === "unity" ? ["WebGL build (.zip)"] : ["Folder (.zip)", "Single .html"];
+
   return (
-    <div className="w-full max-w-lg mx-auto">
+    <div className="sh-sheet">
+      <h2 className="sh-sheet-h">Add a build</h2>
+      <p className="sh-sheet-sub">Upload a finished HTML5 playable, or a Unity WebGL build that we compile into one file.</p>
+
       {/* source switch */}
-      <div className="mb-4 flex overflow-hidden rounded-lg border border-[#1b5540] text-sm">
+      <div className="sh-tabs" role="tablist" aria-label="Build type">
         {(
           [
             ["html", "HTML5 playable"],
@@ -96,12 +106,15 @@ export function UploadForm({
         ).map(([m, label]) => (
           <button
             key={m}
+            type="button"
+            role="tab"
+            aria-selected={mode === m}
             onClick={() => {
               setMode(m);
               setFile(null);
               setErr(null);
             }}
-            className={`flex-1 px-3 py-2 ${mode === m ? "bg-amber-500/20 text-amber-200" : "text-slate-400 hover:text-slate-200"}`}
+            className={`sh-tab${mode === m ? " on" : ""}`}
           >
             {label}
           </button>
@@ -109,6 +122,9 @@ export function UploadForm({
       </div>
 
       <div
+        role="button"
+        tabIndex={0}
+        aria-label={file ? `Selected ${file.name}. Choose another file` : "Choose a build file"}
         onDragOver={(e) => {
           e.preventDefault();
           setDrag(true);
@@ -116,76 +132,103 @@ export function UploadForm({
         onDragLeave={() => setDrag(false)}
         onDrop={onDrop}
         onClick={() => inputRef.current?.click()}
-        className={`cursor-pointer rounded-xl border-2 border-dashed p-8 text-center transition ${
-          drag ? "border-amber-400 bg-amber-500/10" : "border-[#1f6b4a] hover:border-[#7cb342]"
-        }`}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            inputRef.current?.click();
+          }
+        }}
+        className={`sh-drop${drag ? " over" : ""}${file ? " has" : ""}`}
       >
         <input
           ref={inputRef}
           type="file"
           accept={mode === "unity" ? ".zip" : ".zip,.html,.htm"}
-          className="hidden"
-          onChange={(e) => pick(e.target.files?.[0])}
+          hidden
+          onChange={(e) => {
+            pick(e.target.files?.[0]);
+            e.target.value = "";
+          }}
         />
-        <div className="text-slate-300">
-          {file ? (
-            <span className="font-medium text-amber-300">{file.name}</span>
-          ) : mode === "unity" ? (
-            <>
-              <div className="text-lg font-medium">Drop a zipped Unity WebGL build</div>
-              <div className="mt-1 text-sm text-slate-400">
-                File ▸ Build Settings ▸ WebGL, then zip the output folder (index.html + Build/). We compile it into one self-contained
-                playable and tell you what to shrink.
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="text-lg font-medium">Drop an HTML5 playable</div>
-              <div className="text-sm text-slate-400 mt-1">.zip (folder) or a single .html — or click to browse</div>
-            </>
-          )}
-        </div>
+        {file ? (
+          <div className="sh-file-row">
+            <span className="sh-file-ico">
+              <Icon.File />
+            </span>
+            <span className="sh-file-meta">
+              <div className="sh-file-name">{file.name}</div>
+              <div className="sh-file-sub">{fmtBytes(file.size)}</div>
+            </span>
+            <span className="sh-link-btn">Change</span>
+          </div>
+        ) : (
+          <>
+            <div className="sh-drop-ico">
+              <Icon.Upload />
+            </div>
+            <div className="sh-drop-h">Drop your build here</div>
+            <div className="sh-drop-p">
+              or <b>browse</b> to choose a file
+            </div>
+            <div className="sh-drop-kinds">
+              {kinds.map((k) => (
+                <span key={k} className="sh-drop-kind">
+                  {k}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {mode === "unity" && (
-        <p className="mt-2 text-[11px] text-slate-500">
-          Tip: Publishing Settings ▸ Compression Format = Disabled, Managed Stripping = High, Exceptions = None. Network caps are 2–5 MB, so
-          this suits light games; the Unity plugin does these settings for you.
+        <p className="sh-note" style={{ marginTop: 10 }}>
+          File ▸ Build Settings ▸ WebGL, then zip the output folder (index.html + Build/). Use Compression Format = Disabled, Managed Stripping =
+          High and Exceptions = None. Network caps are 2–5 MB, so this suits light games; the Unity plugin sets all of this for you.
         </p>
       )}
 
-      <div className="mt-4 grid gap-3">
-        <Field label="Creative name">
-          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="my_creative" />
+      <Field label="Creative name">
+        <input className="sh-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="my_creative" />
+      </Field>
+      <div className="sh-grid2">
+        <Field label="App Store URL (iOS)" optional>
+          <input className="sh-input mono" value={iosUrl} onChange={(e) => setIos(e.target.value)} placeholder="https://apps.apple.com/…" />
         </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="iOS App Store URL">
-            <input className={inputCls} value={iosUrl} onChange={(e) => setIos(e.target.value)} placeholder="https://apps.apple.com/…" />
-          </Field>
-          <Field label="Google Play URL">
-            <input className={inputCls} value={androidUrl} onChange={(e) => setAndroid(e.target.value)} placeholder="https://play.google.com/…" />
-          </Field>
-        </div>
+        <Field label="Google Play URL" optional>
+          <input className="sh-input mono" value={androidUrl} onChange={(e) => setAndroid(e.target.value)} placeholder="https://play.google.com/…" />
+        </Field>
       </div>
 
-      {err && <div className="mt-3 text-sm text-red-400">{err}</div>}
+      {err && (
+        <div className="sh-alert err" role="alert" style={{ marginTop: 4 }}>
+          <Icon.Alert />
+          <span className="sh-alert-text">{err}</span>
+        </div>
+      )}
 
-      <button
-        onClick={submit}
-        disabled={busy || !file}
-        className="mt-5 w-full rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {busy ? (mode === "unity" ? (job ? "Compiling…" : "Uploading…") : "Uploading…") : mode === "unity" ? "Compile playable" : "Upload playable"}
+      <button type="button" onClick={() => void submit()} disabled={busy || !file} className="sh-btn sh-btn-primary sh-btn-block" style={{ marginTop: 8 }}>
+        {busy ? (
+          <>
+            <span className="sh-spin" /> {mode === "unity" ? (job ? "Compiling…" : "Uploading…") : "Uploading…"}
+          </>
+        ) : (
+          <>
+            <Icon.Upload /> {mode === "unity" ? "Compile playable" : "Upload playable"}
+          </>
+        )}
       </button>
 
       {busy && mode === "unity" && (
-        <div className="mt-3" aria-live="polite">
-          <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
-            <span className="truncate">{job?.label ?? (job?.status === "queued" ? "Waiting for a worker…" : "Uploading the build…")}</span>
-            <span className="ml-3 tabular-nums">{job?.progress ?? 0}%</span>
+        <div className="sh-progress" aria-live="polite">
+          <div className="sh-progress-top">
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {job?.label ?? (job?.status === "queued" ? "Waiting for a worker…" : "Uploading the build…")}
+            </span>
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>{job?.progress ?? 0}%</span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded-full bg-[#0a3a28]">
-            <div className="h-full rounded-full bg-amber-500 transition-[width] duration-300" style={{ width: `${Math.max(3, job?.progress ?? 0)}%` }} />
+          <div className="sh-progress-bar">
+            <div style={{ width: `${Math.max(3, job?.progress ?? 0)}%` }} />
           </div>
         </div>
       )}
@@ -193,63 +236,60 @@ export function UploadForm({
   );
 }
 
-const fmtBytes = (n: number) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(2)} MB` : `${Math.round(n / 1024)} KB`);
-
 function CompileSummary({ r, onOpen, onAgain }: { r: CompileJobResult; onOpen: () => void; onAgain: () => void }) {
   const parts: { label: string; n: number; color: string }[] = [
-    { label: "Code (.wasm)", n: r.breakdown.wasm, color: "#f59e0b" },
-    { label: "Assets (.data)", n: r.breakdown.data, color: "#a3d977" },
-    { label: "Framework", n: r.breakdown.framework, color: "#60a5fa" },
-    { label: "Loader", n: r.breakdown.loader, color: "#c084fc" },
-    ...(r.breakdown.streamingAssets ? [{ label: "StreamingAssets", n: r.breakdown.streamingAssets, color: "#f472b6" }] : []),
+    { label: "Code (.wasm)", n: r.breakdown.wasm, color: "var(--brand)" },
+    { label: "Assets (.data)", n: r.breakdown.data, color: "var(--signal)" },
+    { label: "Framework", n: r.breakdown.framework, color: "var(--brand-pink)" },
+    { label: "Loader", n: r.breakdown.loader, color: "var(--warn)" },
+    ...(r.breakdown.streamingAssets ? [{ label: "StreamingAssets", n: r.breakdown.streamingAssets, color: "var(--brand-300)" }] : []),
   ];
   const total = Math.max(1, r.breakdown.totalRaw);
   const over = r.fitsNetworks.length === 0;
   return (
-    <div className="mx-auto w-full max-w-lg">
-      <div className="rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-5">
-        <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-400">Compiled</div>
-        <div className="text-2xl text-slate-100" style={{ fontFamily: "Bungee, sans-serif" }}>
-          {fmtBytes(r.sizeBytes)}
-        </div>
-        <div className={`mt-1 text-sm ${over ? "text-red-300" : "text-slate-300"}`}>
-          {over ? "Above every network's size cap." : `Fits ${r.fitsNetworks.length} network${r.fitsNetworks.length === 1 ? "" : "s"}.`}
-          {r.unityVersion && <span className="text-slate-500"> · Unity {r.unityVersion}</span>}
-        </div>
+    <div className="sh-sheet">
+      <div className="sh-card-t" style={{ color: "var(--brand-700)" }}>
+        Compiled
+      </div>
+      <div className="sh-kpi">{fmtBytes(r.sizeBytes)}</div>
+      <div style={{ fontSize: 13.5, marginTop: 2, color: over ? "#b91c1c" : "var(--text-2)" }}>
+        {over ? "Above every network's size cap." : `Fits ${r.fitsNetworks.length} network${r.fitsNetworks.length === 1 ? "" : "s"}.`}
+        {r.unityVersion && <span className="sh-dim"> · Unity {r.unityVersion}</span>}
+      </div>
 
-        <div className="mt-4 flex h-3 overflow-hidden rounded-full bg-[#06281c]">
-          {parts.map((p) => (
-            <div key={p.label} style={{ width: `${(p.n / total) * 100}%`, background: p.color }} title={`${p.label}: ${fmtBytes(p.n)}`} />
-          ))}
-        </div>
-        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400">
-          {parts.map((p) => (
-            <div key={p.label} className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <i className="inline-block h-2 w-2 rounded-sm" style={{ background: p.color }} />
-                {p.label}
-              </span>
-              <span className="tabular-nums text-slate-300">{fmtBytes(p.n)}</span>
+      <div className="sh-stack">
+        {parts.map((p) => (
+          <div key={p.label} style={{ width: `${(p.n / total) * 100}%`, background: p.color }} title={`${p.label}: ${fmtBytes(p.n)}`} />
+        ))}
+      </div>
+      <div className="sh-legend">
+        {parts.map((p) => (
+          <div key={p.label}>
+            <span>
+              <i style={{ background: p.color }} />
+              {p.label}
+            </span>
+            <b>{fmtBytes(p.n)}</b>
+          </div>
+        ))}
+      </div>
+
+      {r.warnings.length > 0 && (
+        <div style={{ marginTop: 14, display: "grid", gap: 6 }}>
+          {r.warnings.map((w, i) => (
+            <div key={i} className="sh-alert warn" style={{ margin: 0 }}>
+              <Icon.Alert />
+              <span className="sh-alert-text">{w}</span>
             </div>
           ))}
         </div>
+      )}
 
-        {r.warnings.length > 0 && (
-          <ul className="mt-4 grid gap-1.5 text-xs text-slate-300">
-            {r.warnings.map((w, i) => (
-              <li key={i} className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-1.5">
-                {w}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="mt-4 flex gap-2">
-        <button onClick={onOpen} className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 font-medium text-white hover:bg-amber-500">
-          Open creative → export
+      <div style={{ display: "flex", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+        <button type="button" onClick={onOpen} className="sh-btn sh-btn-primary" style={{ flex: 1 }}>
+          Open creative <Icon.ArrowRight />
         </button>
-        <button onClick={onAgain} className="rounded-lg border border-[#1f6b4a] px-4 py-2.5 text-sm text-slate-300 hover:border-[#7cb342]">
+        <button type="button" onClick={onAgain} className="sh-btn sh-btn-ghost">
           Compile another
         </button>
       </div>
@@ -257,13 +297,12 @@ function CompileSummary({ r, onOpen, onAgain }: { r: CompileJobResult; onOpen: (
   );
 }
 
-const inputCls =
-  "w-full rounded-lg border border-[#1f6b4a] bg-[#0a3a28] px-3 py-2 text-sm text-slate-100 outline-none focus:border-amber-500";
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, optional, children }: { label: string; optional?: boolean; children: ReactNode }) {
   return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">{label}</span>
+    <label className="sh-field">
+      <span>
+        {label} {optional && <span className="opt">(optional)</span>}
+      </span>
       {children}
     </label>
   );

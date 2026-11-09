@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { updateCreative } from "../api";
 import type { VariableDef, VariableValues } from "../types";
+import { Icon } from "./icons";
 
 /**
  * Dashboard-tunable custom variables for one creative: fields the game declared with
@@ -77,23 +78,22 @@ export function VariablesPanel({
   if (schema.length === 0 && freeKeys.length === 0 && readOnly) return null;
 
   return (
-    <div className="mt-4 rounded-xl border border-[#1b5540] bg-[#0a3a28]/50 p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Variables</h3>
-        {savedAt && !dirty && <span className="text-[11px] text-[#a3d977]">saved · re-export to apply</span>}
+    <div className="sh-card">
+      <div className="sh-card-h">
+        <span className="sh-card-t">Variables</span>
+        {savedAt && !dirty && <span style={{ fontSize: 11.5, color: "var(--signal)", fontWeight: 500 }}>Saved · re-export to apply</span>}
       </div>
 
       {schema.length === 0 && freeKeys.length === 0 && (
-        <p className="mb-2 text-xs text-slate-500">
-          No variables declared. In Unity mark fields with <code className="text-slate-300">[AdLabField]</code>; HTML5 playables read{" "}
-          <code className="text-slate-300">PF.getVar("key", fallback)</code>.
+        <p className="sh-note" style={{ marginBottom: 10 }}>
+          No variables declared. In Unity mark fields with <code>[AdLabField]</code>; HTML5 playables read <code>PF.getVar("key", fallback)</code>.
         </p>
       )}
 
       {sections.map((sec) => (
-        <div key={sec || "_"} className="mb-2">
-          {sec && <div className="mb-1 text-[11px] font-medium text-amber-300/80">{sec}</div>}
-          <div className="grid gap-1.5">
+        <div key={sec || "_"} style={{ marginBottom: 8 }}>
+          {sec && <div className="sh-var-sec">{sec}</div>}
+          <div style={{ display: "grid", gap: 6 }}>
             {schema
               .filter((d) => (d.section || "") === sec)
               .map((d) => (
@@ -104,24 +104,25 @@ export function VariablesPanel({
       ))}
 
       {freeKeys.length > 0 && (
-        <div className="mb-2 grid gap-1.5">
+        <div style={{ display: "grid", gap: 6, marginBottom: 8 }}>
           {freeKeys.map((k) => (
-            <div key={k} className="flex items-center gap-2 text-sm">
-              <span className="w-36 shrink-0 truncate text-slate-300" title={k}>
+            <div key={k} className="sh-var-row">
+              <span className="sh-var-k" title={k}>
                 {k}
               </span>
               <input
                 className={inputCls}
                 disabled={readOnly}
                 value={String(draft[k])}
+                aria-label={k}
                 onChange={(e) => {
                   const raw = e.target.value;
                   set(k, raw === "true" ? true : raw === "false" ? false : raw !== "" && Number.isFinite(Number(raw)) ? Number(raw) : raw);
                 }}
               />
               {!readOnly && (
-                <button onClick={() => remove(k)} className="text-xs text-red-400 hover:underline" title="Remove">
-                  ×
+                <button type="button" onClick={() => remove(k)} className="sh-icon-btn" title="Remove" aria-label={`Remove ${k}`}>
+                  <Icon.X />
                 </button>
               )}
             </div>
@@ -131,19 +132,22 @@ export function VariablesPanel({
 
       {!readOnly && (
         <>
-          <div className="mt-2 flex items-center gap-2">
-            <input className={`${inputCls} w-36`} placeholder="new.key" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
-            <input className={inputCls} placeholder="value" value={newVal} onChange={(e) => setNewVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addFree()} />
-            <button onClick={addFree} className="rounded-md bg-[#123f2d] px-2.5 py-1.5 text-sm text-slate-200 hover:bg-[#1a5a40]">
-              +
+          <div className="sh-var-row" style={{ marginTop: 6 }}>
+            <input className={inputCls} style={{ width: 112, flex: "none" }} placeholder="new.key" aria-label="New variable key" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
+            <input
+              className={inputCls}
+              placeholder="value"
+              aria-label="New variable value"
+              value={newVal}
+              onChange={(e) => setNewVal(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addFree()}
+            />
+            <button type="button" onClick={addFree} className="sh-icon-btn" title="Add variable" aria-label="Add variable">
+              <Icon.Plus />
             </button>
           </div>
-          {err && <div className="mt-2 text-xs text-red-400">{err}</div>}
-          <button
-            onClick={() => void save()}
-            disabled={busy || !dirty}
-            className="mt-3 w-full rounded-lg border border-amber-500/60 px-3 py-1.5 text-sm text-amber-200 hover:bg-amber-500/10 disabled:opacity-40"
-          >
+          {err && <div className="sh-modal-err">{err}</div>}
+          <button type="button" onClick={() => void save()} disabled={busy || !dirty} className="sh-btn sh-btn-ghost sh-btn-sm sh-btn-block" style={{ marginTop: 12 }}>
             {busy ? "Saving…" : dirty ? "Save variables" : "Saved"}
           </button>
         </>
@@ -156,12 +160,12 @@ function VarRow({ def, value, readOnly, onChange }: { def: VariableDef; value: n
   const label = def.displayName || def.key.split(".").pop() || def.key;
   const numeric = def.type === "number" || def.type === "int";
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className="w-36 shrink-0 truncate text-slate-300" title={def.key}>
+    <div className="sh-var-row">
+      <span className="sh-var-k" title={def.key}>
         {label}
       </span>
       {def.type === "bool" ? (
-        <input type="checkbox" disabled={readOnly} checked={!!value} onChange={(e) => onChange(e.target.checked)} className="accent-amber-500" />
+        <input type="checkbox" disabled={readOnly} checked={!!value} onChange={(e) => onChange(e.target.checked)} className="sh-check" aria-label={label} />
       ) : numeric && def.min !== undefined && def.max !== undefined ? (
         <>
           <input
@@ -172,9 +176,10 @@ function VarRow({ def, value, readOnly, onChange }: { def: VariableDef; value: n
             step={def.step ?? (def.type === "int" ? 1 : (def.max - def.min) / 100)}
             value={Number(value)}
             onChange={(e) => onChange(def.type === "int" ? Math.round(Number(e.target.value)) : Number(e.target.value))}
-            className="flex-1 accent-amber-500"
+            className="sh-range"
+            aria-label={label}
           />
-          <span className="w-14 shrink-0 text-right tabular-nums text-slate-200">{Number(value)}</span>
+          <span style={{ width: 44, flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--text)" }}>{Number(value)}</span>
         </>
       ) : (
         <input
@@ -185,6 +190,7 @@ function VarRow({ def, value, readOnly, onChange }: { def: VariableDef; value: n
           min={def.min}
           max={def.max}
           value={String(value)}
+          aria-label={label}
           onChange={(e) => onChange(numeric ? Number(e.target.value) : e.target.value)}
         />
       )}
@@ -192,4 +198,4 @@ function VarRow({ def, value, readOnly, onChange }: { def: VariableDef; value: n
   );
 }
 
-const inputCls = "min-w-0 flex-1 rounded-md border border-[#1f6b4a] bg-[#0a3a28] px-2 py-1 text-sm text-slate-100 outline-none focus:border-amber-500 disabled:opacity-60";
+const inputCls = "sh-input sm min-w-0 flex-1";
