@@ -104,7 +104,7 @@ const PLANS: PlanCard[] = [
   {
     id: "starter",
     name: "Starter",
-    amount: "$49",
+    amount: "$100",
     cadence: "/mo",
     blurb: "For a solo developer shipping playables on a regular basis.",
     cta: "Choose Starter",
@@ -113,7 +113,7 @@ const PLANS: PlanCard[] = [
   {
     id: "studio",
     name: "Studio",
-    amount: "$199",
+    amount: "$750",
     cadence: "/mo",
     blurb: "For a UA team shipping across all the major networks.",
     cta: "Choose Studio",
@@ -132,7 +132,7 @@ const PLANS: PlanCard[] = [
 
 const COMPARE: { feat: string; us: string; them: string; bad: boolean; hl?: boolean }[] = [
   { feat: "Workflow", us: "Unity plugin or HTML5 upload", them: "Generic WebGL or third-party tools", bad: false },
-  { feat: "Typical monthly cost", us: "$0 – $199 / mo", them: "Agency or per-creative fees", bad: true, hl: true },
+  { feat: "Typical monthly cost", us: "$0 – $750 / mo", them: "Agency or per-creative fees", bad: true, hl: true },
   { feat: "Supported ad networks", us: `${NET_COUNT}, each packaged to spec`, them: "A standard set of networks", bad: false },
   { feat: "Per-network size checks", us: "Every file checked against its cap", them: "Checked by hand", bad: true },
   { feat: "Custom preloader", us: "Your own logo and loading screen", them: "No preloader branding", bad: true },
@@ -143,8 +143,8 @@ const COMPARE: { feat: string; us: string; them: string; bad: boolean; hl?: bool
 /** Illustrative only: about an hour of work (~$60) to hand-package and test one network export. */
 const MANUAL_COST_PER_EXPORT = 60;
 const SAVINGS: Record<PaidPlan, { name: string; price: number; exports: number }> = {
-  starter: { name: "Starter", price: 49, exports: 30 },
-  studio: { name: "Studio", price: 199, exports: 150 },
+  starter: { name: "Starter", price: 100, exports: 30 },
+  studio: { name: "Studio", price: 750, exports: 150 },
 };
 
 const FAQ: { q: string; a: string }[] = [

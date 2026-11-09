@@ -26,11 +26,11 @@ export const PLANS: Record<PlanId, PlanDef> = {
     blurb: "Try it out", features: ["Unlimited Unity Ads exports", "Device-frame preview", "No card required"],
   },
   starter: {
-    id: "starter", name: "Starter", price: 49, priceLabel: "$49/mo", exportsPer30d: 30, networks: "all",
+    id: "starter", name: "Starter", price: 100, priceLabel: "$100/mo", exportsPer30d: 30, networks: "all",
     blurb: "For a solo dev shipping regularly", features: ["30 exports / 30 days", "All 20+ networks", "Custom CTA & store links"],
   },
   studio: {
-    id: "studio", name: "Studio", price: 199, priceLabel: "$199/mo", exportsPer30d: 150, networks: "all", popular: true,
+    id: "studio", name: "Studio", price: 750, priceLabel: "$750/mo", exportsPer30d: 150, networks: "all", popular: true,
     blurb: "For a UA team", features: ["150 exports / 30 days", "All networks", "Team workspace", "Priority support"],
   },
   enterprise: {
