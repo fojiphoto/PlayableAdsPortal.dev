@@ -6,6 +6,7 @@ import { UploadForm } from "./UploadForm";
 import { ResultCard } from "./ResultCard";
 import { DevicePreview } from "./DevicePreview";
 import { Icon } from "./icons";
+import { NetworkLogo } from "./networkLogos";
 
 /**
  * The creative studio for one concept: builds on the left (with their variables), the phone preview in
@@ -293,6 +294,7 @@ export function Workspace({
                         <span className="sh-netrow-check" aria-hidden="true">
                           {on && <Icon.Check />}
                         </span>
+                        <NetworkLogo network={n.id} name={n.name} size={22} />
                         <span className="sh-netrow-name">{n.name}</span>
                       </label>
                     );

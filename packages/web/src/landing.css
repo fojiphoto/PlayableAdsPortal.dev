@@ -444,11 +444,7 @@
   padding-left: 6px;
 }
 .fan-ico {
-  width: 20px;
-  height: 20px;
   flex-shrink: 0;
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 .fan-chip:nth-child(odd) {
   margin-left: 22px;
@@ -880,16 +876,6 @@
 /* network logo square */
 .lp-mark {
   flex: none;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 
 /* networks marquee */

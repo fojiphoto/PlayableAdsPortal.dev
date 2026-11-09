@@ -4,6 +4,7 @@ import type { Network, Plan, PlanStatus } from "../types";
 import { ContactDialog } from "./ContactDialog";
 import { Icon } from "./icons";
 import { Msg, PageHead } from "./pageKit";
+import { NetworkLogo } from "./networkLogos";
 
 /** Where the landing page parks a plan picked before sign-in (see App's PENDING_PLAN_KEY). */
 const PENDING_PLAN_KEY = "adlab.pendingPlan";
@@ -280,7 +281,12 @@ export function Plans({ status, onChanged, email }: { status: PlanStatus | null;
                 </tr>
                 {(networks.length ? networks : [{ id: "unityads", name: "Unity Ads" } as Network]).map((n) => (
                   <tr key={n.id}>
-                    <td>{n.name}</td>
+                    <td>
+                      <span className="pg-net-cell">
+                        <NetworkLogo network={n.id} name={n.name} size={20} />
+                        {n.name}
+                      </span>
+                    </td>
                     {plans.map((p) => (
                       <td key={p.id} className="ctr">
                         {allows(p, n.id) ? yes : no}

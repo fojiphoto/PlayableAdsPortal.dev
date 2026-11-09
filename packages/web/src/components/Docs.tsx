@@ -4,6 +4,7 @@ import type { Network } from "../types";
 import { linkClick, routePath, type Route } from "../router";
 import { Icon } from "./icons";
 import { PageHead } from "./pageKit";
+import { NetworkLogo } from "./networkLogos";
 
 /**
  * Docs: a left nav of pages, the article, and an "On this page" list. The open page lives in component
@@ -427,7 +428,12 @@ function NetworksTable() {
         <tbody>
           {nets.map((n) => (
             <tr key={n.id}>
-              <td>{n.name}</td>
+              <td>
+                <span className="pg-net-cell">
+                  <NetworkLogo network={n.id} name={n.name} size={20} />
+                  {n.name}
+                </span>
+              </td>
               <td>{FORMAT[n.format] ?? n.format}</td>
               <td className="r">{Math.round(n.maxSizeBytes / (1024 * 1024))} MB</td>
             </tr>

@@ -425,3 +425,10 @@ textarea.pg-input { height: auto; min-height: 120px; padding: 10px 13px; line-he
 @keyframes pg-spin {
   to { transform: rotate(360deg); }
 }
+
+/* a network name with its logo, in tables */
+.pg-net-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
