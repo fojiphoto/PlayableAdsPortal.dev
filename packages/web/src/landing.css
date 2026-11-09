@@ -1318,24 +1318,20 @@
 }
 .lp-cost-card-mark {
   position: absolute;
-  top: -24px;
-  left: 32px;
-  display: grid;
-  place-items: center;
-  width: 54px;
-  height: 54px;
-  border-radius: 16px;
-  background: var(--cream-2);
-  border: 2px solid rgba(163, 217, 119, 0.35);
-  box-shadow: var(--shadow-2);
+  top: -46px;
+  left: 26px;
+  display: block;
+  width: 88px;
+  height: 88px;
 }
 .lp-cost-card-mark img {
-  width: 36px;
-  height: 36px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  filter: drop-shadow(0 8px 14px rgba(3, 30, 20, 0.45));
 }
 .lp-cost-headline {
-  margin-top: 14px;
+  margin-top: 36px;
   font-family: var(--font-heading);
   font-size: 28px;
   font-weight: 400;
@@ -1716,7 +1712,10 @@
     padding: 22px 18px;
   }
   .lp-cost-card-mark {
-    left: 18px;
+    left: 14px;
+    top: -38px;
+    width: 72px;
+    height: 72px;
   }
   .lp-cost-headline {
     font-size: 23px;
